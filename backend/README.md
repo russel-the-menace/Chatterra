@@ -45,8 +45,17 @@ backend preference endpoint remains available for explicit privacy administratio
 
 The Inference Orchestrator owns retrieval, context assembly, prompt construction,
 response length, model routing, and fixed sampling defaults. It can answer a reaction
-such as `👍` through a direct route without calling a model. Model settings are not
-part of the character API.
+such as `👍` through a direct route without calling a model. It can also accept the
+Decision Engine's `no_reply` action as a `none` route, skipping retrieval and model
+generation entirely. Model settings are not part of the character API.
+
+Companion turns do not automatically require a visible answer. The reply policy uses
+message demand, character personality and availability, affect, relationship warmth,
+and conversational momentum. Silence is deterministic and audited; it is never inferred
+from an empty provider response. Direct questions, explicit requests, distress, grief,
+and relational conflict retain response priority. A successful no-reply turn returns
+`reply: null` with `behavior.decision: "no_reply"` and still persists the user message,
+memory candidates, state changes, decision record, and `none` inference audit.
 
 Every chat request emits structured inference trace logs and returns a `traceId`. The
 same metadata is stored in `inference_records.diagnostics` and

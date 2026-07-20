@@ -53,7 +53,7 @@ erDiagram
 - `decision_records`: selected action, mode, reason codes, and due time.
 - `inference_records`: route decision, policy version, response style, selected context,
   structured inference diagnostics, and completion status for every direct/model/tool
-  inference path.
+  inference path or intentional `none` route.
 - `generation_records`: provider-specific model profile, parameters, selected context
   IDs, diagnostics, and latency for actual model calls.
 - `user_learning_profiles`: user-owned correction policy and proficiency state.
@@ -84,11 +84,12 @@ For every incoming message, the API:
 4. Applies bounded relationship and affect transitions.
 5. Extracts eligible deduplicated memory with evidence and provenance by default. An
    explicit backend privacy opt-out suppresses capture and retrieval.
-6. Records a behavioral policy decision.
-7. The Inference Orchestrator decides whether a model is needed, retrieves context,
+6. Records an explainable `reply_now` or `no_reply` behavioral policy decision.
+7. The Inference Orchestrator maps `no_reply` to a `none` route without retrieval or a
+   provider call. Otherwise it decides whether a model is needed, retrieves context,
    builds a token-budgeted prompt, and derives response length and provider parameters.
-8. Persists the assistant message, event, inference audit, and (for model routes) a
-   provider generation audit.
+8. Persists either a no-reply event and inference audit, or the assistant message,
+   event, inference audit, and (for model routes) provider generation audit.
 
 State reads checkpoint decay only after a meaningful interval or activity change.
 They do not append domain events.

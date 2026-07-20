@@ -106,6 +106,14 @@ export interface ConversationSummary {
 
 export type InteractionMode = 'companion' | 'practice'
 
+export type ResponseDecisionAction = 'reply_now' | 'no_reply'
+
+export interface ResponseDecision {
+  action: ResponseDecisionAction
+  reasonCodes: string[]
+  scoreDetails: Record<string, any>
+}
+
 export interface CharacterInstance {
   id: UUID
   userId: UUID

@@ -12,7 +12,8 @@ import {
   ConversationSummary,
   InteractionMode,
   Memory,
-  Message
+  Message,
+  ResponseDecision
 } from './types'
 import {
   fallbackMessageForPolicy,
@@ -22,7 +23,7 @@ import {
 } from './language-policy'
 import { DIALOGUE_ONLY_INSTRUCTION, normalizeAssistantSpeech } from './response-format'
 
-export type InferenceRoute = 'direct' | 'model'
+export type InferenceRoute = 'direct' | 'model' | 'none'
 export type ModelTier = 'lightweight' | 'primary'
 
 export type InferenceMessage = {
@@ -102,6 +103,7 @@ type OrchestrationInput = {
   mode: InteractionMode
   snapshot: BehaviorSnapshot
   memoryEnabled: boolean
+  decision: ResponseDecision
 }
 
 type LearningContext = Awaited<ReturnType<typeof getUserLearningContext>>
@@ -171,13 +173,17 @@ const commitmentSignal = (text: string) => phraseSignal(text, [
 const emotionalSignal = (text: string) => phraseSignal(text, [
   'feel', 'felt', 'afraid', 'angry', 'anxious', 'excited', 'happy', 'hurt', 'love',
   'miss', 'sad', 'sorry', 'upset', 'worried', 'proud', 'lonely', 'heartbroken',
-  'passed away', 'pass away', 'died', 'grieving'
+  'passed away', 'pass away', 'died', 'grieving', '難過', '难过', '傷心', '伤心',
+  '好驚', '好惊', '焦慮', '焦虑', '孤單', '孤单', '寂寞', '去世', '過世',
+  '过世', '離世', '离世', '走咗', '走了', '辛苦', '痛苦'
 ])
 
 const distressSignal = (text: string) => phraseSignal(text, [
   'afraid', 'anxious', 'hurt', 'sad', 'upset', 'worried', 'lonely', 'devastated',
   'heartbroken', 'crying', 'overwhelmed', 'passed away', 'pass away', 'died',
-  'death', 'funeral', 'grieving'
+  'death', 'funeral', 'grieving', '難過', '难过', '傷心', '伤心', '好驚', '好惊',
+  '害怕', '焦慮', '焦虑', '崩潰', '崩溃', '孤單', '孤单', '寂寞', '去世',
+  '過世', '过世', '離世', '离世', '走咗', '走了', '辛苦', '痛苦'
 ])
 
 const explicitCorrectionSignal = (text: string) => phraseSignal(text, [
@@ -193,7 +199,8 @@ const narrativeSignal = (text: string) => phraseSignal(text, [
 const conflictSignal = (text: string) => phraseSignal(text, [
   'you never', 'you always', 'stop', 'leave me alone', 'angry', 'hate', 'lied',
   'wrong', 'disappointed', 'not listening', 'pissed me off', 'angry at you',
-  'mad at you', 'hurt me'
+  'mad at you', 'hurt me', '激嬲我', '惹怒我', '傷害我', '伤害我', '唔聽',
+  '不听', '無視', '无视'
 ])
 
 const personalityTalkativeness = (character: Character) => {
@@ -217,7 +224,7 @@ const inferResponseStyle = (
 ): ResponseStyle => {
   const talkativeness = personalityTalkativeness(character)
   const wordCount = lexicalTerms(message).length
-  const questionDensity = clamp((message.match(/\?/g) || []).length / 3, 0, 1)
+  const questionDensity = clamp((message.match(/[?？]/g) || []).length / 3, 0, 1)
   const informationDemand = clamp(Math.log2(wordCount + 1) / 6 + questionDensity * 0.3, 0, 1)
   const narrativeDemand = narrativeSignal(message)
   const emotionalDepth = emotionalSignal(message)
@@ -606,6 +613,21 @@ export const buildInferencePlan = async (input: OrchestrationInput): Promise<Inf
     temperature: FIXED_TEMPERATURE,
     topP: FIXED_TOP_P,
     maxResponseTokens
+  }
+
+  if (input.decision.action === 'no_reply') {
+    return {
+      id: uuidv4(),
+      policyVersion: POLICY_VERSION,
+      route: 'none',
+      reasonCodes: ['response_not_required', ...input.decision.reasonCodes],
+      mode: input.mode,
+      responseStyle: style,
+      responseLanguage,
+      parameters,
+      messages: [],
+      contextManifest: manifestBase(input.snapshot, tokenBudget, input.memoryEnabled, responseLanguage)
+    }
   }
 
   if (isReactionOnly(input.message)) {

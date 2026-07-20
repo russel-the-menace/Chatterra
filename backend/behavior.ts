@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { query, withTransaction } from './database'
 import type { InferencePlan } from './inference-orchestrator'
 import type { InferenceDiagnostics } from './inference-logger'
+import { decideResponse } from './response-decision'
 import {
   AffectState,
   BehaviorSnapshot,
@@ -10,6 +11,7 @@ import {
   CharacterInstance,
   InteractionMode,
   Memory,
+  ResponseDecision,
   RelationshipState,
   SimulationState
 } from './types'
@@ -51,6 +53,7 @@ export type InteractionPreparation = {
   snapshot: BehaviorSnapshot
   triggerEventId: string
   decisionId: string
+  decision: ResponseDecision
   appraisal: Appraisal
   mode: InteractionMode
   memoryEnabled: boolean
@@ -427,14 +430,21 @@ const appraiseText = (text: string): Appraisal => {
   const directedNegativeWords = ['stupid', 'useless', 'idiot', 'terrible', 'hate you']
   const positive = positiveSocialPhrases.filter(phrase => lowered.includes(phrase)).length
   const bereavement = /\b(?:passed|pass)\s+away\b|\b(?:died|death|funeral|bereaved|grieving)\b/i.test(text)
-  const distress = bereavement || /\b(?:devastated|heartbroken|crying|lonely|scared|afraid|anxious|overwhelmed|hurt|upset|sad)\b/i.test(text)
+    || /(?:去世|過世|过世|離世|离世|走咗|走了|亡くな|他界)/.test(text)
+  const distress = bereavement
+    || /\b(?:devastated|heartbroken|crying|lonely|scared|afraid|anxious|overwhelmed|hurt|upset|sad)\b/i.test(text)
+    || /(?:難過|难过|傷心|伤心|好驚|好惊|害怕|焦慮|焦虑|崩潰|崩溃|孤單|孤单|寂寞|辛苦|痛苦|悲しい|怖い|つらい)/.test(text)
   const directedConflict = /\b(?:you|your)\b[^.!?\n]{0,60}\b(?:pissed me off|hurt me|angered me|upset me|not listening|ignored me)\b/i.test(text)
     || /\b(?:angry|mad|pissed|disappointed)\s+(?:at|with)\s+you\b/i.test(text)
+    || /你[^.!?？\n]{0,30}(?:激嬲我|惹怒我|傷害我|伤害我|唔聽|不听|無視|无视)/.test(text)
   const negative = directedNegativeWords.filter(word => lowered.includes(word)).length + (directedConflict ? 1 : 0)
   const apology = lowered.includes('sorry') || lowered.includes('apologize') || lowered.includes('my fault')
-  const selfDisclosure = distress || /\b(i am|i'm|my name is|i live|i work|i like|i love|i want|i was|my family|my mother|my father|my grandfather|my grandmother)\b/i.test(text)
-  const question = text.includes('?')
+  const selfDisclosure = distress
+    || /\b(i am|i'm|my name is|i live|i work|i like|i love|i want|i was|my family|my mother|my father|my grandfather|my grandmother)\b/i.test(text)
+    || /(?:我|我哋|我地|我想|我嘅|我的|私|僕|ぼく|わたし)/.test(text)
+  const question = /[?？]/.test(text)
   const urgency = /\b(urgent|emergency|asap|immediately|help)\b/i.test(text)
+    || /(?:緊急|紧急|救命|幫我|帮我|助けて)/.test(text)
   const relationshipReasons: string[] = ['interaction_recorded']
   const affectReasons: string[] = []
 
@@ -840,10 +850,32 @@ export const prepareInteraction = async ({
       await storeMemoryCandidates(client, userId, character.id, messageId, event.id, message, now)
     }
 
-    const action = 'reply_now'
-    const reasons = mode === 'practice'
-      ? ['practice_mode_guarantees_response', 'incoming_message']
-      : ['incoming_message', 'interactive_request', 'availability_policy']
+    const recentMessagesResult = await client.query(
+      `SELECT sender_role, content, created_at
+       FROM messages
+       WHERE conversation_id = $1 AND id <> $2
+       ORDER BY created_at DESC, id DESC
+       LIMIT 8`,
+      [conversationId, messageId]
+    )
+    const refreshedInstanceResult = await client.query(
+      'SELECT * FROM character_instances WHERE id = $1',
+      [instance.id]
+    )
+    const snapshot = await loadSnapshot(client, mapInstance(refreshedInstanceResult.rows[0]))
+    const decision = decideResponse({
+      message,
+      mode,
+      character,
+      snapshot,
+      appraisal,
+      recentMessages: recentMessagesResult.rows.map(row => ({
+        senderRole: row.sender_role,
+        content: row.content,
+        createdAt: new Date(row.created_at).toISOString()
+      })),
+      now
+    })
     const decisionId = uuidv4()
     await client.query(
       `INSERT INTO decision_records (
@@ -856,22 +888,16 @@ export const prepareInteraction = async ({
         conversationId,
         event.id,
         mode,
-        action,
-        JSON.stringify(reasons),
+        decision.action,
+        JSON.stringify(decision.reasonCodes),
         JSON.stringify({
-          practiceGuarantee: mode === 'practice',
-          currentActivity: 'evaluated',
+          ...decision.scoreDetails,
           memoryPersonalization: memoryEnabled
         }),
-        now.toISOString()
+        decision.action === 'reply_now' ? now.toISOString() : null
       ]
     )
-    const refreshedInstanceResult = await client.query(
-      'SELECT * FROM character_instances WHERE id = $1',
-      [instance.id]
-    )
-    const snapshot = await loadSnapshot(client, mapInstance(refreshedInstanceResult.rows[0]))
-    return { snapshot, triggerEventId: event.id, decisionId, appraisal, mode, memoryEnabled }
+    return { snapshot, triggerEventId: event.id, decisionId, decision, appraisal, mode, memoryEnabled }
   })
 }
 
@@ -1007,6 +1033,77 @@ export const recordAssistantResponse = async ({
         ]
       )
     }
+    return event.id
+  })
+}
+
+export const recordSkippedInference = async ({
+  userId,
+  character,
+  conversationId,
+  decisionId,
+  triggerEventId,
+  mode = 'practice',
+  inference,
+  diagnostics,
+  now = new Date()
+}: {
+  userId: string
+  character: Character
+  conversationId: string
+  decisionId?: string
+  triggerEventId?: string
+  mode?: InteractionMode
+  inference: InferencePlan
+  diagnostics?: InferenceDiagnostics
+  now?: Date
+}) => {
+  return withTransaction(async client => {
+    const instance = await ensureInstance(client, userId, character, mode)
+    const event = await appendEvent(client, {
+      instanceId: instance.id,
+      userId,
+      characterId: character.id,
+      conversationId,
+      eventType: 'response_not_generated',
+      actorRole: 'character',
+      actorId: character.id,
+      payload: {
+        action: 'no_reply',
+        route: inference.route,
+        reasonCodes: inference.reasonCodes
+      },
+      occurredAt: now,
+      source: 'inference_orchestrator'
+    })
+    await client.query(
+      `INSERT INTO inference_records (
+         id, instance_id, conversation_id, decision_id, trigger_event_id,
+         output_message_id, mode, route, reason_codes, policy_version,
+         provider, model, profile, parameters, response_style, context_manifest,
+         diagnostics, status, latency_ms, completed_at
+       ) VALUES (
+         $1, $2, $3, $4, $5, NULL, $6, $7, $8::jsonb, $9, NULL, NULL, $10,
+         $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, 'completed', 0, $15
+       )`,
+      [
+        inference.id,
+        instance.id,
+        conversationId,
+        decisionId || null,
+        triggerEventId || null,
+        mode,
+        inference.route,
+        JSON.stringify(inference.reasonCodes),
+        inference.policyVersion,
+        inference.responseStyle.profile,
+        JSON.stringify(inference.parameters),
+        JSON.stringify(inference.responseStyle),
+        JSON.stringify({ ...inference.contextManifest, responseSkippedEventId: event.id }),
+        JSON.stringify(diagnostics || {}),
+        now.toISOString()
+      ]
+    )
     return event.id
   })
 }

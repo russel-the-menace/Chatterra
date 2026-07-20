@@ -7,6 +7,7 @@ import {
   prepareInteraction,
   recordAssistantResponse,
   recordInferenceFailure,
+  recordSkippedInference,
   resolveCharacterMode,
   resetBehaviorState
 } from './behavior'
@@ -289,7 +290,10 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
   trace.mark('interaction_prepared', 'completed', {
     mode: preparation.mode,
     memoryEnabled: preparation.memoryEnabled,
-    decisionId: preparation.decisionId
+    decisionId: preparation.decisionId,
+    decision: preparation.decision.action,
+    reasonCodes: preparation.decision.reasonCodes,
+    scoreDetails: preparation.decision.scoreDetails
   })
   const inference = await buildInferencePlan({
     userId: normalizedUserId,
@@ -299,7 +303,8 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
     message: normalizedMessage,
     mode,
     snapshot: preparation.snapshot,
-    memoryEnabled: preparation.memoryEnabled
+    memoryEnabled: preparation.memoryEnabled,
+    decision: preparation.decision
   })
   trace.mark('inference_plan_built', 'completed', {
     inferenceId: inference.id,
@@ -312,6 +317,43 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
     selectedMemories: inference.contextManifest.memories.length,
     selectedEvents: inference.contextManifest.events.length
   })
+
+  if (inference.route === 'none') {
+    trace.mark('inference_skipped', 'skipped', {
+      decision: preparation.decision.action,
+      reasonCodes: inference.reasonCodes
+    })
+    try {
+      await recordSkippedInference({
+        userId: normalizedUserId,
+        character: storedCharacter,
+        conversationId: conversation.id,
+        decisionId: preparation.decisionId,
+        triggerEventId: preparation.triggerEventId,
+        mode,
+        inference,
+        diagnostics: trace.snapshot(),
+        now: new Date()
+      })
+      trace.mark('request_completed', 'completed', { decision: 'no_reply' })
+    } catch (error) {
+      trace.mark('request_failed', 'failed', {
+        stage: 'skip_persistence',
+        error: error instanceof Error ? error.name : 'unknown_error'
+      })
+      throw error
+    }
+    return res.json({
+      reply: null,
+      conversationId: conversation.id,
+      behavior: {
+        emotion: preparation.snapshot.emotionLabel,
+        activity: preparation.snapshot.simulation.currentActivity,
+        decision: preparation.decision.action
+      },
+      traceId: trace.traceId
+    })
+  }
 
   let rawReply = inference.directResponse || ''
   let generation: {
@@ -417,7 +459,7 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
     behavior: {
       emotion: preparation.snapshot.emotionLabel,
       activity: preparation.snapshot.simulation.currentActivity,
-      decision: 'reply_now'
+      decision: preparation.decision.action
     },
     traceId: trace.traceId
   })

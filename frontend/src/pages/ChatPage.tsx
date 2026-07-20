@@ -427,12 +427,18 @@ export default function ChatPage(): JSX.Element{
               .replace(/^./, value => value.toUpperCase())
             setBehaviorStatus(activity)
           }
-          const aiMsg: Message = {
-            id: makeMessageId(),
-            sender: 'ai',
-            text: typeof data.reply === 'string' ? data.reply : 'Sorry, I could not generate a response.'
+          if (data.behavior?.decision === 'no_reply' || data.reply === null) {
+            setMessages(prev2 => prev2.filter(m => m.id !== loadingId))
+          } else if (typeof data.reply !== 'string') {
+            throw new Error('The server returned no usable response.')
+          } else {
+            const aiMsg: Message = {
+              id: makeMessageId(),
+              sender: 'ai',
+              text: typeof data.reply === 'string' ? data.reply : 'Sorry, I could not generate a response.'
+            }
+            setMessages(prev2 => prev2.map(m => m.id === loadingId ? aiMsg : m))
           }
-          setMessages(prev2 => prev2.map(m => m.id === loadingId ? aiMsg : m))
         } catch (error) {
           const errMsg: Message = {
             id: makeMessageId(),
