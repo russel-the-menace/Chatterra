@@ -1,21 +1,21 @@
 # Chatterra MVP
 
-Minimal AI language-practice chat MVP.
+AI language-practice chat with a Vite/React frontend, Express API, and
+PostgreSQL persistence.
 
-Frontend (Vite + React) and backend (Express) are included.
+## Quick Start
 
-Quick start
-
-
-1. Backend
+1. Start PostgreSQL and migrate the legacy JSON data.
 
 ```
+docker compose up -d postgres
 cd backend
 npm install
+npm run db:setup
 npm start
 ```
 
-2. Frontend (in another terminal)
+2. Start the frontend in another terminal.
 
 ```
 cd frontend
@@ -23,6 +23,5 @@ npm install
 npm run dev
 ```
 
-Notes: both frontend and backend are migrated to TypeScript. Frontend uses Vite; backend runs with `ts-node-dev` during development.
-
-The frontend calls `http://localhost:3000/api/chat` by default. Later we'll integrate OpenAI on the backend.
+The frontend calls `http://localhost:3000`. Database design and migration details
+are documented in [`backend/DATABASE.md`](backend/DATABASE.md).

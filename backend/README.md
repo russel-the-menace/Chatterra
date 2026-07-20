@@ -1,19 +1,29 @@
-Chatterra backend MVP additions
+# Chatterra Backend
 
-Files added:
-- `types.ts`: TypeScript interfaces for User, Character, Conversation, Message, Memory, ConversationSummary.
+The Express API uses PostgreSQL for characters, conversations, messages, and
+memories. See [DATABASE.md](./DATABASE.md) for the schema design.
 
-What changed in `server.ts`:
-- Added a tiny file-backed JSON store under `/data` for `users.json`, `characters.json`, `conversations.json`, `messages.json`, and `memories.json`.
-- Persist messages and conversations on each chat call.
-- Simple rule-based memory extraction (heuristic looking for "I am / I'm / I worked" patterns).
-- Calls DeepSeek API using `DEEPSEEK_API_KEY` from environment.
-
-Run backend:
+## Setup
 
 ```bash
+docker compose up -d postgres
 cd backend
 npm install
-# ensure .env has DEEPSEEK_API_KEY
-npm run dev
+npm run db:setup
+npm start
 ```
+
+`db:setup` applies versioned SQL migrations and imports the legacy JSON records
+from `/data`. The importer is safe to rerun and never overwrites existing rows.
+
+The local Docker connection is the development default, so an existing `.env`
+containing only `DEEPSEEK_API_KEY` continues to work. Use `.env.example` as the
+reference when connecting to a different database.
+
+Environment variables:
+
+- `DATABASE_URL`: PostgreSQL connection URL. Required in production; local Docker is the development default.
+- `DATABASE_SSL`: set to `true` for hosted PostgreSQL providers requiring TLS.
+- `DEEPSEEK_API_KEY`: DeepSeek API key for live chat mode.
+- `DEEPSEEK_API_MODE`: `live` or `mock`.
+- `PORT`: API port, default `3000`.

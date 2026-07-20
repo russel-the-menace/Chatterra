@@ -1,59 +1,34 @@
-import express from 'express'
+import express, { NextFunction, Request, Response } from 'express'
 import cors from 'cors'
 import dotenv from 'dotenv'
-import { v4 as uuidv4 } from 'uuid'
-import fs from 'fs'
-import path from 'path'
-import { User, Character, Conversation, Message, Memory } from './types'
+import { closeDatabase, query } from './database'
+import {
+  appendMessage,
+  clearChatHistory,
+  createCharacter,
+  createConversationWithStarter,
+  createMemory,
+  getCharacter,
+  getConversation,
+  listCharacters,
+  listConversations,
+  listMessages,
+  listRecentMessages,
+  newId,
+  updateCharacter
+} from './repository'
+import { Character, Conversation, Memory, Message } from './types'
 
 dotenv.config()
+
 const app = express()
 app.use(cors())
 app.use(express.json())
 
-const DATA_DIR = path.join(__dirname, '..', 'data')
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true })
-
-// simple file store (MVP)
-const writeJson = (name: string, obj: any) => fs.writeFileSync(path.join(DATA_DIR, name), JSON.stringify(obj, null, 2))
-const readJson = (name: string, fallback: any) => {
-  const p = path.join(DATA_DIR, name)
-  if (!fs.existsSync(p)) return fallback
-  try { return JSON.parse(fs.readFileSync(p, 'utf8')) } catch { return fallback }
-}
-
-// bootstrapped stores
-const users: User[] = readJson('users.json', [])
-const characters: Character[] = readJson('characters.json', [])
-const conversations: Conversation[] = readJson('conversations.json', [])
-const messages: Message[] = readJson('messages.json', [])
-const memories: Memory[] = readJson('memories.json', [])
-
-const persistAll = () => {
-  writeJson('users.json', users)
-  writeJson('characters.json', characters)
-  writeJson('conversations.json', conversations)
-  writeJson('messages.json', messages)
-  writeJson('memories.json', memories)
-}
-
-const syncCharacter = (nextCharacter: Character) => {
-  const index = characters.findIndex(character => character.id === nextCharacter.id)
-  if (index >= 0) {
-    characters[index] = {
-      ...characters[index],
-      ...nextCharacter,
-      updatedAt: new Date().toISOString()
-    }
-  } else {
-    characters.push({
-      ...nextCharacter,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    })
-  }
-  persistAll()
-  return characters.find(character => character.id === nextCharacter.id)
+const asyncRoute = (
+  handler: (req: Request, res: Response, next: NextFunction) => Promise<any>
+) => (req: Request, res: Response, next: NextFunction) => {
+  Promise.resolve(handler(req, res, next)).catch(next)
 }
 
 const characterTextFields: Array<keyof Character> = [
@@ -73,7 +48,7 @@ const characterFromPayload = (payload: any, existing?: Character): Character => 
   const now = new Date().toISOString()
   const character: Character = {
     ...(existing || {} as Character),
-    id: existing?.id || uuidv4(),
+    id: existing?.id || newId(),
     name: existing?.name || '',
     createdAt: existing?.createdAt || now,
     updatedAt: now
@@ -145,222 +120,173 @@ const getStarterMessage = (character?: Character) => {
   return `Hello, I'm ${character?.name || 'Interviewer'}. Let's start the interview. Tell me briefly about your background.`
 }
 
-const clearChatHistory = (userId: string, characterId: string) => {
-  const conversationIds = conversations
-    .filter(conversation => conversation.userId === userId && conversation.characterId === characterId)
-    .map(conversation => conversation.id)
-
-  if (conversationIds.length === 0) {
-    return { deletedConversations: 0, deletedMessages: 0, deletedMemories: 0 }
+const extractMemoryFromText = async (
+  userId: string,
+  characterId: string,
+  messageText: string,
+  originMessageId: string
+) => {
+  const lowered = messageText.toLowerCase()
+  if (!lowered.includes("i'm") && !lowered.includes('i am') && !lowered.includes('i was') && !lowered.includes('i worked')) {
+    return null
   }
 
-  let deletedMessages = 0
-  let deletedMemories = 0
-
-  for (let index = conversations.length - 1; index >= 0; index -= 1) {
-    const conversation = conversations[index]
-    if (conversation.userId === userId && conversation.characterId === characterId) {
-      conversations.splice(index, 1)
-    }
+  const now = new Date().toISOString()
+  const memory: Memory = {
+    id: newId(),
+    userId,
+    characterId,
+    originMessageId,
+    type: 'important_fact',
+    content: messageText,
+    importanceScore: 0.6,
+    confidence: 0.8,
+    createdAt: now,
+    lastUpdatedAt: now,
+    metadata: { source: 'heuristic' }
   }
-
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (conversationIds.includes(messages[index].conversationId)) {
-      messages.splice(index, 1)
-      deletedMessages += 1
-    }
-  }
-
-  for (let index = memories.length - 1; index >= 0; index -= 1) {
-    const memory = memories[index]
-    if (memory.userId === userId && memory.characterId === characterId) {
-      memories.splice(index, 1)
-      deletedMemories += 1
-    }
-  }
-
-  persistAll()
-  return {
-    deletedConversations: conversationIds.length,
-    deletedMessages,
-    deletedMemories
-  }
+  return createMemory(memory)
 }
 
-app.get('/api/health', (_req, res) => res.json({ status: 'ok' }))
+app.get('/api/health', asyncRoute(async (_req, res) => {
+  await query('SELECT 1')
+  return res.json({ status: 'ok', database: 'postgresql' })
+}))
 
-app.get('/api/characters', (_req, res) => {
-  res.json({ characters })
-})
+app.get('/api/characters', asyncRoute(async (_req, res) => {
+  const characters = await listCharacters()
+  return res.json({ characters })
+}))
 
-app.post('/api/characters', (req, res) => {
+app.post('/api/characters', asyncRoute(async (req, res) => {
   const character = characterFromPayload(req.body || {})
   if (!character.name) return res.status(400).json({ error: 'name is required' })
 
-  const created = syncCharacter(character)
+  const created = await createCharacter(character)
   return res.status(201).json({ character: created })
-})
+}))
 
-app.put('/api/characters/:id', (req, res) => {
+app.put('/api/characters/:id', asyncRoute(async (req, res) => {
   const id = req.params.id
-  const payload = req.body || {}
-
   if (!id) return res.status(400).json({ error: 'id required' })
-  const existing = characters.find(character => character.id === id)
+
+  const existing = await getCharacter(id)
   if (!existing) return res.status(404).json({ error: 'character not found' })
 
-  const nextCharacter = characterFromPayload(payload, existing)
+  const nextCharacter = characterFromPayload(req.body || {}, existing)
   if (!nextCharacter.name) return res.status(400).json({ error: 'name is required' })
 
-  const updated = syncCharacter(nextCharacter)
-
+  const updated = await updateCharacter(nextCharacter)
   return res.json({ character: updated })
-})
+}))
 
-// list conversations for a user
-app.get('/api/conversations', (req, res) => {
+app.get('/api/conversations', asyncRoute(async (req, res) => {
   const userId = String(req.query.userId || '')
   if (!userId) return res.status(400).json({ error: 'userId required' })
-  const list = conversations.filter(c => c.userId === userId)
-  // sort by lastMessageAt desc
-  list.sort((a,b) => (b.lastMessageAt || '')!.localeCompare(a.lastMessageAt || ''))
-  res.json({ conversations: list })
-})
 
-// messages for a conversation
-app.get('/api/conversations/:id/messages', (req, res) => {
-  const id = req.params.id
-  const list = messages.filter(m => m.conversationId === id)
-  // sort by createdAt
-  list.sort((a,b) => a.createdAt.localeCompare(b.createdAt))
-  res.json({ messages: list })
-})
+  const conversations = await listConversations(userId)
+  return res.json({ conversations })
+}))
 
-app.delete('/api/chat-history', (req, res) => {
+app.get('/api/conversations/:id/messages', asyncRoute(async (req, res) => {
+  const messages = await listMessages(req.params.id)
+  return res.json({ messages })
+}))
+
+app.delete('/api/chat-history', asyncRoute(async (req, res) => {
   const { userId, characterId } = req.body || {}
-
   if (!userId) return res.status(400).json({ error: 'userId is required' })
   if (!characterId) return res.status(400).json({ error: 'characterId is required' })
 
-  const result = clearChatHistory(String(userId), String(characterId))
-  return res.json({
-    ok: true,
-    characterId,
-    ...result
-  })
-})
+  const result = await clearChatHistory(String(userId), String(characterId))
+  return res.json({ ok: true, characterId, ...result })
+}))
 
-// lightweight memory extraction (rule-based MVP)
-function extractMemoryFromText(userId: string, conversationId: string, messageText: string, originMessageId: string) {
-  // simple heuristics: look for "I am/I'm/I worked as/I was" patterns
-  const lowered = messageText.toLowerCase()
-  let match: string | null = null
-  if (lowered.includes("i'm") || lowered.includes('i am') || lowered.includes('i was') || lowered.includes('i worked')) {
-    match = messageText
-  }
-  if (!match) return null
-
-  const mem: Memory = {
-    id: uuidv4(),
-    userId,
-    characterId: undefined,
-    originMessageId,
-    type: 'important_fact',
-    content: match,
-    importanceScore: 0.6,
-    confidence: 0.8,
-    createdAt: new Date().toISOString(),
-    lastUpdatedAt: new Date().toISOString(),
-    metadata: { source: 'heuristic' }
-  }
-  memories.push(mem)
-  persistAll()
-  return mem
-}
-
-app.post('/api/chat', async (req, res) => {
+app.post('/api/chat', asyncRoute(async (req, res) => {
   const { message, conversationId, userId, character } = req.body || {}
-
   if (!message) return res.status(400).json({ error: 'message is required' })
   if (!userId) return res.status(400).json({ error: 'userId is required' })
+  if (!character?.id) return res.status(400).json({ error: 'character is required' })
 
-  // ensure conversation
-  let convo = conversations.find(c => c.id === conversationId)
-  if (!convo) {
-    const newConvo: Conversation = {
-      id: conversationId || uuidv4(),
-      userId,
-      characterId: character?.id || 'unknown',
-      title: `${character?.name || 'Character'} chat`,
-      status: 'active',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    }
-    conversations.push(newConvo)
-    convo = newConvo
+  const storedCharacter = await getCharacter(String(character.id))
+  if (!storedCharacter) return res.status(400).json({ error: 'character not found' })
 
-    const starterCreatedAt = new Date().toISOString()
-    const starterMsg: Message = {
-      id: uuidv4(),
-      conversationId: convo.id,
-      senderRole: 'assistant',
-      senderId: character?.id,
-      content: getStarterMessage(character),
-      createdAt: starterCreatedAt
-    }
-    messages.push(starterMsg)
-    convo.lastMessageAt = starterCreatedAt
+  let conversation = conversationId
+    ? await getConversation(String(conversationId))
+    : undefined
+
+  if (conversation && conversation.userId !== String(userId)) {
+    return res.status(403).json({ error: 'conversation does not belong to this user' })
+  }
+  if (conversation && conversation.characterId !== storedCharacter.id) {
+    return res.status(400).json({ error: 'conversation character mismatch' })
   }
 
-  // save user message
-  const userMsg: Message = {
-    id: uuidv4(),
-    conversationId: convo.id,
+  if (!conversation) {
+    const now = new Date().toISOString()
+    const nextConversation: Conversation = {
+      id: conversationId || newId(),
+      userId: String(userId),
+      characterId: storedCharacter.id,
+      title: `${storedCharacter.name} chat`,
+      status: 'active',
+      createdAt: now,
+      updatedAt: now
+    }
+    const starterMessage: Message = {
+      id: newId(),
+      conversationId: nextConversation.id,
+      senderRole: 'assistant',
+      senderId: storedCharacter.id,
+      content: getStarterMessage(storedCharacter),
+      createdAt: now
+    }
+    conversation = await createConversationWithStarter(nextConversation, starterMessage)
+  }
+
+  const userMessage: Message = {
+    id: newId(),
+    conversationId: conversation.id,
     senderRole: 'user',
-    senderId: userId,
-    content: message,
+    senderId: String(userId),
+    content: String(message),
     createdAt: new Date().toISOString()
   }
-  messages.push(userMsg)
-  convo.lastMessageAt = userMsg.createdAt
-  persistAll()
+  await appendMessage(userMessage)
 
-  // call upstream AI (DeepSeek) using previous simple prompt
-  const storedCharacter = characters.find(item => item.id === character?.id) || character
   const systemPrompt = getSystemPrompt(storedCharacter)
-  const contextWindow = storedCharacter?.defaultSettings?.contextWindow || 8
-  const recent = messages.filter(m => m.conversationId === convo!.id).slice(-contextWindow)
-  const convoText = recent.map(m => `${m.senderRole === 'user' ? 'Candidate' : 'Interviewer'}: ${m.content}`).join('\n')
-  const finalPrompt = [systemPrompt, convoText, `Candidate: ${message}`].join('\n\n')
+  const contextWindow = storedCharacter.defaultSettings?.contextWindow || 8
+  const recent = await listRecentMessages(conversation.id, contextWindow)
+  const conversationText = recent
+    .map(item => `${item.senderRole === 'user' ? 'Candidate' : 'Interviewer'}: ${item.content}`)
+    .join('\n')
 
-  const deepseekUrl = process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com/chat/completions'
-  const deepseekModel = process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash'
   const apiMode = process.env.DEEPSEEK_API_MODE || 'live'
+  if (apiMode === 'mock') {
+    const reply = storedCharacter.id === 'c2'
+      ? `First, small correction: a more natural way to say that is: “${message}.” Now tell me a little more.`
+      : `(mock) ${storedCharacter.name}: Thanks — I heard: "${message}". Can you expand on that?`
+    const assistantMessage: Message = {
+      id: newId(),
+      conversationId: conversation.id,
+      senderRole: 'assistant',
+      senderId: storedCharacter.id,
+      content: reply,
+      createdAt: new Date().toISOString()
+    }
+    await appendMessage(assistantMessage)
+    await extractMemoryFromText(String(userId), storedCharacter.id, String(message), userMessage.id)
+    return res.json({ reply, conversationId: conversation.id })
+  }
+
   const apiKey = process.env.DEEPSEEK_API_KEY
   if (!apiKey) return res.status(500).json({ error: 'missing API key' })
 
-  // Optional mock mode for local testing only.
-  if (apiMode === 'mock') {
-    const canned = character?.id === 'c2'
-      ? `First, small correction: a more natural way to say that is: “${message}.” Now tell me a little more.`
-      : `(mock) ${character?.name || 'Interviewer'}: Thanks — I heard: "${message}". Can you expand on that?`
-    const aiMsg: Message = {
-      id: uuidv4(),
-      conversationId: convo.id,
-      senderRole: 'assistant',
-      senderId: character?.id,
-      content: canned,
-      createdAt: new Date().toISOString()
-    }
-    messages.push(aiMsg)
-    convo.lastMessageAt = aiMsg.createdAt
-    persistAll()
-    extractMemoryFromText(userId, convo.id, message, userMsg.id)
-    return res.json({ reply: canned, conversationId: convo.id })
-  }
+  const deepseekUrl = process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com/chat/completions'
+  const deepseekModel = process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash'
 
   try {
-    const resp = await fetch(deepseekUrl, {
+    const response = await fetch(deepseekUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -370,57 +296,81 @@ app.post('/api/chat', async (req, res) => {
         model: deepseekModel,
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: finalPrompt }
+          { role: 'user', content: conversationText }
         ],
-        max_tokens: storedCharacter?.defaultSettings?.maxResponseTokens || 600,
-        temperature: storedCharacter?.defaultSettings?.temperature ?? 0.7,
+        max_tokens: storedCharacter.defaultSettings?.maxResponseTokens || 600,
+        temperature: storedCharacter.defaultSettings?.temperature ?? 0.7,
         stream: false
       })
     })
-    let data: any
-    try { data = await resp.json() } catch (e) { data = await resp.text().catch(()=>null) }
 
-    if (!resp.ok) {
-      console.error('DeepSeek returned error', resp.status, data)
+    let data: any
+    try {
+      data = await response.json()
+    } catch {
+      data = await response.text().catch(() => null)
+    }
+
+    if (!response.ok) {
+      console.error('DeepSeek returned error', response.status, data)
       return res.status(502).json({ error: 'Upstream AI returned an error' })
     }
 
-    // flexible parsing for different provider shapes
-    let reply: string = ''
-    if (!reply && data) {
-      if (typeof data === 'string') reply = data
-      else if (typeof data.reply === 'string') reply = data.reply
-      else if (typeof data.result === 'string') reply = data.result
-      else if (data.choices && Array.isArray(data.choices) && data.choices[0]) {
-        const first = data.choices[0]
-        reply = first.message?.content || first.text || first.output || ''
-      } else if (data.output_text) reply = data.output_text
-    }
+    let reply = ''
+    if (typeof data === 'string') reply = data
+    else if (typeof data?.reply === 'string') reply = data.reply
+    else if (typeof data?.result === 'string') reply = data.result
+    else if (data?.choices && Array.isArray(data.choices) && data.choices[0]) {
+      const first = data.choices[0]
+      reply = first.message?.content || first.text || first.output || ''
+    } else if (data?.output_text) reply = data.output_text
 
     if (!reply) reply = 'Sorry, I could not generate a response.'
 
-    // save assistant message
-    const aiMsg: Message = {
-      id: uuidv4(),
-      conversationId: convo.id,
+    const assistantMessage: Message = {
+      id: newId(),
+      conversationId: conversation.id,
       senderRole: 'assistant',
-      senderId: character?.id,
+      senderId: storedCharacter.id,
       content: reply,
       createdAt: new Date().toISOString()
     }
-    messages.push(aiMsg)
-    convo.lastMessageAt = aiMsg.createdAt
-    persistAll()
+    await appendMessage(assistantMessage)
+    await extractMemoryFromText(String(userId), storedCharacter.id, String(message), userMessage.id)
 
-    // quick memory extraction from user message (MVP rule-based)
-    extractMemoryFromText(userId, convo.id, message, userMsg.id)
-
-    return res.json({ reply, conversationId: convo.id })
-  } catch (err: any) {
-    console.error('AI request failed', err)
+    return res.json({ reply, conversationId: conversation.id })
+  } catch (error) {
+    console.error('AI request failed', error)
     return res.status(500).json({ error: 'AI request failed' })
   }
+}))
+
+app.use((error: any, _req: Request, res: Response, _next: NextFunction) => {
+  console.error('Request failed', error)
+  if (error?.code === '23505') {
+    return res.status(409).json({ error: 'record already exists' })
+  }
+  return res.status(500).json({ error: 'database operation failed' })
 })
 
 const port = process.env.PORT ? Number(process.env.PORT) : 3000
-app.listen(port, () => console.log(`Chatterra backend listening on ${port}`))
+
+const start = async () => {
+  const schemaResult = await query(`SELECT to_regclass('public.characters') AS table_name`)
+  if (!schemaResult.rows[0]?.table_name) {
+    throw new Error('Database schema is missing. Run npm run db:migrate first.')
+  }
+  app.listen(port, () => console.log(`Chatterra backend listening on ${port}`))
+}
+
+start().catch(error => {
+  console.error('Backend startup failed', error)
+  process.exitCode = 1
+})
+
+const shutdown = () => {
+  closeDatabase().finally(() => process.exit())
+}
+
+process.on('SIGINT', shutdown)
+process.on('SIGTERM', shutdown)
