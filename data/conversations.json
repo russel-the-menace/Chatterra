@@ -1,12 +1,12 @@
 [
   {
-    "id": "00497bfc-25e1-47f4-9365-3965973c3b16",
+    "id": "45826156-755a-491f-822d-69a9bc44f4ca",
     "userId": "1784510750433",
-    "characterId": "c1",
-    "title": "David chat",
+    "characterId": "c2",
+    "title": "English Teacher chat",
     "status": "active",
-    "createdAt": "2026-07-20T02:03:54.623Z",
-    "updatedAt": "2026-07-20T02:03:54.623Z",
-    "lastMessageAt": "2026-07-20T02:03:54.624Z"
+    "createdAt": "2026-07-20T02:08:51.077Z",
+    "updatedAt": "2026-07-20T02:08:51.077Z",
+    "lastMessageAt": "2026-07-20T02:08:56.010Z"
   }
 ]

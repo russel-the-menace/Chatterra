@@ -70,6 +70,23 @@ export default function ChatPage(): JSX.Element{
     }
   }
 
+  const clearCurrentCharacterHistory = async () => {
+    const uid = userId || localStorage.getItem('chatterra_userId')
+    if (!uid) return
+
+    await fetch('http://localhost:3000/api/chat-history', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: uid, characterId: selectedCharacter.id })
+    })
+
+    setConversationId(null)
+    setMessages([{id: makeMessageId(), sender:'ai', text: selectedCharacter.id === 'c2'
+      ? 'Hi. First, I will correct your English and programmer mistakes, then I will help you practice naturally. Start by telling me about your current project.'
+      : `Hello, I'm ${selectedCharacter.name}. Let's start the interview. Tell me briefly about your background.`}])
+    localStorage.removeItem('chatterra_conversationId')
+  }
+
   const sendMessage = (text: string) => {
     if(!text) return
     const userMsg: Message = {id: makeMessageId(), sender: 'user', text}
@@ -140,6 +157,7 @@ export default function ChatPage(): JSX.Element{
             <div className="name">{selectedCharacter.name}</div>
             <div className="status">{selectedCharacter.role} · Online</div>
           </div>
+          <button className="clear-history" onClick={clearCurrentCharacterHistory}>Clear History</button>
         </div>
 
         <ChatWindow messages={messages} />

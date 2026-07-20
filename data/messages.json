@@ -1,26 +1,26 @@
 [
   {
-    "id": "b0779b61-890f-49e8-978f-c0cf68b867cb",
-    "conversationId": "00497bfc-25e1-47f4-9365-3965973c3b16",
+    "id": "958f66ff-64a7-48b4-92aa-b6ff853d7f79",
+    "conversationId": "45826156-755a-491f-822d-69a9bc44f4ca",
     "senderRole": "assistant",
-    "senderId": "c1",
-    "content": "Hello, I'm David. Let's start the interview. Tell me briefly about your background.",
-    "createdAt": "2026-07-20T02:03:54.623Z"
+    "senderId": "c2",
+    "content": "Hi. First, I will correct your English and programmer mistakes, then I will help you practice naturally. Start by telling me about your current project.",
+    "createdAt": "2026-07-20T02:08:51.077Z"
   },
   {
-    "id": "1981bc4d-d1a8-44d8-81a1-414a79155198",
-    "conversationId": "00497bfc-25e1-47f4-9365-3965973c3b16",
+    "id": "d3b0e2bc-9b8f-4bf6-af92-2ed5f6bf44f8",
+    "conversationId": "45826156-755a-491f-822d-69a9bc44f4ca",
     "senderRole": "user",
     "senderId": "1784510750433",
-    "content": "My name is Finn",
-    "createdAt": "2026-07-20T02:03:54.623Z"
+    "content": "I am doing my language app.",
+    "createdAt": "2026-07-20T02:08:51.077Z"
   },
   {
-    "id": "1fb24810-680b-4ff8-b029-eac3ab442c9b",
-    "conversationId": "00497bfc-25e1-47f4-9365-3965973c3b16",
+    "id": "31ea35ff-5fc6-4c05-b615-e2cbe6a2e1cf",
+    "conversationId": "45826156-755a-491f-822d-69a9bc44f4ca",
     "senderRole": "assistant",
-    "senderId": "c1",
-    "content": "(mock) David: Thanks — I heard: \"My name is Finn\". Can you expand on that?",
-    "createdAt": "2026-07-20T02:03:54.624Z"
+    "senderId": "c2",
+    "content": "I see you said, \"I am doing my language app.\" That's understandable, but \"doing\" is a bit vague for a project. A more precise phrase would be \"I am working on my language app\" or \"I am developing a language app.\" Also, consider using an article: \"a language app\" if it's not yet specific, but \"my language app\" is fine.\n\nNow, let's continue naturally. Tell me more about your app—what features does it have, and what makes it different from other language learning apps?",
+    "createdAt": "2026-07-20T02:08:56.010Z"
   }
 ]

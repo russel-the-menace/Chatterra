@@ -1,1 +1,44 @@
-[]
+[
+  {
+    "id": "09d2ef70-18a0-4cdc-a903-bcc5353bdb08",
+    "userId": "1784510750433",
+    "originMessageId": "670156a0-f606-44d1-81a6-e0357e91889b",
+    "type": "important_fact",
+    "content": "I am Finn",
+    "importanceScore": 0.6,
+    "confidence": 0.8,
+    "createdAt": "2026-07-20T02:07:45.483Z",
+    "lastUpdatedAt": "2026-07-20T02:07:45.483Z",
+    "metadata": {
+      "source": "heuristic"
+    }
+  },
+  {
+    "id": "ecad5569-7534-4224-a612-0ffbdbae1f22",
+    "userId": "1784510750433",
+    "originMessageId": "b18c4d25-a8fb-48f7-a4f7-c86a3c6a71d6",
+    "type": "important_fact",
+    "content": "I am doing my language app.",
+    "importanceScore": 0.6,
+    "confidence": 0.8,
+    "createdAt": "2026-07-20T02:08:12.126Z",
+    "lastUpdatedAt": "2026-07-20T02:08:12.126Z",
+    "metadata": {
+      "source": "heuristic"
+    }
+  },
+  {
+    "id": "83ef1d29-6c3a-4217-a25f-b55795d8c75e",
+    "userId": "1784510750433",
+    "originMessageId": "d3b0e2bc-9b8f-4bf6-af92-2ed5f6bf44f8",
+    "type": "important_fact",
+    "content": "I am doing my language app.",
+    "importanceScore": 0.6,
+    "confidence": 0.8,
+    "createdAt": "2026-07-20T02:08:56.012Z",
+    "lastUpdatedAt": "2026-07-20T02:08:56.012Z",
+    "metadata": {
+      "source": "heuristic"
+    }
+  }
+]
