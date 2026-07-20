@@ -771,7 +771,13 @@ export const postProcessInferenceOutput = (plan: InferencePlan, output: string) 
   }
   const incoming = [...plan.messages].reverse().find(message => message.role === 'user')?.content || ''
   if (plan.responseLanguage.code !== 'english') {
-    return fallbackMessageForPolicy(plan.responseLanguage, plan.responseStyle.turnPriority)
+    return fallbackMessageForPolicy(plan.responseLanguage, plan.responseStyle.turnPriority, {
+      incoming,
+      recentAssistantReplies: plan.messages
+        .filter(message => message.role === 'assistant')
+        .map(message => message.content)
+        .slice(-5)
+    })
   }
   if (plan.responseStyle.turnPriority === 'emotional_support') {
     const lossMatch = incoming.match(/\bmy\s+([a-z][a-z '-]{1,40}?)\s+(?:(?:has|had)\s+)?(?:(?:passed|pass)\s+away|died)\b/i)

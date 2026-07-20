@@ -10,6 +10,7 @@ body.modal-open{overflow:hidden}
 
 .chat-shell{
   height:100vh;
+  overflow:hidden;
   display:grid;
   grid-template-columns: 320px minmax(0, 1fr);
   background:linear-gradient(180deg, #eef2f7 0%, #e9edf2 100%);
@@ -194,6 +195,8 @@ body.modal-open{overflow:hidden}
   display:flex;
   flex-direction:column;
   min-width:0;
+  min-height:0;
+  overflow:hidden;
   background:linear-gradient(180deg, rgba(255,255,255,0.62) 0%, rgba(255,255,255,0.9) 100%);
   backdrop-filter: blur(12px);
 }
@@ -247,8 +250,10 @@ body.modal-open{overflow:hidden}
 
 .chat-window{
   flex:1;
+  min-height:0;
   padding:24px 22px 18px;
-  overflow:auto;
+  overflow-y:auto;
+  overflow-x:hidden;
   background:linear-gradient(180deg, rgba(233,237,242,0.25) 0%, rgba(233,237,242,0.45) 100%),
     radial-gradient(circle at top left, rgba(26,173,25,0.06), transparent 28%),
     radial-gradient(circle at bottom right, rgba(26,173,25,0.04), transparent 24%);
@@ -295,6 +300,7 @@ body.modal-open{overflow:hidden}
 
 .input-box{
   display:block;
+  flex:0 0 auto;
   padding:16px 18px 18px;
   border-top:1px solid rgba(15,23,42,0.08);
   background:rgba(255,255,255,0.9);

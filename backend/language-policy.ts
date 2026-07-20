@@ -101,12 +101,21 @@ export const starterMessageForPolicy = (
 
 export const fallbackMessageForPolicy = (
   policy: ResponseLanguagePolicy,
-  priority: 'conversation' | 'emotional_support' | 'language_help' = 'conversation'
+  priority: 'conversation' | 'emotional_support' | 'language_help' = 'conversation',
+  context: {
+    incoming?: string
+    recentAssistantReplies?: string[]
+  } = {}
 ) => {
+  const recent = new Set((context.recentAssistantReplies || []).map(reply => reply.trim()))
+
   if (priority === 'emotional_support') {
     switch (policy.code) {
       case 'cantonese':
-        return '唔好意思，我頭先冇好好聽你講。你想唔想同我講多啲？'
+        return [
+          '唔好意思，我頭先冇好好聽你講。你想唔想同我講多啲？',
+          '我喺度聽你講，你慢慢嚟，唔使急。'
+        ].find(reply => !recent.has(reply)) || '唔好意思，我頭先冇好好聽你講。你想唔想同我講多啲？'
       case 'mandarin':
         return '对不起，我刚才没有好好听你说。你愿意再跟我说一点吗？'
       case 'japanese':
@@ -120,9 +129,22 @@ export const fallbackMessageForPolicy = (
 
   switch (policy.code) {
     case 'cantonese':
-      return priority === 'language_help'
-        ? '我可以幫你，你想講邊一部分？'
-        : '我喺度呀，你想講咩？'
+      if (priority === 'language_help') {
+        return ['我可以幫你，你想講邊一部分？', '得呀，我哋逐句睇下。'].find(reply => !recent.has(reply)) || '我可以幫你，你想講邊一部分？'
+      }
+      const incoming = context.incoming || ''
+      const contextual = /travel|旅行|旅遊/iu.test(incoming)
+        ? '去旅行呀？去咗邊度玩？'
+        : /挂住|掛住|想你|miss/iu.test(incoming)
+          ? '我都掛住你啦，最近過成點？'
+          : undefined
+      const candidates = [
+        contextual,
+        '我喺度呀，你想講咩？',
+        '我聽住㗎，你慢慢講。',
+        '得閒呀，你繼續講。'
+      ].filter((reply): reply is string => Boolean(reply))
+      return candidates.find(reply => !recent.has(reply)) || candidates[0]
     case 'mandarin':
       return priority === 'language_help'
         ? '我可以帮你，你想先说哪一部分？'
