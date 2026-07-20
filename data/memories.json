@@ -1,16 +1,1 @@
-[
-  {
-    "id": "ca7a80c0-f9c8-48d1-9a41-baf929bbdbf7",
-    "userId": "1784510750433",
-    "originMessageId": "3fc5f869-5927-45a9-9d58-2ab873faad2c",
-    "type": "important_fact",
-    "content": "I am doing my language app right now.",
-    "importanceScore": 0.6,
-    "confidence": 0.8,
-    "createdAt": "2026-07-20T01:56:22.335Z",
-    "lastUpdatedAt": "2026-07-20T01:56:22.335Z",
-    "metadata": {
-      "source": "heuristic"
-    }
-  }
-]
+[]

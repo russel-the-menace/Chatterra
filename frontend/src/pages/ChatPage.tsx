@@ -22,7 +22,9 @@ export default function ChatPage(): JSX.Element{
 
       const cData = await cRes.json()
       const matchingConversation = (cData.conversations || [])
-        .find((conv:any) => conv.characterId === nextCharacter.id)
+        .filter((conv:any) => conv.characterId === nextCharacter.id)
+        .sort((a:any, b:any) => (b.lastMessageAt || b.updatedAt || b.createdAt || '').localeCompare(a.lastMessageAt || a.updatedAt || a.createdAt || ''))
+        [0]
 
       if (matchingConversation){
         setConversationId(matchingConversation.id)

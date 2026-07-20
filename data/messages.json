@@ -1,18 +1,26 @@
 [
   {
-    "id": "3fc5f869-5927-45a9-9d58-2ab873faad2c",
-    "conversationId": "36bbf748-e2c4-4eca-9003-83cd80479997",
-    "senderRole": "user",
-    "senderId": "1784510750433",
-    "content": "I am doing my language app right now.",
-    "createdAt": "2026-07-20T01:56:22.333Z"
+    "id": "b0779b61-890f-49e8-978f-c0cf68b867cb",
+    "conversationId": "00497bfc-25e1-47f4-9365-3965973c3b16",
+    "senderRole": "assistant",
+    "senderId": "c1",
+    "content": "Hello, I'm David. Let's start the interview. Tell me briefly about your background.",
+    "createdAt": "2026-07-20T02:03:54.623Z"
   },
   {
-    "id": "caccfa79-9392-40d2-877a-740b60155bd4",
-    "conversationId": "36bbf748-e2c4-4eca-9003-83cd80479997",
+    "id": "1981bc4d-d1a8-44d8-81a1-414a79155198",
+    "conversationId": "00497bfc-25e1-47f4-9365-3965973c3b16",
+    "senderRole": "user",
+    "senderId": "1784510750433",
+    "content": "My name is Finn",
+    "createdAt": "2026-07-20T02:03:54.623Z"
+  },
+  {
+    "id": "1fb24810-680b-4ff8-b029-eac3ab442c9b",
+    "conversationId": "00497bfc-25e1-47f4-9365-3965973c3b16",
     "senderRole": "assistant",
-    "senderId": "c2",
-    "content": "(mock) English Teacher: Thanks — I heard: \"I am doing my language app right now.\". Can you expand on that?",
-    "createdAt": "2026-07-20T01:56:22.335Z"
+    "senderId": "c1",
+    "content": "(mock) David: Thanks — I heard: \"My name is Finn\". Can you expand on that?",
+    "createdAt": "2026-07-20T02:03:54.624Z"
   }
 ]

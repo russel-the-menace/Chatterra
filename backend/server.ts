@@ -37,6 +37,56 @@ const persistAll = () => {
   writeJson('memories.json', memories)
 }
 
+const getStarterMessage = (character?: Character) => {
+  if (character?.id === 'c2') {
+    return 'Hi. First, I will correct your English and programmer mistakes, then I will help you practice naturally. Start by telling me about your current project.'
+  }
+
+  return `Hello, I'm ${character?.name || 'Interviewer'}. Let's start the interview. Tell me briefly about your background.`
+}
+
+const clearChatHistory = (userId: string, characterId: string) => {
+  const conversationIds = conversations
+    .filter(conversation => conversation.userId === userId && conversation.characterId === characterId)
+    .map(conversation => conversation.id)
+
+  if (conversationIds.length === 0) {
+    return { deletedConversations: 0, deletedMessages: 0, deletedMemories: 0 }
+  }
+
+  let deletedMessages = 0
+  let deletedMemories = 0
+
+  for (let index = conversations.length - 1; index >= 0; index -= 1) {
+    const conversation = conversations[index]
+    if (conversation.userId === userId && conversation.characterId === characterId) {
+      conversations.splice(index, 1)
+    }
+  }
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (conversationIds.includes(messages[index].conversationId)) {
+      messages.splice(index, 1)
+      deletedMessages += 1
+    }
+  }
+
+  for (let index = memories.length - 1; index >= 0; index -= 1) {
+    const memory = memories[index]
+    if (memory.userId === userId && memory.characterId === characterId) {
+      memories.splice(index, 1)
+      deletedMemories += 1
+    }
+  }
+
+  persistAll()
+  return {
+    deletedConversations: conversationIds.length,
+    deletedMessages,
+    deletedMemories
+  }
+}
+
 app.get('/api/health', (_req, res) => res.json({ status: 'ok' }))
 
 // list conversations for a user
@@ -56,6 +106,20 @@ app.get('/api/conversations/:id/messages', (req, res) => {
   // sort by createdAt
   list.sort((a,b) => a.createdAt.localeCompare(b.createdAt))
   res.json({ messages: list })
+})
+
+app.delete('/api/chat-history', (req, res) => {
+  const { userId, characterId } = req.body || {}
+
+  if (!userId) return res.status(400).json({ error: 'userId is required' })
+  if (!characterId) return res.status(400).json({ error: 'characterId is required' })
+
+  const result = clearChatHistory(String(userId), String(characterId))
+  return res.json({
+    ok: true,
+    characterId,
+    ...result
+  })
 })
 
 // lightweight memory extraction (rule-based MVP)
@@ -106,6 +170,18 @@ app.post('/api/chat', async (req, res) => {
     }
     conversations.push(newConvo)
     convo = newConvo
+
+    const starterCreatedAt = new Date().toISOString()
+    const starterMsg: Message = {
+      id: uuidv4(),
+      conversationId: convo.id,
+      senderRole: 'assistant',
+      senderId: character?.id,
+      content: getStarterMessage(character),
+      createdAt: starterCreatedAt
+    }
+    messages.push(starterMsg)
+    convo.lastMessageAt = starterCreatedAt
   }
 
   // save user message
@@ -129,12 +205,15 @@ app.post('/api/chat', async (req, res) => {
 
   const deepseekUrl = process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com/chat/completions'
   const deepseekModel = process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash'
+  const apiMode = process.env.DEEPSEEK_API_MODE || 'live'
   const apiKey = process.env.DEEPSEEK_API_KEY
   if (!apiKey) return res.status(500).json({ error: 'missing API key' })
 
-  // Test shortcut: when running with DEEPSEEK_API_KEY=test, return a canned reply
-    if (apiKey === 'test') {
-    const canned = `(mock) ${character?.name || 'Interviewer'}: Thanks — I heard: "${message}". Can you expand on that?`
+  // Optional mock mode for local testing only.
+  if (apiMode === 'mock') {
+    const canned = character?.id === 'c2'
+      ? `First, small correction: a more natural way to say that is: “${message}.” Now tell me a little more.`
+      : `(mock) ${character?.name || 'Interviewer'}: Thanks — I heard: "${message}". Can you expand on that?`
     const aiMsg: Message = {
       id: uuidv4(),
       conversationId: convo.id,
