@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import {
   assessResponseLanguage,
-  fallbackMessageForPolicy,
   isResponseLanguageCompliant,
   resolveResponseLanguagePolicy
 } from './language-policy'
@@ -15,7 +14,6 @@ assert.equal(isResponseLanguageCompliant('我在这里，你想聊什么？', ca
 assert.equal(isResponseLanguageCompliant('我在这儿，你想和我聊天吗？', cantonese), false)
 assert.equal(isResponseLanguageCompliant('I am here for you.', cantonese), false)
 assert.equal(assessResponseLanguage('我想丢你', cantonese).reason, 'ambiguous_cjk')
-assert.equal(fallbackMessageForPolicy(cantonese, 'conversation', { incoming: '我想丢你' }), '做咩呀？突然想丟我？')
 
 const plan = {
   route: 'model',
@@ -37,7 +35,12 @@ assert.equal(roleplayOutput.reply, '你想丢我？')
 
 const mandarinOutput = diagnoseInferenceOutput(plan, '我在这里，你想聊什么？')
 assert.equal(mandarinOutput.accepted, false)
-assert.equal(mandarinOutput.fallbackReason, 'language_violation')
-assert.equal(mandarinOutput.reply, '做咩呀？突然想丟我？')
+assert.equal(mandarinOutput.rejectionReason, 'language_violation')
+assert.equal(mandarinOutput.reply, null)
+
+const emptyOutput = diagnoseInferenceOutput(plan, '')
+assert.equal(emptyOutput.accepted, false)
+assert.equal(emptyOutput.rejectionReason, 'empty_provider_output')
+assert.equal(emptyOutput.reply, null)
 
 console.log('language policy checks passed')

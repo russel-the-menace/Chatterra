@@ -440,12 +440,8 @@ export default function ChatPage(): JSX.Element{
             setMessages(prev2 => prev2.map(m => m.id === loadingId ? aiMsg : m))
           }
         } catch (error) {
-          const errMsg: Message = {
-            id: makeMessageId(),
-            sender: 'ai',
-            text: error instanceof Error ? `Sorry, ${error.message}.` : 'Sorry, the server is unreachable.'
-          }
-          setMessages(prev2 => prev2.map(m => m.id === loadingId ? errMsg : m))
+          console.error('Chat request failed', error)
+          setMessages(prev2 => prev2.filter(m => m.id !== loadingId))
         }
       })()
 

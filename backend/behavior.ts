@@ -1117,7 +1117,8 @@ export const recordInferenceFailure = async ({
   mode = 'practice',
   inference,
   diagnostics,
-  latencyMs = 0
+  latencyMs = 0,
+  failureReason = 'provider_failure'
 }: {
   userId: string
   character: Character
@@ -1128,6 +1129,7 @@ export const recordInferenceFailure = async ({
   inference: InferencePlan
   diagnostics?: InferenceDiagnostics
   latencyMs?: number
+  failureReason?: string
 }) => {
   return withTransaction(async client => {
     const instance = await ensureInstance(client, userId, character, mode)
@@ -1149,7 +1151,7 @@ export const recordInferenceFailure = async ({
         triggerEventId || null,
         mode,
         inference.route,
-        JSON.stringify([...inference.reasonCodes, 'provider_failure']),
+        JSON.stringify(Array.from(new Set([...inference.reasonCodes, failureReason]))),
         inference.policyVersion,
         inference.model?.provider || null,
         inference.model?.model || null,

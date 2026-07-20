@@ -409,14 +409,48 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
   }
 
   const outputDiagnostics = diagnoseInferenceOutput(inference, rawReply)
-  const { reply, ...traceOutputDiagnostics } = outputDiagnostics
+  const { reply: processedReply, ...traceOutputDiagnostics } = outputDiagnostics
   trace.mark('output_processed', 'completed', traceOutputDiagnostics)
-  if (outputDiagnostics.usedFallback) {
-    trace.mark('fallback_selected', 'completed', {
-      reason: outputDiagnostics.fallbackReason,
-      replyLength: reply.length
+  if (!outputDiagnostics.accepted || !processedReply) {
+    const rejectionReason = outputDiagnostics.rejectionReason || 'output_rejected'
+    trace.mark('response_not_generated', 'failed', { reason: rejectionReason })
+    try {
+      await recordInferenceFailure({
+        userId: normalizedUserId,
+        character: storedCharacter,
+        conversationId: conversation.id,
+        decisionId: preparation.decisionId,
+        triggerEventId: preparation.triggerEventId,
+        mode,
+        inference,
+        diagnostics: trace.snapshot(),
+        latencyMs: generation?.latencyMs ?? Date.now() - inferenceStartedAt,
+        failureReason: rejectionReason
+      })
+      trace.mark('request_completed', 'completed', {
+        responseStatus: 'inference_failed',
+        reason: rejectionReason
+      })
+    } catch (error) {
+      trace.mark('request_failed', 'failed', {
+        stage: 'rejection_persistence',
+        error: error instanceof Error ? error.name : 'unknown_error'
+      })
+      throw error
+    }
+    return res.json({
+      reply: null,
+      conversationId: conversation.id,
+      behavior: {
+        emotion: preparation.snapshot.emotionLabel,
+        activity: preparation.snapshot.simulation.currentActivity,
+        decision: preparation.decision.action,
+        responseStatus: 'inference_failed'
+      },
+      traceId: trace.traceId
     })
   }
+  const reply = processedReply
   const assistantMessage: Message = {
     id: newId(),
     conversationId: conversation.id,

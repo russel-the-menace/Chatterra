@@ -17,7 +17,6 @@ import {
 } from './types'
 import {
   assessResponseLanguage,
-  fallbackMessageForPolicy,
   resolveResponseLanguagePolicy,
   ResponseLanguagePolicy
 } from './language-policy'
@@ -793,9 +792,8 @@ export type InferenceOutputDiagnostics = {
   languageCompliant: boolean
   languageReason: string
   accepted: boolean
-  usedFallback: boolean
-  fallbackReason?: 'empty_provider_output' | 'format_violation' | 'language_violation'
-  reply: string
+  rejectionReason?: 'empty_provider_output' | 'format_violation' | 'language_violation'
+  reply: string | null
 }
 
 export const diagnoseInferenceOutput = (
@@ -818,41 +816,8 @@ export const diagnoseInferenceOutput = (
       languageCompliant: true,
       languageReason: languageAssessment.reason,
       accepted: true,
-      usedFallback: false,
       reply: normalized
     }
-  }
-
-  const incoming = [...plan.messages].reverse().find(message => message.role === 'user')?.content || ''
-  let reply: string
-  if (plan.responseLanguage.code !== 'english') {
-    reply = fallbackMessageForPolicy(plan.responseLanguage, plan.responseStyle.turnPriority, {
-      incoming,
-      recentAssistantReplies: plan.messages
-        .filter(message => message.role === 'assistant')
-        .map(message => message.content)
-        .slice(-5)
-    })
-  } else if (plan.responseStyle.turnPriority === 'emotional_support') {
-    const lossMatch = incoming.match(/\bmy\s+([a-z][a-z '-]{1,40}?)\s+(?:(?:has|had)\s+)?(?:(?:passed|pass)\s+away|died)\b/i)
-    const lossAcknowledgement = lossMatch?.[1]
-      ? `I'm sorry about your ${lossMatch[1].trim()}.`
-      : distressSignal(incoming) > 0
-        ? "I'm sorry you're going through this."
-        : ''
-    const repair = conflictSignal(incoming) > 0
-      ? "I'm sorry. I focused on the wrong thing when you were telling me something painful. That was insensitive."
-      : ''
-    reply = [
-      repair,
-      lossAcknowledgement,
-      repair ? 'You did not need a grammar lesson in that moment.' : '',
-      'I am listening if you want to tell me more.'
-    ].filter(Boolean).join(' ')
-  } else {
-    reply = plan.mode === 'practice'
-      ? 'I could not form a useful answer. Could you try that once more?'
-      : 'I am here. Could you say that once more?'
   }
 
   return {
@@ -862,13 +827,12 @@ export const diagnoseInferenceOutput = (
     languageCompliant,
     languageReason: languageAssessment.reason,
     accepted: false,
-    usedFallback: true,
-    fallbackReason: !trimmed
+    rejectionReason: !trimmed
       ? 'empty_provider_output'
       : !normalized
         ? 'format_violation'
         : 'language_violation',
-    reply
+    reply: null
   }
 }
 

@@ -114,7 +114,7 @@ from character update payloads and are not returned by the character API.
 
 Inference diagnostics are deliberately metadata-only. Each chat request emits structured
 JSON log lines with a `traceId` and records stages such as plan construction, provider
-response parsing, output validation, fallback selection, and persistence. It does not
+response parsing, output validation, output rejection, and persistence. It does not
 store the API key, full prompt, or raw provider response. Query a recent trace with:
 
 ```sql

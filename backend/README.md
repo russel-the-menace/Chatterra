@@ -56,19 +56,23 @@ from an empty provider response. Direct questions, explicit requests, distress, 
 and relational conflict retain response priority. A successful no-reply turn returns
 `reply: null` with `behavior.decision: "no_reply"` and still persists the user message,
 memory candidates, state changes, decision record, and `none` inference audit.
+Rejected or empty model output also produces no assistant message, but is recorded
+separately as `responseStatus: "inference_failed"`; it is never treated as a character
+decision and never replaced with synthetic dialogue.
 
 Every chat request emits structured inference trace logs and returns a `traceId`. The
 same metadata is stored in `inference_records.diagnostics` and
 `generation_records.diagnostics`, including provider status, finish reason, extracted
-text length, output validation, and fallback reason. Prompts and secrets are not logged.
+text length, output validation, and rejection reason. Prompts and secrets are not logged.
 
 `Character.language` is an output contract. A single-language value such as
 `Cantonese` or `Cantonese only` is treated as strict: starter messages, model prompts,
-mock responses, and deterministic fallbacks use that language. Strict model output is
+and mock responses use that language. Strict model output is
 validated before it is returned, so an English or explicitly Mandarin response cannot
 leak through for a Cantonese-only character. Short CJK-only sentences that are
-linguistically ambiguous are accepted rather than falsely replaced with a generic
-fallback; the audit records `languageReason: "ambiguous_cjk"`. Chat output also uses a
+linguistically ambiguous are accepted rather than falsely rejected; the audit records
+`languageReason: "ambiguous_cjk"`. Invalid output is audited without generating a
+replacement message. Chat output also uses a
 dialogue-only contract: stage directions, facial-expression narration, inner thoughts,
 and roleplay markup are not shown to the user.
 

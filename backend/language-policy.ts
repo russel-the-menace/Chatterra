@@ -118,71 +118,6 @@ export const starterMessageForPolicy = (
   }
 }
 
-export const fallbackMessageForPolicy = (
-  policy: ResponseLanguagePolicy,
-  priority: 'conversation' | 'emotional_support' | 'language_help' = 'conversation',
-  context: {
-    incoming?: string
-    recentAssistantReplies?: string[]
-  } = {}
-) => {
-  const recent = new Set((context.recentAssistantReplies || []).map(reply => reply.trim()))
-
-  if (priority === 'emotional_support') {
-    switch (policy.code) {
-      case 'cantonese':
-        return [
-          '唔好意思，我頭先冇好好聽你講。你想唔想同我講多啲？',
-          '我喺度聽你講，你慢慢嚟，唔使急。'
-        ].find(reply => !recent.has(reply)) || '唔好意思，我頭先冇好好聽你講。你想唔想同我講多啲？'
-      case 'mandarin':
-        return '对不起，我刚才没有好好听你说。你愿意再跟我说一点吗？'
-      case 'japanese':
-        return 'ごめん、ちゃんと話を聞けていなかった。もう少し話してくれる？'
-      case 'english':
-        return "I'm listening. Would you like to tell me more?"
-      default:
-        return '…'
-    }
-  }
-
-  switch (policy.code) {
-    case 'cantonese':
-      if (priority === 'language_help') {
-        return ['我可以幫你，你想講邊一部分？', '得呀，我哋逐句睇下。'].find(reply => !recent.has(reply)) || '我可以幫你，你想講邊一部分？'
-      }
-      const incoming = context.incoming || ''
-      const contextual = /travel|旅行|旅遊/iu.test(incoming)
-        ? '去旅行呀？去咗邊度玩？'
-        : /丢你|丟你|屌你|吊你/iu.test(incoming)
-          ? '做咩呀？突然想丟我？'
-          : /挂住|掛住|想你|miss/iu.test(incoming)
-          ? '我都掛住你啦，最近過成點？'
-          : undefined
-      const candidates = [
-        contextual,
-        '我喺度呀，你想講咩？',
-        '我聽住㗎，你慢慢講。',
-        '得閒呀，你繼續講。'
-      ].filter((reply): reply is string => Boolean(reply))
-      return candidates.find(reply => !recent.has(reply)) || candidates[0]
-    case 'mandarin':
-      return priority === 'language_help'
-        ? '我可以帮你，你想先说哪一部分？'
-        : '我在这里，你想聊什么？'
-    case 'japanese':
-      return priority === 'language_help'
-        ? '手伝えるよ。どの部分から話したい？'
-        : 'ここにいるよ。何を話したい？'
-    case 'english':
-      return priority === 'language_help'
-        ? 'I can help. Which part would you like to talk about?'
-        : 'I am here. What would you like to talk about?'
-    default:
-      return '…'
-  }
-}
-
 export const isResponseLanguageCompliant = (
   text: string,
   policy: ResponseLanguagePolicy
@@ -206,7 +141,7 @@ export const assessResponseLanguage = (
       if (STRONG_MANDARIN_PHRASES.test(normalized)) return { compliant: false, reason: 'explicit_mandarin' }
       if (CANTONESE_MARKERS.test(normalized)) return { compliant: true, reason: 'cantonese_marker' }
       // CJK-only replies are often dialect-ambiguous. Rejecting them
-      // would turn valid, natural Cantonese into a generic fallback.
+      // would discard valid, natural Cantonese.
       return { compliant: true, reason: 'ambiguous_cjk' }
     case 'english':
       return LATIN.test(normalized) && !CJK.test(normalized) && !JAPANESE.test(normalized)
