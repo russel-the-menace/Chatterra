@@ -65,10 +65,12 @@ text length, output validation, and fallback reason. Prompts and secrets are not
 `Character.language` is an output contract. A single-language value such as
 `Cantonese` or `Cantonese only` is treated as strict: starter messages, model prompts,
 mock responses, and deterministic fallbacks use that language. Strict model output is
-validated before it is returned, so an English or empty response cannot leak through
-for a Cantonese-only character. Chat output also uses a dialogue-only contract: stage
-directions, facial-expression narration, inner thoughts, and roleplay markup are not
-shown to the user.
+validated before it is returned, so an English or explicitly Mandarin response cannot
+leak through for a Cantonese-only character. Short CJK-only sentences that are
+linguistically ambiguous are accepted rather than falsely replaced with a generic
+fallback; the audit records `languageReason: "ambiguous_cjk"`. Chat output also uses a
+dialogue-only contract: stage directions, facial-expression narration, inner thoughts,
+and roleplay markup are not shown to the user.
 
 Voice dictation is implemented in the frontend as an input modality. The browser MVP
 uses Web Speech recognition and session-scoped audio capture, then stores transcript

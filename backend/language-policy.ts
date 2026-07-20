@@ -15,10 +15,29 @@ export type ResponseLanguagePolicy = {
 }
 
 const CANTONESE_MARKERS = /(?:係|唔|喺|冇|咩|而家|嘅|啦|喎|囉|呀|吖|喇|啫|㗎|嗰|乜|哋|佢|啲|點|邊|緊|嚟|揾|睇|食|飲|傾|講|咁|得閒|係咪|做咩)/u
+const STRONG_MANDARIN_PHRASES = /(?:我在|你現在|你现在|現在想|现在想|想聊|聊天|什麼事|什么事|怎麼了|怎么了|在哪裡|在哪里|為什麼|为什么|沒有|没有|告訴我|告诉我|我們|我们)/u
 const CJK = /[\u3400-\u9fff\uf900-\ufaff]/u
 const JAPANESE = /[\u3040-\u30ff]/u
 const LATIN = /[A-Za-z]/u
 const NON_VERBAL = /^[\p{P}\p{S}\p{N}\s]+$/u
+
+export type ResponseLanguageAssessment = {
+  compliant: boolean
+  reason:
+    | 'empty'
+    | 'non_verbal'
+    | 'non_strict'
+    | 'unknown_language'
+    | 'latin_contamination'
+    | 'japanese_contamination'
+    | 'not_cjk'
+    | 'explicit_mandarin'
+    | 'cantonese_marker'
+    | 'ambiguous_cjk'
+    | 'english'
+    | 'mandarin'
+    | 'japanese'
+}
 
 const isStrictSetting = (setting: string) => {
   if (/\b(?:only|exclusively|solely)\b|只|仅|只能|只讲|只用/iu.test(setting)) return true
@@ -135,7 +154,9 @@ export const fallbackMessageForPolicy = (
       const incoming = context.incoming || ''
       const contextual = /travel|旅行|旅遊/iu.test(incoming)
         ? '去旅行呀？去咗邊度玩？'
-        : /挂住|掛住|想你|miss/iu.test(incoming)
+        : /丢你|丟你|屌你|吊你/iu.test(incoming)
+          ? '做咩呀？突然想丟我？'
+          : /挂住|掛住|想你|miss/iu.test(incoming)
           ? '我都掛住你啦，最近過成點？'
           : undefined
       const candidates = [
@@ -165,22 +186,41 @@ export const fallbackMessageForPolicy = (
 export const isResponseLanguageCompliant = (
   text: string,
   policy: ResponseLanguagePolicy
-) => {
+) => assessResponseLanguage(text, policy).compliant
+
+export const assessResponseLanguage = (
+  text: string,
+  policy: ResponseLanguagePolicy
+): ResponseLanguageAssessment => {
   const normalized = text.trim()
-  if (!normalized) return false
-  if (!policy.strict || policy.code === 'unknown') return true
-  if (NON_VERBAL.test(normalized)) return true
+  if (!normalized) return { compliant: false, reason: 'empty' }
+  if (!policy.strict) return { compliant: true, reason: 'non_strict' }
+  if (policy.code === 'unknown') return { compliant: true, reason: 'unknown_language' }
+  if (NON_VERBAL.test(normalized)) return { compliant: true, reason: 'non_verbal' }
 
   switch (policy.code) {
     case 'cantonese':
-      return CJK.test(normalized) && !LATIN.test(normalized) && CANTONESE_MARKERS.test(normalized)
+      if (LATIN.test(normalized)) return { compliant: false, reason: 'latin_contamination' }
+      if (JAPANESE.test(normalized)) return { compliant: false, reason: 'japanese_contamination' }
+      if (!CJK.test(normalized)) return { compliant: false, reason: 'not_cjk' }
+      if (STRONG_MANDARIN_PHRASES.test(normalized)) return { compliant: false, reason: 'explicit_mandarin' }
+      if (CANTONESE_MARKERS.test(normalized)) return { compliant: true, reason: 'cantonese_marker' }
+      // CJK-only replies are often dialect-ambiguous. Rejecting them
+      // would turn valid, natural Cantonese into a generic fallback.
+      return { compliant: true, reason: 'ambiguous_cjk' }
     case 'english':
       return LATIN.test(normalized) && !CJK.test(normalized) && !JAPANESE.test(normalized)
+        ? { compliant: true, reason: 'english' }
+        : { compliant: false, reason: CJK.test(normalized) ? 'not_cjk' : 'latin_contamination' }
     case 'mandarin':
       return CJK.test(normalized) && !LATIN.test(normalized) && !JAPANESE.test(normalized)
+        ? { compliant: true, reason: 'mandarin' }
+        : { compliant: false, reason: LATIN.test(normalized) ? 'latin_contamination' : 'not_cjk' }
     case 'japanese':
       return JAPANESE.test(normalized) && !LATIN.test(normalized)
+        ? { compliant: true, reason: 'japanese' }
+        : { compliant: false, reason: LATIN.test(normalized) ? 'latin_contamination' : 'japanese_contamination' }
     default:
-      return true
+      return { compliant: true, reason: 'unknown_language' }
   }
 }

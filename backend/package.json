@@ -7,6 +7,7 @@
     "dev": "ts-node-dev --respawn --transpile-only server.ts",
     "build": "tsc",
     "test:decision": "ts-node --transpile-only response-decision.test.ts",
+    "test:language": "ts-node --transpile-only language-policy.test.ts",
     "db:migrate": "ts-node scripts/migrate.ts",
     "db:import-json": "ts-node scripts/import-json.ts",
     "db:setup": "npm run db:migrate && npm run db:import-json"

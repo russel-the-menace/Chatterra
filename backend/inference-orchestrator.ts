@@ -16,8 +16,8 @@ import {
   ResponseDecision
 } from './types'
 import {
+  assessResponseLanguage,
   fallbackMessageForPolicy,
-  isResponseLanguageCompliant,
   resolveResponseLanguagePolicy,
   ResponseLanguagePolicy
 } from './language-policy'
@@ -791,6 +791,7 @@ export type InferenceOutputDiagnostics = {
   normalizedLength: number
   sanitized: boolean
   languageCompliant: boolean
+  languageReason: string
   accepted: boolean
   usedFallback: boolean
   fallbackReason?: 'empty_provider_output' | 'format_violation' | 'language_violation'
@@ -804,8 +805,10 @@ export const diagnoseInferenceOutput = (
   const raw = typeof output === 'string' ? output : ''
   const trimmed = raw.trim()
   const normalized = normalizeAssistantSpeech(raw)
-  const languageCompliant = plan.route === 'direct'
-    || isResponseLanguageCompliant(normalized, plan.responseLanguage)
+  const languageAssessment = plan.route === 'direct'
+    ? { compliant: true, reason: 'non_verbal' }
+    : assessResponseLanguage(normalized, plan.responseLanguage)
+  const languageCompliant = languageAssessment.compliant
 
   if (normalized && languageCompliant) {
     return {
@@ -813,6 +816,7 @@ export const diagnoseInferenceOutput = (
       normalizedLength: normalized.length,
       sanitized: trimmed !== normalized,
       languageCompliant: true,
+      languageReason: languageAssessment.reason,
       accepted: true,
       usedFallback: false,
       reply: normalized
@@ -856,6 +860,7 @@ export const diagnoseInferenceOutput = (
     normalizedLength: normalized.length,
     sanitized: trimmed !== normalized,
     languageCompliant,
+    languageReason: languageAssessment.reason,
     accepted: false,
     usedFallback: true,
     fallbackReason: !trimmed
