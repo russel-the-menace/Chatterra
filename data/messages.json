@@ -1,1 +1,18 @@
-[]
+[
+  {
+    "id": "3fc5f869-5927-45a9-9d58-2ab873faad2c",
+    "conversationId": "36bbf748-e2c4-4eca-9003-83cd80479997",
+    "senderRole": "user",
+    "senderId": "1784510750433",
+    "content": "I am doing my language app right now.",
+    "createdAt": "2026-07-20T01:56:22.333Z"
+  },
+  {
+    "id": "caccfa79-9392-40d2-877a-740b60155bd4",
+    "conversationId": "36bbf748-e2c4-4eca-9003-83cd80479997",
+    "senderRole": "assistant",
+    "senderId": "c2",
+    "content": "(mock) English Teacher: Thanks — I heard: \"I am doing my language app right now.\". Can you expand on that?",
+    "createdAt": "2026-07-20T01:56:22.335Z"
+  }
+]

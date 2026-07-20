@@ -1,6 +1,6 @@
 import React from 'react'
 
-type Message = { id: number; sender: 'ai'|'user'; text: string; loading?: boolean }
+type Message = { id: string; sender: 'ai'|'user'; text: string; loading?: boolean }
 
 export default function MessageBubble({msg}:{msg:Message}): JSX.Element{
   const isUser = msg.sender === 'user'

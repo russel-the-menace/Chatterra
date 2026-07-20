@@ -3,13 +3,49 @@ import ChatWindow from '../components/ChatWindow'
 import InputBox from '../components/InputBox'
 import character, {characters, Character} from '../data/character'
 
-type Message = { id: number; sender: 'ai' | 'user'; text: string; loading?: boolean }
+type Message = { id: string; sender: 'ai' | 'user'; text: string; loading?: boolean }
+
+const makeMessageId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`
 
 export default function ChatPage(): JSX.Element{
   const [messages, setMessages] = useState<Message[]>([])
   const [userId, setUserIdentifier] = useState<string | null>(null)
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [selectedCharacter, setSelectedCharacter] = useState<Character>(character)
+
+  const loadHistoryForCharacter = async (uid: string, nextCharacter: Character) => {
+    setConversationId(null)
+
+    try{
+      const cRes = await fetch(`http://localhost:3000/api/conversations?userId=${uid}`)
+      if (!cRes.ok) throw new Error('no convs')
+
+      const cData = await cRes.json()
+      const matchingConversation = (cData.conversations || [])
+        .find((conv:any) => conv.characterId === nextCharacter.id)
+
+      if (matchingConversation){
+        setConversationId(matchingConversation.id)
+        localStorage.setItem('chatterra_conversationId', matchingConversation.id)
+
+        const mRes = await fetch(`http://localhost:3000/api/conversations/${matchingConversation.id}/messages`)
+        const mData = await mRes.json()
+        const mapped: Message[] = (mData.messages || []).map((m:any) => ({
+          id: String(m.id),
+          sender: m.senderRole === 'user' ? 'user' : 'ai',
+          text: m.content
+        }))
+        setMessages(mapped)
+        return
+      }
+    }catch(e){
+      // fall through to default greeting
+    }
+
+    setMessages([{id: makeMessageId(), sender:'ai', text: nextCharacter.id === 'c2'
+      ? 'Hi. First, I will correct your English and programmer mistakes, then I will help you practice naturally. Start by telling me about your current project.'
+      : `Hello, I'm ${nextCharacter.name}. Let's start the interview. Tell me briefly about your background.`}])
+  }
 
   useEffect(()=>{
     // get or create a persistent userId
@@ -20,45 +56,22 @@ export default function ChatPage(): JSX.Element{
     const savedCharacterId = localStorage.getItem('chatterra_characterId')
     const initialCharacter = characters.find(c => c.id === savedCharacterId) || character;
     setSelectedCharacter(initialCharacter);
-
-    // load conversations for user and latest messages
-    (async ()=>{
-      try{
-        const cRes = await fetch(`http://localhost:3000/api/conversations?userId=${uid}`)
-        if (!cRes.ok) throw new Error('no convs')
-        const cData = await cRes.json()
-        const matchingConversation = (cData.conversations || []).find((conv:any) => conv.characterId === initialCharacter.id) || (cData.conversations && cData.conversations.length>0 ? cData.conversations[0] : null)
-        if (matchingConversation){
-          const conv = matchingConversation
-          setConversationId(conv.id)
-          localStorage.setItem('chatterra_conversationId', conv.id);
-          const mRes = await fetch(`http://localhost:3000/api/conversations/${conv.id}/messages`)
-          const mData = await mRes.json()
-          const mapped: Message[] = (mData.messages||[]).map((m:any)=>({ id: Number(String(m.id).slice(-9)) || Date.now(), sender: m.senderRole === 'user' ? 'user' : 'ai', text: m.content }))
-          setMessages(mapped)
-          return
-        }
-      }catch(e){
-        // ignore and fall back to default greeting
-      }
-      // fallback: initial greeting
-      setMessages([{id:1, sender:'ai', text: `Hello, I'm ${initialCharacter.name}. Let's start the conversation. Tell me briefly about your background.`}]);
-    })()
+    void loadHistoryForCharacter(uid, initialCharacter)
   }, [])
 
   const handleCharacterSelect = (nextCharacter: Character) => {
     setSelectedCharacter(nextCharacter)
     localStorage.setItem('chatterra_characterId', nextCharacter.id)
-    setConversationId(null)
-    setMessages([{id:1, sender:'ai', text: nextCharacter.id === 'c2'
-      ? 'Hi. First, I will correct your English and programmer mistakes, then I will help you practice naturally. Start by telling me about your current project.'
-      : `Hello, I'm ${nextCharacter.name}. Let's start the interview. Tell me briefly about your background.`}])
+    const uid = userId || localStorage.getItem('chatterra_userId')
+    if (uid) {
+      void loadHistoryForCharacter(uid, nextCharacter)
+    }
   }
 
   const sendMessage = (text: string) => {
     if(!text) return
-    const userMsg: Message = {id: Date.now(), sender: 'user', text}
-    const loadingId = Date.now() + 1
+    const userMsg: Message = {id: makeMessageId(), sender: 'user', text}
+    const loadingId = makeMessageId()
     const loadingMsg: Message = {id: loadingId, sender: 'ai', text: '', loading: true}
 
     // use functional update to avoid stale state
@@ -79,10 +92,10 @@ export default function ChatPage(): JSX.Element{
             setConversationId(data.conversationId)
             localStorage.setItem('chatterra_conversationId', data.conversationId)
           }
-          const aiMsg: Message = {id: Date.now()+2, sender:'ai', text: data.reply}
+          const aiMsg: Message = {id: makeMessageId(), sender:'ai', text: data.reply}
           setMessages(prev2 => prev2.map(m => m.id === loadingId ? aiMsg : m))
         }catch(e){
-          const errMsg: Message = {id: Date.now()+2, sender:'ai', text: 'Sorry, the server is unreachable.'}
+          const errMsg: Message = {id: makeMessageId(), sender:'ai', text: 'Sorry, the server is unreachable.'}
           setMessages(prev2 => prev2.map(m => m.id === loadingId ? errMsg : m))
         }
       })()

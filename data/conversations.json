@@ -1,1 +1,12 @@
-[]
+[
+  {
+    "id": "36bbf748-e2c4-4eca-9003-83cd80479997",
+    "userId": "1784510750433",
+    "characterId": "c2",
+    "title": "English Teacher chat",
+    "status": "active",
+    "createdAt": "2026-07-20T01:56:22.333Z",
+    "updatedAt": "2026-07-20T01:56:22.333Z",
+    "lastMessageAt": "2026-07-20T01:56:22.335Z"
+  }
+]
