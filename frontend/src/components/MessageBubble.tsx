@@ -7,6 +7,7 @@ export default function MessageBubble({msg}:{msg:Message}): JSX.Element{
   const bubbleClass = "bubble "+(isUser? 'user':'ai')
   return (
     <div className={"message-row "+(isUser? 'right':'left')}>
+      {!isUser && <div className="avatar assistant">ET</div>}
       <div className={bubbleClass}>
         {msg.loading ? (
           <span className="typing">
@@ -16,6 +17,7 @@ export default function MessageBubble({msg}:{msg:Message}): JSX.Element{
           msg.text
         )}
       </div>
+      {isUser && <div className="avatar user">Me</div>}
     </div>
   )
 }

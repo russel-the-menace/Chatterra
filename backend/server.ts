@@ -127,7 +127,8 @@ app.post('/api/chat', async (req, res) => {
   const convoText = recent.map(m => `${m.senderRole === 'user' ? 'Candidate' : 'Interviewer'}: ${m.content}`).join('\n')
   const finalPrompt = [systemPrompt, convoText, `Candidate: ${message}`].join('\n\n')
 
-  const deepseekUrl = process.env.DEEPSEEK_API_URL || 'https://api.deepseek.ai/v1/generate'
+  const deepseekUrl = process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com/chat/completions'
+  const deepseekModel = process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash'
   const apiKey = process.env.DEEPSEEK_API_KEY
   if (!apiKey) return res.status(500).json({ error: 'missing API key' })
 
@@ -152,8 +153,19 @@ app.post('/api/chat', async (req, res) => {
   try {
     const resp = await fetch(deepseekUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-      body: JSON.stringify({ prompt: finalPrompt, max_tokens: 600 })
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: deepseekModel,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: finalPrompt }
+        ],
+        max_tokens: 600,
+        stream: false
+      })
     })
     let data: any
     try { data = await resp.json() } catch (e) { data = await resp.text().catch(()=>null) }
