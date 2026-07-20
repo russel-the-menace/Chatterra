@@ -2,6 +2,8 @@ import React, {useState, useEffect, useMemo, useRef} from 'react'
 import ChatWindow from '../components/ChatWindow'
 import InputBox from '../components/InputBox'
 import seedCharacter, {characters as seedCharacters, Character} from '../data/character'
+import { VoiceTranscriptMetadata } from '../voice/types'
+import { starterMessageForCharacter } from '../languagePolicy'
 
 type Message = { id: string; sender: 'ai' | 'user'; text: string; loading?: boolean }
 type CharacterTextKey = 'name' | 'role' | 'company' | 'scenario' | 'goal' | 'language' | 'personality' | 'background' | 'systemPromptTemplate'
@@ -76,12 +78,6 @@ export default function ChatPage(): JSX.Element{
     return characters.filter(ch => [ch.name, ch.role, ch.company, ch.personality].join(' ').toLowerCase().includes(query))
   }, [characters, searchText])
 
-  const starterMessage = (nextCharacter: Character) => {
-    return nextCharacter.id === 'c2'
-      ? 'Hi. I will help you practice English and point out useful mistakes when it helps, while keeping the conversation natural. Tell me about your current project.'
-      : `Hello, I'm ${nextCharacter.name}. Let's start the interview. Tell me briefly about your background.`
-  }
-
   const loadHistoryForCharacter = async (uid: string, nextCharacter: Character) => {
     setConversationId(null)
 
@@ -112,7 +108,7 @@ export default function ChatPage(): JSX.Element{
       // fall through to default greeting
     }
 
-    setMessages([{ id: makeMessageId(), sender: 'ai', text: starterMessage(nextCharacter) }])
+    setMessages([{ id: makeMessageId(), sender: 'ai', text: starterMessageForCharacter(nextCharacter) }])
   }
 
   const openCharacterEditor = (character: Character) => {
@@ -368,7 +364,7 @@ export default function ChatPage(): JSX.Element{
     })
 
     setConversationId(null)
-    setMessages([{ id: makeMessageId(), sender: 'ai', text: starterMessage(selectedCharacter) }])
+    setMessages([{ id: makeMessageId(), sender: 'ai', text: starterMessageForCharacter(selectedCharacter) }])
     localStorage.removeItem('chatterra_conversationId')
   }
 
@@ -388,7 +384,7 @@ export default function ChatPage(): JSX.Element{
     window.alert('Start Group Chat is not implemented yet.')
   }
 
-  const sendMessage = (text: string) => {
+  const sendMessage = (text: string, voice?: VoiceTranscriptMetadata) => {
     if (!text) return
     const userMsg: Message = { id: makeMessageId(), sender: 'user', text }
     const loadingId = makeMessageId()
@@ -407,7 +403,16 @@ export default function ChatPage(): JSX.Element{
               history: updated,
               character: selectedCharacter,
               userId: userId || localStorage.getItem('chatterra_userId'),
-              conversationId
+              conversationId,
+              voice: voice
+                ? {
+                    originalText: voice.originalText,
+                    correctedText: voice.correctedText,
+                    detectedLanguage: voice.detectedLanguage,
+                    confidence: voice.confidence,
+                    audioAvailable: voice.audioAvailable
+                  }
+                : undefined
             })
           })
           const data = await res.json().catch(() => ({}))
@@ -544,7 +549,7 @@ export default function ChatPage(): JSX.Element{
           character={selectedCharacter}
           onEditCharacter={() => openCharacterEditor(selectedCharacter)}
         />
-        <InputBox onSend={sendMessage} />
+        <InputBox onSend={sendMessage} language={selectedCharacter.language} />
       </main>
 
       {showCharacterEditor && editingCharacter && (

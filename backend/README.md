@@ -47,3 +47,17 @@ The Inference Orchestrator owns retrieval, context assembly, prompt construction
 response length, model routing, and fixed sampling defaults. It can answer a reaction
 such as `👍` through a direct route without calling a model. Model settings are not
 part of the character API.
+
+`Character.language` is an output contract. A single-language value such as
+`Cantonese` or `Cantonese only` is treated as strict: starter messages, model prompts,
+mock responses, and deterministic fallbacks use that language. Strict model output is
+validated before it is returned, so an English or empty response cannot leak through
+for a Cantonese-only character. Chat output also uses a dialogue-only contract: stage
+directions, facial-expression narration, inner thoughts, and roleplay markup are not
+shown to the user.
+
+Voice dictation is implemented in the frontend as an input modality. The browser MVP
+uses Web Speech recognition and session-scoped audio capture, then stores transcript
+metadata in `messages.content_json.voice` through the normal chat request. Raw audio is
+not uploaded; see the repository-level voice architecture document for the future
+realtime adapter boundary.

@@ -52,6 +52,14 @@ export interface Message {
   createdAt: string
 }
 
+export interface VoiceTranscriptMetadata {
+  originalText: string
+  correctedText?: string
+  detectedLanguage?: string
+  confidence?: number
+  audioAvailable?: boolean
+}
+
 export type MemoryType =
   | 'user_profile'
   | 'background'

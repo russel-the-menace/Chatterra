@@ -12,6 +12,7 @@ import {
 } from './behavior'
 import { buildInferencePlan, postProcessInferenceOutput } from './inference-orchestrator'
 import { generateModelResponse, ModelGatewayError } from './model-gateway'
+import { resolveResponseLanguagePolicy, starterMessageForPolicy } from './language-policy'
 import {
   clearChatHistory,
   createCharacter,
@@ -26,7 +27,7 @@ import {
   setUserMemoryConsent,
   updateCharacter
 } from './repository'
-import { Character, Conversation, Message } from './types'
+import { Character, Conversation, Message, VoiceTranscriptMetadata } from './types'
 
 dotenv.config()
 
@@ -72,12 +73,34 @@ const characterFromPayload = (payload: any, existing?: Character): Character => 
   return character
 }
 
+const voiceMetadataFromPayload = (payload: any): VoiceTranscriptMetadata | undefined => {
+  if (!payload || typeof payload.originalText !== 'string') return undefined
+  const originalText = payload.originalText.trim().slice(0, 20000)
+  if (!originalText) return undefined
+  const correctedText = typeof payload.correctedText === 'string'
+    ? payload.correctedText.trim().slice(0, 20000)
+    : undefined
+  const confidence = Number(payload.confidence)
+  return {
+    originalText,
+    correctedText: correctedText || undefined,
+    detectedLanguage: typeof payload.detectedLanguage === 'string'
+      ? payload.detectedLanguage.trim().slice(0, 32) || undefined
+      : undefined,
+    confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : undefined,
+    audioAvailable: payload.audioAvailable === true
+  }
+}
+
 const getStarterMessage = (character?: Character) => {
+  const languagePolicy = resolveResponseLanguagePolicy(character?.language)
   if (character?.id === 'c2') {
-    return 'Hi. I will help you practice English and point out useful mistakes when it helps, while keeping the conversation natural. Tell me about your current project.'
+    if (languagePolicy.code === 'english') {
+      return 'Hi. I will help you practice English and point out useful mistakes when it helps, while keeping the conversation natural. Tell me about your current project.'
+    }
   }
 
-  return `Hello, I'm ${character?.name || 'Interviewer'}. Let's start the interview. Tell me briefly about your background.`
+  return starterMessageForPolicy(character?.name || 'Interviewer', languagePolicy)
 }
 
 app.get('/api/health', asyncRoute(async (_req, res) => {
@@ -186,6 +209,7 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
 
   const normalizedUserId = String(userId)
   const normalizedMessage = String(message)
+  const voiceMetadata = voiceMetadataFromPayload(req.body?.voice)
 
   const storedCharacter = await getCharacter(String(character.id))
   if (!storedCharacter) return res.status(400).json({ error: 'character not found' })
@@ -239,6 +263,7 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
     conversationId: conversation.id,
     messageId: userMessage.id,
     message: normalizedMessage,
+    contentJson: voiceMetadata ? { voice: voiceMetadata } : undefined,
     mode,
     now: new Date(userMessage.createdAt)
   })

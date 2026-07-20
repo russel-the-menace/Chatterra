@@ -27,3 +27,5 @@ The frontend calls `http://localhost:3000`. Database design and migration detail
 are documented in [`backend/DATABASE.md`](backend/DATABASE.md). The target behavioral
 design, including the implemented Inference Orchestrator, is documented in
 [`AI_COMPANION_ARCHITECTURE.md`](AI_COMPANION_ARCHITECTURE.md).
+Voice dictation boundaries and the browser/realtime migration path are documented in
+[`VOICE_INPUT_ARCHITECTURE.md`](VOICE_INPUT_ARCHITECTURE.md).

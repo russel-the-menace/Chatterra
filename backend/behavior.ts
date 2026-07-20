@@ -763,6 +763,7 @@ export const prepareInteraction = async ({
   conversationId,
   messageId,
   message,
+  contentJson,
   mode = 'practice',
   now = new Date()
 }: {
@@ -771,6 +772,7 @@ export const prepareInteraction = async ({
   conversationId: string
   messageId: string
   message: string
+  contentJson?: Record<string, any>
   mode?: InteractionMode
   now?: Date
 }): Promise<InteractionPreparation> => {
@@ -778,9 +780,16 @@ export const prepareInteraction = async ({
     const instance = await ensureInstance(client, userId, character, mode)
     await client.query(
       `INSERT INTO messages (
-         id, conversation_id, sender_role, sender_id, content, created_at
-       ) VALUES ($1, $2, 'user', $3, $4, $5)`,
-      [messageId, conversationId, userId, message, now.toISOString()]
+         id, conversation_id, sender_role, sender_id, content, content_json, created_at
+       ) VALUES ($1, $2, 'user', $3, $4, $5::jsonb, $6)`,
+      [
+        messageId,
+        conversationId,
+        userId,
+        message,
+        contentJson ? JSON.stringify(contentJson) : null,
+        now.toISOString()
+      ]
     )
     await client.query(
       `UPDATE conversations SET

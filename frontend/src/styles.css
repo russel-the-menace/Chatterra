@@ -294,14 +294,19 @@ body.modal-open{overflow:hidden}
 .bubble.user{background:#1aad19;color:#fff;border-bottom-right-radius:4px}
 
 .input-box{
-  display:flex;
-  gap:12px;
+  display:block;
   padding:16px 18px 18px;
   border-top:1px solid rgba(15,23,42,0.08);
   background:rgba(255,255,255,0.9);
 }
+.input-compose-row{
+  display:flex;
+  align-items:flex-end;
+  gap:12px;
+}
 .input-box textarea{
   flex:1;
+  min-width:0;
   min-height:54px;
   max-height:120px;
   border-radius:16px;
@@ -312,16 +317,75 @@ body.modal-open{overflow:hidden}
   background:#fff;
 }
 .input-box textarea:focus{border-color:#1aad19;box-shadow:0 0 0 3px rgba(26,173,25,0.14)}
+.input-actions{display:flex;align-items:flex-end;gap:8px;flex:0 0 auto;height:54px}
+.voice-button{
+  position:relative;
+  width:54px;
+  height:54px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border:1px solid rgba(15,23,42,0.14);
+  border-radius:16px;
+  background:#fff;
+  color:#4b5563;
+  cursor:pointer;
+  transition:background 160ms ease, color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+.voice-button:hover:not(:disabled){background:#f3f7f4;color:#137c18;border-color:rgba(26,173,25,0.4)}
+.voice-button:focus-visible{outline:3px solid rgba(26,173,25,0.24);outline-offset:2px}
+.voice-button:disabled{cursor:wait;opacity:0.72}
+.voice-microphone-icon{width:23px;height:23px;display:block}
+.voice-button.voice-recording{
+  color:#b42318;
+  background:#fff3f1;
+  border-color:#f2a39a;
+  animation:voice-pulse 1.5s ease-in-out infinite;
+}
+.voice-button.voice-processing{color:#137c18;background:#f1f8f2}
+.voice-button.voice-error{color:#b42318;background:#fff3f1;border-color:#f2a39a}
+.voice-error-mark{font-size:23px;font-weight:800;line-height:1}
+.voice-spinner{
+  width:20px;
+  height:20px;
+  border:2px solid rgba(19,124,24,0.2);
+  border-top-color:#137c18;
+  border-radius:50%;
+  animation:voice-spin 0.8s linear infinite;
+}
+.voice-status{
+  min-height:18px;
+  padding:7px 2px 0;
+  color:#5f6875;
+  font-size:12px;
+  font-weight:600;
+  overflow-wrap:anywhere;
+}
+.voice-status-recording{color:#b42318}
+.voice-status-processing{color:#137c18}
+.voice-status-error{color:#b42318}
+@keyframes voice-pulse{
+  0%,100%{box-shadow:0 0 0 0 rgba(180,35,24,0.16)}
+  50%{box-shadow:0 0 0 6px rgba(180,35,24,0.08)}
+}
+@keyframes voice-spin{to{transform:rotate(360deg)}}
 .input-box .send{
   background:#1aad19;
   color:white;
   border:0;
-  padding:0 18px;
-  border-radius:16px;
+  height:54px;
+  min-width:78px;
+  padding:0 16px;
+  border-radius:14px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  line-height:1;
   font-weight:700;
-  min-width:90px;
   box-shadow:0 10px 20px rgba(26,173,25,0.22);
+  cursor:pointer;
 }
+.input-box .send:disabled{cursor:not-allowed;opacity:0.55;box-shadow:none}
 
 .typing{ display:inline-flex; align-items:center; gap:6px }
 .typing .dot{ width:8px; height:8px; background:currentColor; border-radius:50%; display:inline-block; opacity:0.9 }
@@ -600,6 +664,10 @@ body.modal-open{overflow:hidden}
 @media(max-width:640px){
   .top-bar{padding:14px 14px 12px;gap:10px;flex-wrap:wrap}
   .top-bar-identity{flex:1 1 150px}
+  .input-compose-row{gap:8px}
+  .input-actions{gap:6px;height:48px}
+  .voice-button{width:48px;height:48px;border-radius:14px}
+  .input-box .send{height:48px;min-width:72px;padding:0 12px;border-radius:14px}
   .character-modal-backdrop{align-items:flex-end;padding:0}
   .character-modal{width:100%;max-height:94vh;border-radius:8px 8px 0 0}
   .character-modal-header{padding:16px 18px}

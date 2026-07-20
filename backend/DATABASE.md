@@ -115,6 +115,10 @@ internal policy labels derived from the character definition. The chat API ignor
 client-supplied mode, and public state does not expose one. Turn-level priorities such
 as `emotional_support` are stored in the inference response-style audit.
 
+Voice messages use the existing `messages.content_json` column. The `voice` object
+stores bounded original/editable transcript metadata; raw audio is not persisted by the
+current browser MVP.
+
 ## JSON Import
 
 `npm run db:import-json` is idempotent and imports the current `/data/*.json`

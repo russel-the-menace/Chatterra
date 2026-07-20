@@ -19,13 +19,28 @@ export class ModelGatewayError extends Error {
 }
 
 const extractText = (data: any) => {
+  const contentText = (value: any): string => {
+    if (typeof value === 'string') return value
+    if (Array.isArray(value)) {
+      return value.map(part => {
+        if (typeof part === 'string') return part
+        return typeof part?.text === 'string'
+          ? part.text
+          : typeof part?.content === 'string'
+            ? part.content
+            : ''
+      }).join('')
+    }
+    return typeof value?.text === 'string' ? value.text : ''
+  }
+
   if (typeof data === 'string') return data
   if (typeof data?.reply === 'string') return data.reply
   if (typeof data?.result === 'string') return data.result
   if (typeof data?.output_text === 'string') return data.output_text
   if (Array.isArray(data?.choices) && data.choices[0]) {
     const first = data.choices[0]
-    return first.message?.content || first.text || first.output || ''
+    return contentText(first.message?.content) || contentText(first.text) || contentText(first.output)
   }
   return ''
 }
@@ -50,13 +65,19 @@ export const generateModelResponse = async (
     const lossAcknowledgement = lossMatch?.[1]
       ? `I'm sorry about your ${lossMatch[1].trim()}.`
       : "I'm sorry for your loss."
-    const content = plan.responseStyle.turnPriority === 'emotional_support'
-      ? grief
-        ? `I'm sorry. I focused on correction when you were telling me something painful. That was insensitive. ${lossAcknowledgement} Do you want to tell me about them?`
-        : "I'm sorry. I was focused on the wrong thing and did not really listen to what you were saying. Let me slow down. What happened?"
-      : plan.mode === 'practice'
-      ? `First, a small correction: a more natural way to say that is: "${incoming}" Now tell me a little more.`
-      : `(mock) ${character.name}: I heard you. Can you expand on that?`
+    const content = plan.responseLanguage.code === 'cantonese'
+      ? plan.responseStyle.turnPriority === 'emotional_support'
+        ? '唔好意思，我頭先冇好好聽你講。你想唔想同我講多啲？'
+        : plan.mode === 'practice'
+          ? '我可以幫你講得自然啲，你想先講邊一部分？'
+          : `我聽到喇，${character.name}喺度。你想唔想再講多啲？`
+      : plan.responseStyle.turnPriority === 'emotional_support'
+        ? grief
+          ? `I'm sorry. I focused on correction when you were telling me something painful. That was insensitive. ${lossAcknowledgement} Do you want to tell me about them?`
+          : "I'm sorry. I was focused on the wrong thing and did not really listen to what you were saying. Let me slow down. What happened?"
+        : plan.mode === 'practice'
+          ? `First, a small correction: a more natural way to say that is: "${incoming}" Now tell me a little more.`
+          : `(mock) ${character.name}: I heard you. Can you expand on that?`
     return {
       content,
       provider: 'mock',
@@ -103,8 +124,17 @@ export const generateModelResponse = async (
     throw new ModelGatewayError('Upstream AI returned an error')
   }
 
+  const content = extractText(data)
+  if (!content.trim()) {
+    console.warn('Model provider returned no assistant text', {
+      model: plan.model.model,
+      finishReason: data?.choices?.[0]?.finish_reason || null,
+      responseKeys: data && typeof data === 'object' ? Object.keys(data).slice(0, 12) : []
+    })
+  }
+
   return {
-    content: extractText(data),
+    content,
     provider: plan.model.provider,
     model: plan.model.model,
     latencyMs: Date.now() - startedAt
