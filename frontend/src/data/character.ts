@@ -8,6 +8,15 @@ export type Character = {
   scenario: string
   goal: string
   language: string
+  background?: string
+  systemPromptTemplate?: string
+  defaultSettings?: {
+    maxResponseTokens?: number
+    temperature?: number
+    contextWindow?: number
+  }
+  createdAt?: string
+  updatedAt?: string
 }
 
 export const characters: Character[] = [

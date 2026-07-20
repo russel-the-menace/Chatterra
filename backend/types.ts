@@ -15,8 +15,13 @@ export interface User {
 export interface Character {
   id: UUID
   name: string
+  avatar?: string
   role?: string
   personality?: string
+  company?: string
+  scenario?: string
+  goal?: string
+  language?: string
   background?: string
   systemPromptTemplate?: string
   defaultSettings?: {

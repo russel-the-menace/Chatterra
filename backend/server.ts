@@ -37,6 +37,106 @@ const persistAll = () => {
   writeJson('memories.json', memories)
 }
 
+const syncCharacter = (nextCharacter: Character) => {
+  const index = characters.findIndex(character => character.id === nextCharacter.id)
+  if (index >= 0) {
+    characters[index] = {
+      ...characters[index],
+      ...nextCharacter,
+      updatedAt: new Date().toISOString()
+    }
+  } else {
+    characters.push({
+      ...nextCharacter,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    })
+  }
+  persistAll()
+  return characters.find(character => character.id === nextCharacter.id)
+}
+
+const characterTextFields: Array<keyof Character> = [
+  'name',
+  'avatar',
+  'role',
+  'company',
+  'personality',
+  'scenario',
+  'goal',
+  'language',
+  'background',
+  'systemPromptTemplate'
+]
+
+const characterFromPayload = (payload: any, existing?: Character): Character => {
+  const now = new Date().toISOString()
+  const character: Character = {
+    ...(existing || {} as Character),
+    id: existing?.id || uuidv4(),
+    name: existing?.name || '',
+    createdAt: existing?.createdAt || now,
+    updatedAt: now
+  }
+
+  characterTextFields.forEach(field => {
+    if (typeof payload?.[field] === 'string') {
+      ;(character as any)[field] = payload[field].trim()
+    }
+  })
+
+  const settings = payload?.defaultSettings
+  if (settings && typeof settings === 'object') {
+    character.defaultSettings = {
+      maxResponseTokens: Number.isFinite(Number(settings.maxResponseTokens))
+        ? Math.max(1, Math.round(Number(settings.maxResponseTokens)))
+        : existing?.defaultSettings?.maxResponseTokens,
+      temperature: Number.isFinite(Number(settings.temperature))
+        ? Math.min(2, Math.max(0, Number(settings.temperature)))
+        : existing?.defaultSettings?.temperature,
+      contextWindow: Number.isFinite(Number(settings.contextWindow))
+        ? Math.max(1, Math.round(Number(settings.contextWindow)))
+        : existing?.defaultSettings?.contextWindow
+    }
+  }
+
+  return character
+}
+
+const interpolatePrompt = (template: string, character: Character) => {
+  const values: Record<string, string> = {
+    name: character.name || '',
+    role: character.role || '',
+    company: character.company || '',
+    personality: character.personality || '',
+    scenario: character.scenario || '',
+    goal: character.goal || '',
+    language: character.language || '',
+    background: character.background || ''
+  }
+
+  return template.replace(/\{\{\s*(\w+)\s*\}\}/g, (match, key) => values[key] ?? match)
+}
+
+const getSystemPrompt = (character?: Character) => {
+  if (!character) return 'You are a helpful conversation partner.'
+  if (character.systemPromptTemplate?.trim()) {
+    return interpolatePrompt(character.systemPromptTemplate, character)
+  }
+
+  return [
+    `You are ${character.name}.`,
+    character.role ? `Role: ${character.role}.` : '',
+    character.company ? `Company: ${character.company}.` : '',
+    character.personality ? `Personality: ${character.personality}.` : '',
+    character.background ? `Background: ${character.background}.` : '',
+    character.scenario ? `Scenario: ${character.scenario}.` : '',
+    character.goal ? `Goal: ${character.goal}.` : '',
+    character.language ? `Language: ${character.language}.` : '',
+    'Stay in character and ask useful follow-up questions.'
+  ].filter(Boolean).join('\n')
+}
+
 const getStarterMessage = (character?: Character) => {
   if (character?.id === 'c2') {
     return 'Hi. First, I will correct your English and programmer mistakes, then I will help you practice naturally. Start by telling me about your current project.'
@@ -88,6 +188,34 @@ const clearChatHistory = (userId: string, characterId: string) => {
 }
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok' }))
+
+app.get('/api/characters', (_req, res) => {
+  res.json({ characters })
+})
+
+app.post('/api/characters', (req, res) => {
+  const character = characterFromPayload(req.body || {})
+  if (!character.name) return res.status(400).json({ error: 'name is required' })
+
+  const created = syncCharacter(character)
+  return res.status(201).json({ character: created })
+})
+
+app.put('/api/characters/:id', (req, res) => {
+  const id = req.params.id
+  const payload = req.body || {}
+
+  if (!id) return res.status(400).json({ error: 'id required' })
+  const existing = characters.find(character => character.id === id)
+  if (!existing) return res.status(404).json({ error: 'character not found' })
+
+  const nextCharacter = characterFromPayload(payload, existing)
+  if (!nextCharacter.name) return res.status(400).json({ error: 'name is required' })
+
+  const updated = syncCharacter(nextCharacter)
+
+  return res.json({ character: updated })
+})
 
 // list conversations for a user
 app.get('/api/conversations', (req, res) => {
@@ -198,8 +326,10 @@ app.post('/api/chat', async (req, res) => {
   persistAll()
 
   // call upstream AI (DeepSeek) using previous simple prompt
-  const systemPrompt = `You are ${character?.name || 'an interviewer'}. Role: ${character?.role || ''}. Personality: ${character?.personality || ''}.\nRules: speak English, ask follow-ups.`
-  const recent = messages.filter(m => m.conversationId === convo!.id).slice(-8)
+  const storedCharacter = characters.find(item => item.id === character?.id) || character
+  const systemPrompt = getSystemPrompt(storedCharacter)
+  const contextWindow = storedCharacter?.defaultSettings?.contextWindow || 8
+  const recent = messages.filter(m => m.conversationId === convo!.id).slice(-contextWindow)
   const convoText = recent.map(m => `${m.senderRole === 'user' ? 'Candidate' : 'Interviewer'}: ${m.content}`).join('\n')
   const finalPrompt = [systemPrompt, convoText, `Candidate: ${message}`].join('\n\n')
 
@@ -242,7 +372,8 @@ app.post('/api/chat', async (req, res) => {
           { role: 'system', content: systemPrompt },
           { role: 'user', content: finalPrompt }
         ],
-        max_tokens: 600,
+        max_tokens: storedCharacter?.defaultSettings?.maxResponseTokens || 600,
+        temperature: storedCharacter?.defaultSettings?.temperature ?? 0.7,
         stream: false
       })
     })

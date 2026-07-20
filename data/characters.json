@@ -24,5 +24,25 @@
     "language": "English only",
     "createdAt": "2026-07-20T00:00:00.000Z",
     "updatedAt": "2026-07-20T00:00:00.000Z"
+  },
+  {
+    "id": "f521d4fa-d9fb-4677-b1af-beb8ff888086",
+    "name": "麻辣佬",
+    "createdAt": "2026-07-20T09:39:19.488Z",
+    "updatedAt": "2026-07-20T09:39:19.488Z",
+    "avatar": "",
+    "role": "",
+    "company": "",
+    "personality": "",
+    "scenario": "",
+    "goal": "",
+    "language": "Cantonese",
+    "background": "",
+    "systemPromptTemplate": "",
+    "defaultSettings": {
+      "maxResponseTokens": 600,
+      "temperature": 0.7,
+      "contextWindow": 8
+    }
   }
 ]
