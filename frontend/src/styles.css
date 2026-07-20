@@ -24,21 +24,123 @@ button,textarea{font:inherit}
 
 .contacts-header{
   display:flex;
-  justify-content:space-between;
   align-items:center;
+  gap:12px;
   padding:18px 18px 14px;
+  position:relative;
 }
 
-.app-title{font-weight:700;font-size:20px;letter-spacing:-0.02em}
-.app-subtitle{font-size:12px;color:#6b7280;margin-top:2px}
-.me-dot{
-  background:#1aad19;
-  color:#fff;
-  font-size:12px;
-  font-weight:700;
-  padding:7px 10px;
-  border-radius:999px;
+.wechat-search{
+  flex:1;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  height:56px;
+  padding:0 16px;
+  background:#f5f6f8;
+  border-radius:16px;
+  border:1px solid rgba(15,23,42,0.06);
 }
+.wechat-search-icon{
+  font-size:22px;
+  line-height:1;
+  color:#909399;
+  transform:translateY(-1px);
+}
+.wechat-search input{
+  width:100%;
+  border:0;
+  outline:none;
+  background:transparent;
+  font-size:18px;
+  color:#111827;
+}
+.wechat-search input::placeholder{color:#a0a4aa}
+
+.add-menu-wrap{
+  position:relative;
+  flex:0 0 auto;
+}
+
+.wechat-add-button{
+  width:56px;
+  height:56px;
+  border-radius:28px;
+  border:2px solid #555;
+  background:#fff;
+  color:#111827;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  cursor:pointer;
+  box-shadow:0 2px 4px rgba(15,23,42,0.06);
+}
+.wechat-add-button .plus{
+  font-size:28px;
+  line-height:1;
+  margin-top:-2px;
+}
+.wechat-add-button.open{background:#f7f7f7}
+
+.drawer-backdrop{
+  position:fixed;
+  inset:0;
+  background:transparent;
+  border:0;
+  padding:0;
+  margin:0;
+}
+
+.wechat-drawer{
+  position:absolute;
+  right:0;
+  top:68px;
+  width:360px;
+  background:#fff;
+  border-radius:18px;
+  box-shadow:0 18px 38px rgba(15,23,42,0.18);
+  border:1px solid rgba(15,23,42,0.08);
+  z-index:10;
+  overflow:hidden;
+}
+.wechat-drawer::before{
+  content:'';
+  position:absolute;
+  top:-9px;
+  right:28px;
+  width:18px;
+  height:18px;
+  background:#fff;
+  border-left:1px solid rgba(15,23,42,0.08);
+  border-top:1px solid rgba(15,23,42,0.08);
+  transform:rotate(45deg);
+}
+.drawer-item{
+  width:100%;
+  display:flex;
+  align-items:center;
+  gap:18px;
+  border:0;
+  background:transparent;
+  padding:18px 22px;
+  font-size:18px;
+  color:#111827;
+  text-align:left;
+  cursor:pointer;
+}
+.drawer-item:hover{background:#f7f8fa}
+.drawer-item + .drawer-item{border-top:1px solid #f1f1f1}
+.drawer-icon{
+  width:28px;
+  text-align:center;
+  font-size:22px;
+  color:#2f3133;
+  flex:0 0 auto;
+}
+.drawer-item.danger{color:#d14343}
+.drawer-item.danger .drawer-icon{color:#d14343}
+
+.app-title,.app-subtitle,.me-dot{display:none}
 
 .contacts-list{padding:6px 8px 12px;overflow:auto}
 .contact-item{
@@ -86,7 +188,7 @@ button,textarea{font:inherit}
 .top-bar .back{display:none}
 .title .name{font-weight:700;font-size:18px}
 .title .status{font-size:12px;color:#6b7280;margin-top:2px}
-
+.clear-history{display:none}
 .character-card{display:none}
 
 .chat-window{
