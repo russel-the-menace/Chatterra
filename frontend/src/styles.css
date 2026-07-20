@@ -4,12 +4,13 @@
   background:#e9edf2;
 }
 *{box-sizing:border-box}
-body,html,#root{height:100%;margin:0;background:#e9edf2}
+body,html,#root{height:100%;margin:0;background:#e9edf2;overflow:hidden;overscroll-behavior:none}
 button,textarea,input{font:inherit}
 body.modal-open{overflow:hidden}
 
 .chat-shell{
   height:100vh;
+  height:100dvh;
   overflow:hidden;
   display:grid;
   grid-template-columns: 320px minmax(0, 1fr);
@@ -22,6 +23,8 @@ body.modal-open{overflow:hidden}
   display:flex;
   flex-direction:column;
   min-width:0;
+  min-height:0;
+  overflow:hidden;
 }
 
 .contacts-header{
@@ -144,7 +147,7 @@ body.modal-open{overflow:hidden}
 
 .app-title,.app-subtitle,.me-dot{display:none}
 
-.contacts-list{padding:6px 8px 12px;overflow:auto}
+.contacts-list{flex:1;min-height:0;padding:6px 8px 12px;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain}
 .contact-item{
   width:100%;
   display:flex;
@@ -202,6 +205,7 @@ body.modal-open{overflow:hidden}
 }
 
 .top-bar{
+  flex:0 0 auto;
   display:flex;
   align-items:center;
   justify-content:space-between;
@@ -254,6 +258,7 @@ body.modal-open{overflow:hidden}
   padding:24px 22px 18px;
   overflow-y:auto;
   overflow-x:hidden;
+  overscroll-behavior:contain;
   background:linear-gradient(180deg, rgba(233,237,242,0.25) 0%, rgba(233,237,242,0.45) 100%),
     radial-gradient(circle at top left, rgba(26,173,25,0.06), transparent 28%),
     radial-gradient(circle at bottom right, rgba(26,173,25,0.04), transparent 24%);
@@ -313,26 +318,27 @@ body.modal-open{overflow:hidden}
 .input-box textarea{
   flex:1;
   min-width:0;
-  min-height:54px;
+  height:48px;
+  min-height:48px;
   max-height:120px;
-  border-radius:16px;
-  padding:14px 16px;
+  border-radius:14px;
+  padding:11px 14px;
   border:1px solid rgba(15,23,42,0.12);
   resize:none;
   outline:none;
   background:#fff;
 }
 .input-box textarea:focus{border-color:#1aad19;box-shadow:0 0 0 3px rgba(26,173,25,0.14)}
-.input-actions{display:flex;align-items:flex-end;gap:8px;flex:0 0 auto;height:54px}
+.input-actions{display:flex;align-items:flex-end;gap:8px;flex:0 0 auto;height:48px}
 .voice-button{
   position:relative;
-  width:54px;
-  height:54px;
+  width:48px;
+  height:48px;
   display:flex;
   align-items:center;
   justify-content:center;
   border:1px solid rgba(15,23,42,0.14);
-  border-radius:16px;
+  border-radius:14px;
   background:#fff;
   color:#4b5563;
   cursor:pointer;
@@ -379,9 +385,9 @@ body.modal-open{overflow:hidden}
   background:#1aad19;
   color:white;
   border:0;
-  height:54px;
-  min-width:78px;
-  padding:0 16px;
+  height:48px;
+  min-width:74px;
+  padding:0 14px;
   border-radius:14px;
   display:inline-flex;
   align-items:center;
@@ -671,9 +677,10 @@ body.modal-open{overflow:hidden}
   .top-bar{padding:14px 14px 12px;gap:10px;flex-wrap:wrap}
   .top-bar-identity{flex:1 1 150px}
   .input-compose-row{gap:8px}
-  .input-actions{gap:6px;height:48px}
-  .voice-button{width:48px;height:48px;border-radius:14px}
-  .input-box .send{height:48px;min-width:72px;padding:0 12px;border-radius:14px}
+  .input-box textarea{height:44px;min-height:44px;padding:9px 12px;border-radius:13px}
+  .input-actions{gap:6px;height:44px}
+  .voice-button{width:44px;height:44px;border-radius:13px}
+  .input-box .send{height:44px;min-width:68px;padding:0 11px;border-radius:13px}
   .character-modal-backdrop{align-items:flex-end;padding:0}
   .character-modal{width:100%;max-height:94vh;border-radius:8px 8px 0 0}
   .character-modal-header{padding:16px 18px}

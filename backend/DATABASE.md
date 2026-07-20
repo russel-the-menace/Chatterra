@@ -52,9 +52,10 @@ erDiagram
 - `memory_evidence`: message/event provenance for semantic memory records.
 - `decision_records`: selected action, mode, reason codes, and due time.
 - `inference_records`: route decision, policy version, response style, selected context,
-  and completion status for every direct/model/tool inference path.
+  structured inference diagnostics, and completion status for every direct/model/tool
+  inference path.
 - `generation_records`: provider-specific model profile, parameters, selected context
-  IDs, and latency for actual model calls.
+  IDs, diagnostics, and latency for actual model calls.
 - `user_learning_profiles`: user-owned correction policy and proficiency state.
 - `schema_migrations`: applied SQL migration versions.
 
@@ -109,6 +110,18 @@ orchestrator also suppresses retrieval when it is disabled.
 Inference parameters are internal. `temperature`, `top_p`, `max_response_tokens`, and
 context message selection are derived by `Inference Orchestrator`; they are not accepted
 from character update payloads and are not returned by the character API.
+
+Inference diagnostics are deliberately metadata-only. Each chat request emits structured
+JSON log lines with a `traceId` and records stages such as plan construction, provider
+response parsing, output validation, fallback selection, and persistence. It does not
+store the API key, full prompt, or raw provider response. Query a recent trace with:
+
+```sql
+SELECT created_at, provider, model, status, diagnostics
+FROM inference_records
+ORDER BY created_at DESC
+LIMIT 20;
+```
 
 The `mode` columns on character instances, decisions, inferences, and generations are
 internal policy labels derived from the character definition. The chat API ignores a

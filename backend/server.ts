@@ -10,9 +10,13 @@ import {
   resolveCharacterMode,
   resetBehaviorState
 } from './behavior'
-import { buildInferencePlan, postProcessInferenceOutput } from './inference-orchestrator'
+import {
+  buildInferencePlan,
+  diagnoseInferenceOutput
+} from './inference-orchestrator'
 import { generateModelResponse, ModelGatewayError } from './model-gateway'
 import { resolveResponseLanguagePolicy, starterMessageForPolicy } from './language-policy'
+import { createInferenceTrace } from './inference-logger'
 import {
   clearChatHistory,
   createCharacter,
@@ -210,10 +214,24 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
   const normalizedUserId = String(userId)
   const normalizedMessage = String(message)
   const voiceMetadata = voiceMetadataFromPayload(req.body?.voice)
+  const requestId = newId()
+  const trace = createInferenceTrace(requestId)
+  trace.mark('request_received', 'started', {
+    userId: normalizedUserId,
+    characterId: String(character.id),
+    conversationId: conversationId ? String(conversationId) : null,
+    messageLength: normalizedMessage.length,
+    hasVoiceMetadata: Boolean(voiceMetadata)
+  })
 
   const storedCharacter = await getCharacter(String(character.id))
   if (!storedCharacter) return res.status(400).json({ error: 'character not found' })
   const mode = resolveCharacterMode(storedCharacter)
+  trace.mark('character_loaded', 'completed', {
+    characterId: storedCharacter.id,
+    language: storedCharacter.language || null,
+    mode
+  })
 
   let conversation = conversationId
     ? await getConversation(String(conversationId))
@@ -246,6 +264,7 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
       createdAt: now
     }
     conversation = await createConversationWithStarter(nextConversation, starterMessage)
+    trace.mark('conversation_created', 'completed', { conversationId: conversation.id })
   }
 
   const userMessage: Message = {
@@ -267,6 +286,11 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
     mode,
     now: new Date(userMessage.createdAt)
   })
+  trace.mark('interaction_prepared', 'completed', {
+    mode: preparation.mode,
+    memoryEnabled: preparation.memoryEnabled,
+    decisionId: preparation.decisionId
+  })
   const inference = await buildInferencePlan({
     userId: normalizedUserId,
     character: storedCharacter,
@@ -277,6 +301,17 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
     snapshot: preparation.snapshot,
     memoryEnabled: preparation.memoryEnabled
   })
+  trace.mark('inference_plan_built', 'completed', {
+    inferenceId: inference.id,
+    route: inference.route,
+    provider: inference.model?.provider || null,
+    model: inference.model?.model || null,
+    responseLanguage: inference.responseLanguage.code,
+    estimatedContextTokens: inference.contextManifest.estimatedTokens,
+    selectedMessages: inference.contextManifest.messages.length,
+    selectedMemories: inference.contextManifest.memories.length,
+    selectedEvents: inference.contextManifest.events.length
+  })
 
   let rawReply = inference.directResponse || ''
   let generation: {
@@ -285,12 +320,13 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
     profile?: string
     parameters?: Record<string, any>
     contextManifest?: Record<string, any>
+    diagnostics?: Record<string, any>
     latencyMs?: number
   } | undefined
   const inferenceStartedAt = Date.now()
   try {
     if (inference.route === 'model') {
-      const result = await generateModelResponse(inference, storedCharacter)
+      const result = await generateModelResponse(inference, storedCharacter, trace)
       rawReply = result.content
       generation = {
         provider: result.provider,
@@ -298,10 +334,17 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
         profile: inference.model?.profile,
         parameters: inference.parameters,
         contextManifest: inference.contextManifest,
+        diagnostics: result.diagnostics,
         latencyMs: result.latencyMs
       }
+    } else {
+      trace.mark('provider_request', 'skipped', { route: inference.route })
     }
   } catch (error) {
+    trace.mark('request_failed', 'failed', {
+      stage: 'provider_request',
+      error: error instanceof ModelGatewayError ? error.message : error instanceof Error ? error.name : 'unknown_error'
+    })
     try {
       await recordInferenceFailure({
         userId: normalizedUserId,
@@ -311,6 +354,7 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
         triggerEventId: preparation.triggerEventId,
         mode,
         inference,
+        diagnostics: trace.snapshot(),
         latencyMs: Date.now() - inferenceStartedAt
       })
     } catch (auditError) {
@@ -322,7 +366,15 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
     throw error
   }
 
-  const reply = postProcessInferenceOutput(inference, rawReply)
+  const outputDiagnostics = diagnoseInferenceOutput(inference, rawReply)
+  const { reply, ...traceOutputDiagnostics } = outputDiagnostics
+  trace.mark('output_processed', 'completed', traceOutputDiagnostics)
+  if (outputDiagnostics.usedFallback) {
+    trace.mark('fallback_selected', 'completed', {
+      reason: outputDiagnostics.fallbackReason,
+      replyLength: reply.length
+    })
+  }
   const assistantMessage: Message = {
     id: newId(),
     conversationId: conversation.id,
@@ -331,19 +383,33 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
     content: reply,
     createdAt: new Date().toISOString()
   }
-  await recordAssistantResponse({
-    userId: normalizedUserId,
-    character: storedCharacter,
-    conversationId: conversation.id,
+  trace.mark('response_ready_for_persistence', 'completed', {
     messageId: assistantMessage.id,
-    decisionId: preparation.decisionId,
-    triggerEventId: preparation.triggerEventId,
-    mode,
-    content: reply,
-    inference,
-    generation,
-    now: new Date(assistantMessage.createdAt)
+    replyLength: reply.length
   })
+  try {
+    await recordAssistantResponse({
+      userId: normalizedUserId,
+      character: storedCharacter,
+      conversationId: conversation.id,
+      messageId: assistantMessage.id,
+      decisionId: preparation.decisionId,
+      triggerEventId: preparation.triggerEventId,
+      mode,
+      content: reply,
+      inference,
+      generation,
+      diagnostics: trace.snapshot(),
+      now: new Date(assistantMessage.createdAt)
+    })
+    trace.mark('request_completed', 'completed', { messageId: assistantMessage.id })
+  } catch (error) {
+    trace.mark('request_failed', 'failed', {
+      stage: 'response_persistence',
+      error: error instanceof Error ? error.name : 'unknown_error'
+    })
+    throw error
+  }
 
   return res.json({
     reply,
@@ -352,7 +418,8 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
       emotion: preparation.snapshot.emotionLabel,
       activity: preparation.snapshot.simulation.currentActivity,
       decision: 'reply_now'
-    }
+    },
+    traceId: trace.traceId
   })
 }))
 

@@ -2,6 +2,7 @@ import { PoolClient } from 'pg'
 import { v4 as uuidv4 } from 'uuid'
 import { query, withTransaction } from './database'
 import type { InferencePlan } from './inference-orchestrator'
+import type { InferenceDiagnostics } from './inference-logger'
 import {
   AffectState,
   BehaviorSnapshot,
@@ -885,6 +886,7 @@ export const recordAssistantResponse = async ({
   content,
   inference,
   generation,
+  diagnostics,
   now = new Date()
 }: {
   userId: string
@@ -902,8 +904,10 @@ export const recordAssistantResponse = async ({
     profile?: string
     parameters?: Record<string, any>
     contextManifest?: Record<string, any>
+    diagnostics?: Record<string, any>
     latencyMs?: number
   }
+  diagnostics?: InferenceDiagnostics
   now?: Date
 }) => {
   return withTransaction(async client => {
@@ -953,10 +957,10 @@ export const recordAssistantResponse = async ({
          id, instance_id, conversation_id, decision_id, trigger_event_id,
          output_message_id, mode, route, reason_codes, policy_version,
          provider, model, profile, parameters, response_style, context_manifest,
-         status, latency_ms, completed_at
+         diagnostics, status, latency_ms, completed_at
        ) VALUES (
          $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13,
-         $14::jsonb, $15::jsonb, $16::jsonb, 'completed', $17, $18
+         $14::jsonb, $15::jsonb, $16::jsonb, $17::jsonb, 'completed', $18, $19
        )`,
       [
         inference.id,
@@ -975,6 +979,7 @@ export const recordAssistantResponse = async ({
         JSON.stringify(inference.parameters),
         JSON.stringify(inference.responseStyle),
         JSON.stringify({ assistantEventId: event.id, ...inference.contextManifest }),
+        JSON.stringify(diagnostics || {}),
         latencyMs,
         now.toISOString()
       ]
@@ -983,8 +988,8 @@ export const recordAssistantResponse = async ({
       await client.query(
         `INSERT INTO generation_records (
            id, instance_id, message_id, decision_id, inference_id, mode, provider, model,
-           profile, parameters, context_manifest, latency_ms
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12)`,
+           profile, parameters, context_manifest, diagnostics, latency_ms
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12::jsonb, $13)`,
         [
           uuidv4(),
           instance.id,
@@ -997,6 +1002,7 @@ export const recordAssistantResponse = async ({
           generation.profile || inference.model?.profile || 'default',
           JSON.stringify(generation.parameters || inference.parameters),
           JSON.stringify(generation.contextManifest || inference.contextManifest),
+          JSON.stringify(generation.diagnostics || {}),
           latencyMs
         ]
       )
@@ -1013,6 +1019,7 @@ export const recordInferenceFailure = async ({
   triggerEventId,
   mode = 'practice',
   inference,
+  diagnostics,
   latencyMs = 0
 }: {
   userId: string
@@ -1022,6 +1029,7 @@ export const recordInferenceFailure = async ({
   triggerEventId?: string
   mode?: InteractionMode
   inference: InferencePlan
+  diagnostics?: InferenceDiagnostics
   latencyMs?: number
 }) => {
   return withTransaction(async client => {
@@ -1031,10 +1039,10 @@ export const recordInferenceFailure = async ({
          id, instance_id, conversation_id, decision_id, trigger_event_id,
          output_message_id, mode, route, reason_codes, policy_version,
          provider, model, profile, parameters, response_style, context_manifest,
-         status, latency_ms, completed_at
+         diagnostics, status, latency_ms, completed_at
        ) VALUES (
          $1, $2, $3, $4, $5, NULL, $6, $7, $8::jsonb, $9, $10, $11, $12,
-         $13::jsonb, $14::jsonb, $15::jsonb, 'failed', $16, $17
+         $13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb, 'failed', $17, $18
        )`,
       [
         inference.id,
@@ -1052,6 +1060,7 @@ export const recordInferenceFailure = async ({
         JSON.stringify(inference.parameters),
         JSON.stringify(inference.responseStyle),
         JSON.stringify(inference.contextManifest),
+        JSON.stringify(diagnostics || {}),
         Math.max(0, Math.round(latencyMs)),
         new Date().toISOString()
       ]

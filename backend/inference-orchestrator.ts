@@ -764,22 +764,50 @@ export const buildInferencePlan = async (input: OrchestrationInput): Promise<Inf
   }
 }
 
-export const postProcessInferenceOutput = (plan: InferencePlan, output: string) => {
-  const normalized = normalizeAssistantSpeech(output)
-  if (normalized && (plan.route === 'direct' || isResponseLanguageCompliant(normalized, plan.responseLanguage))) {
-    return normalized
+export type InferenceOutputDiagnostics = {
+  rawLength: number
+  normalizedLength: number
+  sanitized: boolean
+  languageCompliant: boolean
+  accepted: boolean
+  usedFallback: boolean
+  fallbackReason?: 'empty_provider_output' | 'format_violation' | 'language_violation'
+  reply: string
+}
+
+export const diagnoseInferenceOutput = (
+  plan: InferencePlan,
+  output: string
+): InferenceOutputDiagnostics => {
+  const raw = typeof output === 'string' ? output : ''
+  const trimmed = raw.trim()
+  const normalized = normalizeAssistantSpeech(raw)
+  const languageCompliant = plan.route === 'direct'
+    || isResponseLanguageCompliant(normalized, plan.responseLanguage)
+
+  if (normalized && languageCompliant) {
+    return {
+      rawLength: raw.length,
+      normalizedLength: normalized.length,
+      sanitized: trimmed !== normalized,
+      languageCompliant: true,
+      accepted: true,
+      usedFallback: false,
+      reply: normalized
+    }
   }
+
   const incoming = [...plan.messages].reverse().find(message => message.role === 'user')?.content || ''
+  let reply: string
   if (plan.responseLanguage.code !== 'english') {
-    return fallbackMessageForPolicy(plan.responseLanguage, plan.responseStyle.turnPriority, {
+    reply = fallbackMessageForPolicy(plan.responseLanguage, plan.responseStyle.turnPriority, {
       incoming,
       recentAssistantReplies: plan.messages
         .filter(message => message.role === 'assistant')
         .map(message => message.content)
         .slice(-5)
     })
-  }
-  if (plan.responseStyle.turnPriority === 'emotional_support') {
+  } else if (plan.responseStyle.turnPriority === 'emotional_support') {
     const lossMatch = incoming.match(/\bmy\s+([a-z][a-z '-]{1,40}?)\s+(?:(?:has|had)\s+)?(?:(?:passed|pass)\s+away|died)\b/i)
     const lossAcknowledgement = lossMatch?.[1]
       ? `I'm sorry about your ${lossMatch[1].trim()}.`
@@ -789,14 +817,34 @@ export const postProcessInferenceOutput = (plan: InferencePlan, output: string) 
     const repair = conflictSignal(incoming) > 0
       ? "I'm sorry. I focused on the wrong thing when you were telling me something painful. That was insensitive."
       : ''
-    return [
+    reply = [
       repair,
       lossAcknowledgement,
       repair ? 'You did not need a grammar lesson in that moment.' : '',
       'I am listening if you want to tell me more.'
     ].filter(Boolean).join(' ')
+  } else {
+    reply = plan.mode === 'practice'
+      ? 'I could not form a useful answer. Could you try that once more?'
+      : 'I am here. Could you say that once more?'
   }
-  return plan.mode === 'practice'
-    ? 'I could not form a useful answer. Could you try that once more?'
-    : 'I am here. Could you say that once more?'
+
+  return {
+    rawLength: raw.length,
+    normalizedLength: normalized.length,
+    sanitized: trimmed !== normalized,
+    languageCompliant,
+    accepted: false,
+    usedFallback: true,
+    fallbackReason: !trimmed
+      ? 'empty_provider_output'
+      : !normalized
+        ? 'format_violation'
+        : 'language_violation',
+    reply
+  }
+}
+
+export const postProcessInferenceOutput = (plan: InferencePlan, output: string) => {
+  return diagnoseInferenceOutput(plan, output).reply
 }

@@ -1,11 +1,24 @@
 import { Character } from './types'
 import { InferencePlan } from './inference-orchestrator'
+import { InferenceTrace } from './inference-logger'
+
+export type ModelGatewayDiagnostics = {
+  transport: 'mock' | 'http'
+  httpStatus?: number
+  responseKeys?: string[]
+  choiceCount?: number
+  finishReason?: string | null
+  contentType?: string
+  providerRequestId?: string
+  extractedTextLength: number
+}
 
 export type ModelGatewayResult = {
   content: string
   provider: string
   model: string
   latencyMs: number
+  diagnostics: ModelGatewayDiagnostics
 }
 
 export class ModelGatewayError extends Error {
@@ -51,13 +64,20 @@ const latestUserMessage = (plan: InferencePlan) => {
 
 export const generateModelResponse = async (
   plan: InferencePlan,
-  character: Character
+  character: Character,
+  trace?: InferenceTrace
 ): Promise<ModelGatewayResult> => {
   if (plan.route !== 'model' || !plan.model) {
     throw new ModelGatewayError('A model route is required', 500)
   }
 
   const startedAt = Date.now()
+  trace?.mark('provider_request_started', 'started', {
+    provider: plan.model.provider,
+    model: plan.model.model,
+    messageCount: plan.messages.length,
+    maxResponseTokens: plan.parameters.maxResponseTokens
+  })
   if (plan.model.provider === 'mock') {
     const incoming = latestUserMessage(plan)
     const grief = /\b(?:passed|pass)\s+away\b|\b(?:died|death|funeral|grieving)\b/i.test(incoming)
@@ -78,11 +98,17 @@ export const generateModelResponse = async (
         : plan.mode === 'practice'
           ? `First, a small correction: a more natural way to say that is: "${incoming}" Now tell me a little more.`
           : `(mock) ${character.name}: I heard you. Can you expand on that?`
+    const diagnostics: ModelGatewayDiagnostics = {
+      transport: 'mock',
+      extractedTextLength: content.length
+    }
+    trace?.mark('provider_response_parsed', 'completed', diagnostics)
     return {
       content,
       provider: 'mock',
       model: plan.model.model,
-      latencyMs: Date.now() - startedAt
+      latencyMs: Date.now() - startedAt,
+      diagnostics
     }
   }
 
@@ -109,6 +135,9 @@ export const generateModelResponse = async (
     })
   } catch (error) {
     console.error('Model provider request failed', error)
+    trace?.mark('provider_request', 'failed', {
+      error: error instanceof Error ? error.name : 'unknown_error'
+    })
     throw new ModelGatewayError('AI provider is unreachable')
   }
 
@@ -121,22 +150,37 @@ export const generateModelResponse = async (
 
   if (!response.ok) {
     console.error('Model provider returned error', response.status, data)
+    trace?.mark('provider_response', 'failed', {
+      httpStatus: response.status,
+      responseKeys: data && typeof data === 'object' ? Object.keys(data).slice(0, 12) : []
+    })
     throw new ModelGatewayError('Upstream AI returned an error')
   }
 
   const content = extractText(data)
-  if (!content.trim()) {
-    console.warn('Model provider returned no assistant text', {
-      model: plan.model.model,
-      finishReason: data?.choices?.[0]?.finish_reason || null,
-      responseKeys: data && typeof data === 'object' ? Object.keys(data).slice(0, 12) : []
-    })
+  const firstChoice = data?.choices?.[0]
+  const diagnostics: ModelGatewayDiagnostics = {
+    transport: 'http',
+    httpStatus: response.status,
+    responseKeys: data && typeof data === 'object' ? Object.keys(data).slice(0, 12) : [],
+    choiceCount: Array.isArray(data?.choices) ? data.choices.length : 0,
+    finishReason: firstChoice?.finish_reason ?? null,
+    contentType: firstChoice?.message?.content == null
+      ? firstChoice?.text == null ? 'missing' : typeof firstChoice.text
+      : Array.isArray(firstChoice.message.content) ? 'array' : typeof firstChoice.message.content,
+    providerRequestId: typeof data?.id === 'string' ? data.id.slice(0, 120) : undefined,
+    extractedTextLength: content.length
   }
+  if (!content.trim()) {
+    console.warn('Model provider returned no assistant text', diagnostics)
+  }
+  trace?.mark('provider_response_parsed', 'completed', diagnostics)
 
   return {
     content,
     provider: plan.model.provider,
     model: plan.model.model,
-    latencyMs: Date.now() - startedAt
+    latencyMs: Date.now() - startedAt,
+    diagnostics
   }
 }

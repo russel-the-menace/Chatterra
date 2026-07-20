@@ -48,6 +48,11 @@ response length, model routing, and fixed sampling defaults. It can answer a rea
 such as `👍` through a direct route without calling a model. Model settings are not
 part of the character API.
 
+Every chat request emits structured inference trace logs and returns a `traceId`. The
+same metadata is stored in `inference_records.diagnostics` and
+`generation_records.diagnostics`, including provider status, finish reason, extracted
+text length, output validation, and fallback reason. Prompts and secrets are not logged.
+
 `Character.language` is an output contract. A single-language value such as
 `Cantonese` or `Cantonese only` is treated as strict: starter messages, model prompts,
 mock responses, and deterministic fallbacks use that language. Strict model output is
