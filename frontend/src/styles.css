@@ -19,6 +19,13 @@ body,html,#root{height:100%;margin:0;background:#fff}
 .input-box textarea{flex:1;height:44px;border-radius:8px;padding:8px;border:1px solid #ddd;resize:none}
 .input-box .send{background:#007bff;color:white;border:0;padding:10px 14px;border-radius:8px}
 
+.typing{ display:inline-flex; align-items:center; gap:6px }
+.typing .dot{ width:8px; height:8px; background:#999; border-radius:50%; display:inline-block; opacity:0.9 }
+.typing .dot:nth-child(1){ animation: blink 1s infinite 0s }
+.typing .dot:nth-child(2){ animation: blink 1s infinite 0.2s }
+.typing .dot:nth-child(3){ animation: blink 1s infinite 0.4s }
+@keyframes blink{ 0%{opacity:0.2}50%{opacity:1}100%{opacity:0.2} }
+
 @media(min-width:700px){
   .chat-page{height:700px;margin-top:24px}
 }

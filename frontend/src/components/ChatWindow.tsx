@@ -1,7 +1,7 @@
 import React, {useEffect, useRef} from 'react'
 import MessageBubble from './MessageBubble'
 
-type Message = { id: number; sender: 'ai'|'user'; text: string }
+type Message = { id: number; sender: 'ai'|'user'; text: string; loading?: boolean }
 
 export default function ChatWindow({messages}:{messages:Message[]}): JSX.Element{
   const ref = useRef<HTMLDivElement | null>(null)
