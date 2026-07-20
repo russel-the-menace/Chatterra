@@ -131,6 +131,24 @@ app.post('/api/chat', async (req, res) => {
   const apiKey = process.env.DEEPSEEK_API_KEY
   if (!apiKey) return res.status(500).json({ error: 'missing API key' })
 
+  // Test shortcut: when running with DEEPSEEK_API_KEY=test, return a canned reply
+    if (apiKey === 'test') {
+    const canned = `(mock) ${character?.name || 'Interviewer'}: Thanks — I heard: "${message}". Can you expand on that?`
+    const aiMsg: Message = {
+      id: uuidv4(),
+      conversationId: convo.id,
+      senderRole: 'assistant',
+      senderId: character?.id,
+      content: canned,
+      createdAt: new Date().toISOString()
+    }
+    messages.push(aiMsg)
+    convo.lastMessageAt = aiMsg.createdAt
+    persistAll()
+    extractMemoryFromText(userId, convo.id, message, userMsg.id)
+    return res.json({ reply: canned, conversationId: convo.id })
+  }
+
   try {
     const resp = await fetch(deepseekUrl, {
       method: 'POST',
@@ -175,7 +193,7 @@ app.post('/api/chat', async (req, res) => {
     // quick memory extraction from user message (MVP rule-based)
     extractMemoryFromText(userId, convo.id, message, userMsg.id)
 
-    return res.json({ reply })
+    return res.json({ reply, conversationId: convo.id })
   } catch (err: any) {
     console.error('AI request failed', err)
     return res.status(500).json({ error: 'AI request failed' })

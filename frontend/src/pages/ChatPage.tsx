@@ -8,14 +8,14 @@ type Message = { id: number; sender: 'ai' | 'user'; text: string; loading?: bool
 
 export default function ChatPage(): JSX.Element{
   const [messages, setMessages] = useState<Message[]>([])
-  const [userId, setUserId] = useState<string | null>(null)
+  const [userId, setUserIdentifier] = useState<string | null>(null)
   const [conversationId, setConversationId] = useState<string | null>(null)
 
   useEffect(()=>{
     // get or create a persistent userId
     let uid = localStorage.getItem('chatterra_userId')
-    if (!uid) { uid = String(Date.now()); localStorage.setItem('chatterra_userId', uid) }
-    setUserId(uid)
+    if (!uid) { uid = String(Date.now()); localStorage.setItem('chatterra_userId', uid); }
+    setUserIdentifier(uid);
 
     // load conversations for user and latest messages
     (async ()=>{
@@ -26,7 +26,7 @@ export default function ChatPage(): JSX.Element{
         if (cData.conversations && cData.conversations.length>0){
           const conv = cData.conversations[0]
           setConversationId(conv.id)
-          localStorage.setItem('chatterra_conversationId', conv.id)
+          localStorage.setItem('chatterra_conversationId', conv.id);
           const mRes = await fetch(`http://localhost:3000/api/conversations/${conv.id}/messages`)
           const mData = await mRes.json()
           const mapped: Message[] = (mData.messages||[]).map((m:any,idx:number)=>({ id: idx+1, sender: m.senderRole === 'user' ? 'user' : 'ai', text: m.content }))
@@ -37,33 +37,44 @@ export default function ChatPage(): JSX.Element{
         // ignore and fall back to default greeting
       }
       // fallback: initial greeting
-      setMessages([{id:1, sender:'ai', text: `Hello, I'm ${character.name}. Let's start the interview. Tell me briefly about your background.`}])
+      setMessages([{id:1, sender:'ai', text: `Hello, I'm ${character.name}. Let's start the interview. Tell me briefly about your background.`}]);
     })()
   }, [])
 
-  const sendMessage = async (text: string) => {
+  const sendMessage = (text: string) => {
     if(!text) return
     const userMsg: Message = {id: Date.now(), sender: 'user', text}
-    // append user message and a loading indicator for the assistant
     const loadingId = Date.now() + 1
     const loadingMsg: Message = {id: loadingId, sender: 'ai', text: '', loading: true}
-    const updated = [...messages, userMsg, loadingMsg]
-    setMessages(updated)
 
-    try{
-      const res = await fetch('http://localhost:3000/api/chat',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({message:text, history: updated, character, userId, conversationId})
-      })
-      const data = await res.json()
-      const aiMsg: Message = {id: Date.now()+2, sender:'ai', text: data.reply}
-      // replace loading message with real AI message
-      setMessages(prev => prev.map(m => m.id === loadingId ? aiMsg : m))
-    }catch(e){
-      const errMsg: Message = {id: Date.now()+2, sender:'ai', text: 'Sorry, the server is unreachable.'}
-      setMessages(prev => prev.map(m => m.id === loadingId ? errMsg : m))
-    }
+    // use functional update to avoid stale state
+    setMessages(prev => {
+      const updated = [...prev, userMsg, loadingMsg]
+
+      // fire-and-forget async request using the current updated history
+      ;(async () => {
+        try{
+          const res = await fetch('http://localhost:3000/api/chat',{
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({message:text, history: updated, character, userId, conversationId})
+          })
+          const data = await res.json()
+          // persist conversationId if provided
+          if (data.conversationId && !conversationId) {
+            setConversationId(data.conversationId)
+            localStorage.setItem('chatterra_conversationId', data.conversationId)
+          }
+          const aiMsg: Message = {id: Date.now()+2, sender:'ai', text: data.reply}
+          setMessages(prev2 => prev2.map(m => m.id === loadingId ? aiMsg : m))
+        }catch(e){
+          const errMsg: Message = {id: Date.now()+2, sender:'ai', text: 'Sorry, the server is unreachable.'}
+          setMessages(prev2 => prev2.map(m => m.id === loadingId ? errMsg : m))
+        }
+      })()
+
+      return updated
+    })
   }
 
   return (

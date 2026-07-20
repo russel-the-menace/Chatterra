@@ -1,0 +1,16 @@
+[
+  {
+    "id": "a1f7759f-1d50-4913-bec7-64b7468ce75b",
+    "userId": "test-user-1",
+    "originMessageId": "52ec2359-e83a-4932-9419-9482ae6313ff",
+    "type": "important_fact",
+    "content": "I am a software engineer with 5 years experience",
+    "importanceScore": 0.6,
+    "confidence": 0.8,
+    "createdAt": "2026-07-20T01:33:58.960Z",
+    "lastUpdatedAt": "2026-07-20T01:33:58.960Z",
+    "metadata": {
+      "source": "heuristic"
+    }
+  }
+]
