@@ -10,11 +10,6 @@ export type Character = {
   language: string
   background?: string
   systemPromptTemplate?: string
-  defaultSettings?: {
-    maxResponseTokens?: number
-    temperature?: number
-    contextWindow?: number
-  }
   createdAt?: string
   updatedAt?: string
 }

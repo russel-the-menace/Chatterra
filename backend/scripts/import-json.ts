@@ -76,7 +76,10 @@ const run = async () => {
           user.nativeLanguage ?? null,
           JSON.stringify(user.learningGoals || {}),
           JSON.stringify(user.preferences || {}),
-          JSON.stringify(user.consentFlags || {}),
+          JSON.stringify({
+            ...(user.consentFlags || {}),
+            memoryPersonalization: user.consentFlags?.memoryPersonalization !== false
+          }),
           user.createdAt || now,
           user.updatedAt || user.createdAt || now
         ]
@@ -102,10 +105,32 @@ const run = async () => {
           character.language ?? null,
           character.background ?? null,
           character.systemPromptTemplate ?? null,
-          JSON.stringify(character.defaultSettings || {}),
+          JSON.stringify({}),
           character.createdAt || now,
           character.updatedAt || character.createdAt || now
         ]
+      )
+    }
+
+    for (const character of charactersById.values()) {
+      await client.query(
+        `INSERT INTO character_versions (id, character_id, version, definition, created_at)
+         SELECT $1, c.id, COALESCE(c.current_version, 1), jsonb_build_object(
+           'name', c.name,
+           'avatar', COALESCE(c.avatar, ''),
+           'role', COALESCE(c.role, ''),
+           'company', COALESCE(c.company, ''),
+           'personality', COALESCE(c.personality, ''),
+           'scenario', COALESCE(c.scenario, ''),
+           'goal', COALESCE(c.goal, ''),
+           'language', COALESCE(c.language, ''),
+           'background', COALESCE(c.background, ''),
+           'systemPromptTemplate', COALESCE(c.system_prompt_template, '')
+         ), c.updated_at
+         FROM characters c
+         WHERE c.id = $2
+         ON CONFLICT (character_id, version) DO NOTHING`,
+        [`${character.id}:v${character.currentVersion || 1}`, character.id]
       )
     }
 

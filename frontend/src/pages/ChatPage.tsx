@@ -1,13 +1,21 @@
-import React, {useState, useEffect, useMemo} from 'react'
+import React, {useState, useEffect, useMemo, useRef} from 'react'
 import ChatWindow from '../components/ChatWindow'
 import InputBox from '../components/InputBox'
 import seedCharacter, {characters as seedCharacters, Character} from '../data/character'
 
 type Message = { id: string; sender: 'ai' | 'user'; text: string; loading?: boolean }
-type CharacterTextKey = 'name' | 'avatar' | 'role' | 'company' | 'scenario' | 'goal' | 'language' | 'personality' | 'background' | 'systemPromptTemplate'
-type CharacterSettingKey = 'maxResponseTokens' | 'temperature' | 'contextWindow'
+type CharacterTextKey = 'name' | 'role' | 'company' | 'scenario' | 'goal' | 'language' | 'personality' | 'background' | 'systemPromptTemplate'
+type Point = { x: number; y: number }
 
 const makeMessageId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`
+const isImageAvatar = (avatar?: string) => Boolean(avatar && /^(data:image\/|blob:|https?:\/\/|\/)/.test(avatar))
+
+const avatarContent = (character: Pick<Character, 'avatar' | 'name'>) => {
+  if (isImageAvatar(character.avatar)) {
+    return <img src={character.avatar} alt="" />
+  }
+  return <span>{character.avatar || character.name.slice(0, 1) || '?'}</span>
+}
 
 const editableFields: Array<{
   key: CharacterTextKey
@@ -15,7 +23,6 @@ const editableFields: Array<{
   multiline?: boolean
 }> = [
   { key: 'name', label: 'Name' },
-  { key: 'avatar', label: 'Avatar' },
   { key: 'role', label: 'Role' },
   { key: 'company', label: 'Company' },
   { key: 'scenario', label: 'Scenario' },
@@ -25,12 +32,6 @@ const editableFields: Array<{
   { key: 'background', label: 'Background', multiline: true },
   { key: 'systemPromptTemplate', label: 'System Prompt Template', multiline: true }
 ]
-
-const defaultCharacterSettings = {
-  maxResponseTokens: 600,
-  temperature: 0.7,
-  contextWindow: 8
-}
 
 const createCharacterDraft = (): Character => ({
   id: '',
@@ -43,8 +44,7 @@ const createCharacterDraft = (): Character => ({
   language: 'English only',
   personality: '',
   background: '',
-  systemPromptTemplate: '',
-  defaultSettings: { ...defaultCharacterSettings }
+  systemPromptTemplate: ''
 })
 
 export default function ChatPage(): JSX.Element{
@@ -53,12 +53,22 @@ export default function ChatPage(): JSX.Element{
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [characters, setCharacters] = useState<Character[]>(seedCharacters)
   const [selectedCharacter, setSelectedCharacter] = useState<Character>(seedCharacter)
+  const [behaviorStatus, setBehaviorStatus] = useState('Online')
   const [searchText, setSearchText] = useState('')
   const [showAddDrawer, setShowAddDrawer] = useState(false)
   const [showCharacterEditor, setShowCharacterEditor] = useState(false)
   const [editingCharacter, setEditingCharacter] = useState<Character | null>(null)
   const [isSavingCharacter, setIsSavingCharacter] = useState(false)
   const [characterEditorError, setCharacterEditorError] = useState('')
+  const [avatarCropSource, setAvatarCropSource] = useState<string | null>(null)
+  const [avatarCropScale, setAvatarCropScale] = useState(1)
+  const [avatarCropPosition, setAvatarCropPosition] = useState<Point>({ x: 0, y: 0 })
+  const [avatarCropFit, setAvatarCropFit] = useState<'wide' | 'tall'>('tall')
+  const [isDraggingAvatar, setIsDraggingAvatar] = useState(false)
+  const avatarFileInputRef = useRef<HTMLInputElement | null>(null)
+  const avatarCropViewportRef = useRef<HTMLDivElement | null>(null)
+  const avatarCropImageRef = useRef<HTMLImageElement | null>(null)
+  const avatarDragRef = useRef<{ pointerId: number; pointerX: number; pointerY: number; x: number; y: number } | null>(null)
 
   const visibleCharacters = useMemo(() => {
     const query = searchText.trim().toLowerCase()
@@ -68,7 +78,7 @@ export default function ChatPage(): JSX.Element{
 
   const starterMessage = (nextCharacter: Character) => {
     return nextCharacter.id === 'c2'
-      ? 'Hi. First, I will correct your English and programmer mistakes, then I will help you practice naturally. Start by telling me about your current project.'
+      ? 'Hi. I will help you practice English and point out useful mistakes when it helps, while keeping the conversation natural. Tell me about your current project.'
       : `Hello, I'm ${nextCharacter.name}. Let's start the interview. Tell me briefly about your background.`
   }
 
@@ -106,13 +116,7 @@ export default function ChatPage(): JSX.Element{
   }
 
   const openCharacterEditor = (character: Character) => {
-    setEditingCharacter({
-      ...character,
-      defaultSettings: {
-        ...defaultCharacterSettings,
-        ...character.defaultSettings
-      }
-    })
+    setEditingCharacter({ ...character })
     setShowCharacterEditor(true)
     setShowAddDrawer(false)
     setCharacterEditorError('')
@@ -132,11 +136,124 @@ export default function ChatPage(): JSX.Element{
     setCharacterEditorError('')
   }
 
+  const clampAvatarCropPosition = (position: Point, scale = avatarCropScale): Point => {
+    const image = avatarCropImageRef.current
+    const viewport = avatarCropViewportRef.current
+    if (!image || !viewport || !image.naturalWidth || !image.naturalHeight) return position
+
+    const viewportSize = viewport.clientWidth || 320
+    const aspect = image.naturalWidth / image.naturalHeight
+    const baseWidth = aspect >= 1 ? viewportSize * aspect : viewportSize
+    const baseHeight = aspect >= 1 ? viewportSize : viewportSize / aspect
+    const maxX = Math.max(0, (baseWidth * scale - viewportSize) / 2)
+    const maxY = Math.max(0, (baseHeight * scale - viewportSize) / 2)
+
+    return {
+      x: Math.min(maxX, Math.max(-maxX, position.x)),
+      y: Math.min(maxY, Math.max(-maxY, position.y))
+    }
+  }
+
+  const closeAvatarCropper = () => {
+    setAvatarCropSource(null)
+    setAvatarCropScale(1)
+    setAvatarCropPosition({ x: 0, y: 0 })
+    setAvatarCropFit('tall')
+    setIsDraggingAvatar(false)
+    avatarDragRef.current = null
+    if (avatarFileInputRef.current) avatarFileInputRef.current.value = ''
+  }
+
+  const handleAvatarFileSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      setCharacterEditorError('Please choose an image file.')
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onload = () => {
+      setAvatarCropSource(String(reader.result || ''))
+      setAvatarCropScale(1)
+      setAvatarCropPosition({ x: 0, y: 0 })
+      setAvatarCropFit('tall')
+      setCharacterEditorError('')
+    }
+    reader.onerror = () => setCharacterEditorError('Could not read that image.')
+    reader.readAsDataURL(file)
+  }
+
+  const handleAvatarCropScaleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const nextScale = Number(event.target.value)
+    setAvatarCropScale(nextScale)
+    setAvatarCropPosition(prev => clampAvatarCropPosition(prev, nextScale))
+  }
+
+  const handleAvatarCropPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    avatarDragRef.current = {
+      pointerId: event.pointerId,
+      pointerX: event.clientX,
+      pointerY: event.clientY,
+      x: avatarCropPosition.x,
+      y: avatarCropPosition.y
+    }
+    setIsDraggingAvatar(true)
+  }
+
+  const handleAvatarCropPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = avatarDragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+
+    setAvatarCropPosition(clampAvatarCropPosition({
+      x: drag.x + event.clientX - drag.pointerX,
+      y: drag.y + event.clientY - drag.pointerY
+    }))
+  }
+
+  const handleAvatarCropPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = avatarDragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    avatarDragRef.current = null
+    setIsDraggingAvatar(false)
+    event.currentTarget.releasePointerCapture(event.pointerId)
+  }
+
+  const applyAvatarCrop = () => {
+    const image = avatarCropImageRef.current
+    const viewport = avatarCropViewportRef.current
+    if (!image || !viewport || !editingCharacter) return
+
+    const imageRect = image.getBoundingClientRect()
+    const viewportRect = viewport.getBoundingClientRect()
+    const sourceX = (viewportRect.left - imageRect.left) * image.naturalWidth / imageRect.width
+    const sourceY = (viewportRect.top - imageRect.top) * image.naturalHeight / imageRect.height
+    const sourceSize = viewportRect.width * image.naturalWidth / imageRect.width
+    const canvas = document.createElement('canvas')
+    canvas.width = 512
+    canvas.height = 512
+    const context = canvas.getContext('2d')
+    if (!context) return
+
+    context.drawImage(image, sourceX, sourceY, sourceSize, sourceSize, 0, 0, canvas.width, canvas.height)
+    const croppedAvatar = canvas.toDataURL('image/jpeg', 0.88)
+    setEditingCharacter(prev => prev ? { ...prev, avatar: croppedAvatar } : prev)
+    closeAvatarCropper()
+  }
+
   useEffect(() => {
     if (!showCharacterEditor) return
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') closeCharacterEditor()
+      if (event.key === 'Escape') {
+        if (avatarCropSource) {
+          closeAvatarCropper()
+        } else {
+          closeCharacterEditor()
+        }
+      }
     }
     document.addEventListener('keydown', handleKeyDown)
     document.body.classList.add('modal-open')
@@ -145,7 +262,7 @@ export default function ChatPage(): JSX.Element{
       document.removeEventListener('keydown', handleKeyDown)
       document.body.classList.remove('modal-open')
     }
-  }, [showCharacterEditor, isSavingCharacter])
+  }, [showCharacterEditor, isSavingCharacter, avatarCropSource])
 
   useEffect(() => {
     let uid = localStorage.getItem('chatterra_userId')
@@ -154,7 +271,6 @@ export default function ChatPage(): JSX.Element{
       localStorage.setItem('chatterra_userId', uid)
     }
     setUserIdentifier(uid)
-
     const loadCharacters = async () => {
       try {
         const res = await fetch('http://localhost:3000/api/characters')
@@ -185,6 +301,7 @@ export default function ChatPage(): JSX.Element{
 
   const handleCharacterSelect = (nextCharacter: Character) => {
     setSelectedCharacter(nextCharacter)
+    setBehaviorStatus('Online')
     localStorage.setItem('chatterra_characterId', nextCharacter.id)
     const uid = userId || localStorage.getItem('chatterra_userId')
     if (uid) void loadHistoryForCharacter(uid, nextCharacter)
@@ -240,19 +357,6 @@ export default function ChatPage(): JSX.Element{
     }
   }
 
-  const updateCharacterSetting = (key: CharacterSettingKey, rawValue: string) => {
-    setEditingCharacter(prev => {
-      if (!prev) return prev
-      return {
-        ...prev,
-        defaultSettings: {
-          ...prev.defaultSettings,
-          [key]: rawValue === '' ? undefined : Number(rawValue)
-        }
-      }
-    })
-  }
-
   const clearCurrentCharacterHistory = async () => {
     const uid = userId || localStorage.getItem('chatterra_userId')
     if (!uid) return
@@ -298,17 +402,38 @@ export default function ChatPage(): JSX.Element{
           const res = await fetch('http://localhost:3000/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: text, history: updated, character: selectedCharacter, userId, conversationId })
+            body: JSON.stringify({
+              message: text,
+              history: updated,
+              character: selectedCharacter,
+              userId: userId || localStorage.getItem('chatterra_userId'),
+              conversationId
+            })
           })
-          const data = await res.json()
+          const data = await res.json().catch(() => ({}))
+          if (!res.ok) throw new Error(data.error || 'Chat request failed')
           if (data.conversationId && !conversationId) {
             setConversationId(data.conversationId)
             localStorage.setItem('chatterra_conversationId', data.conversationId)
           }
-          const aiMsg: Message = { id: makeMessageId(), sender: 'ai', text: data.reply }
+          if (data.behavior) {
+            const activity = String(data.behavior.activity || 'Online')
+              .replace(/_/g, ' ')
+              .replace(/^./, value => value.toUpperCase())
+            setBehaviorStatus(activity)
+          }
+          const aiMsg: Message = {
+            id: makeMessageId(),
+            sender: 'ai',
+            text: typeof data.reply === 'string' ? data.reply : 'Sorry, I could not generate a response.'
+          }
           setMessages(prev2 => prev2.map(m => m.id === loadingId ? aiMsg : m))
-        } catch (e) {
-          const errMsg: Message = { id: makeMessageId(), sender: 'ai', text: 'Sorry, the server is unreachable.' }
+        } catch (error) {
+          const errMsg: Message = {
+            id: makeMessageId(),
+            sender: 'ai',
+            text: error instanceof Error ? `Sorry, ${error.message}.` : 'Sorry, the server is unreachable.'
+          }
           setMessages(prev2 => prev2.map(m => m.id === loadingId ? errMsg : m))
         }
       })()
@@ -368,58 +493,57 @@ export default function ChatPage(): JSX.Element{
 
         <div className="contacts-list">
           {visibleCharacters.map(ch => (
-            <div
+            <button
+              type="button"
               key={ch.id}
               className={"contact-item " + (selectedCharacter.id === ch.id ? 'active' : '')}
               onClick={() => handleCharacterSelect(ch)}
             >
-              <button
-                type="button"
-                className="contact-avatar contact-edit-trigger"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  openCharacterEditor(ch)
-                }}
-                aria-label={`Edit ${ch.name}`}
-              >
-                {ch.avatar || ch.name.slice(0, 1)}
-              </button>
+              <div className="contact-avatar">
+                {avatarContent(ch)}
+              </div>
               <div className="contact-meta">
-                <button
-                  type="button"
-                  className="contact-name contact-edit-trigger"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    openCharacterEditor(ch)
-                  }}
-                >
+                <div className="contact-name">
                   {ch.name}
-                </button>
+                </div>
                 <div className="contact-preview">{ch.personality}</div>
               </div>
-            </div>
+            </button>
           ))}
         </div>
       </aside>
 
       <main className="chat-pane">
         <div className="top-bar">
-          <div className="title">
-            <div className="name">{selectedCharacter.name}</div>
-            <div className="status">{selectedCharacter.role} · Online</div>
+          <div className="top-bar-identity">
+            <button
+              type="button"
+              className="top-bar-avatar chat-character-edit-trigger"
+              onClick={() => openCharacterEditor(selectedCharacter)}
+              aria-label={`Edit ${selectedCharacter.name}`}
+              title="Edit character"
+            >
+              {avatarContent(selectedCharacter)}
+            </button>
+            <div className="title">
+              <button
+                type="button"
+                className="name chat-character-edit-trigger"
+                onClick={() => openCharacterEditor(selectedCharacter)}
+                title="Edit character"
+              >
+                {selectedCharacter.name}
+              </button>
+              <div className="status">{selectedCharacter.role || 'Conversation partner'} · {behaviorStatus}</div>
+            </div>
           </div>
-          <button
-            type="button"
-            className="top-bar-edit"
-            onClick={() => openCharacterEditor(selectedCharacter)}
-            aria-label={`Edit ${selectedCharacter.name}`}
-            title="Edit character"
-          >
-            ✎
-          </button>
         </div>
 
-        <ChatWindow messages={messages} />
+        <ChatWindow
+          messages={messages}
+          character={selectedCharacter}
+          onEditCharacter={() => openCharacterEditor(selectedCharacter)}
+        />
         <InputBox onSend={sendMessage} />
       </main>
 
@@ -440,6 +564,39 @@ export default function ChatPage(): JSX.Element{
             </div>
 
             <div className="character-form-grid">
+              <div className="character-avatar-editor field-wide">
+                <span>Avatar</span>
+                <div className="character-avatar-row">
+                  <button
+                    type="button"
+                    className="character-avatar-picker"
+                    onClick={() => avatarFileInputRef.current?.click()}
+                    aria-label="Upload avatar"
+                  >
+                    {avatarContent(editingCharacter)}
+                    <span className="avatar-upload-overlay">Upload</span>
+                  </button>
+                  <div className="character-avatar-tools">
+                    {editingCharacter.avatar && (
+                      <button
+                        type="button"
+                        className="avatar-tool-button secondary"
+                        onClick={() => setEditingCharacter(prev => prev ? { ...prev, avatar: '' } : prev)}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    ref={avatarFileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="avatar-file-input"
+                    onChange={handleAvatarFileSelected}
+                  />
+                </div>
+              </div>
+
               {editableFields.map(field => (
                 <label
                   key={String(field.key)}
@@ -461,41 +618,6 @@ export default function ChatPage(): JSX.Element{
                 </label>
               ))}
 
-              <fieldset className="character-settings field-wide">
-                <legend>Model Settings</legend>
-                <label className="character-field">
-                  <span>Max Response Tokens</span>
-                  <input
-                    type="number"
-                    min="1"
-                    step="1"
-                    value={editingCharacter.defaultSettings?.maxResponseTokens ?? ''}
-                    onChange={(e) => updateCharacterSetting('maxResponseTokens', e.target.value)}
-                  />
-                </label>
-                <label className="character-field">
-                  <span>Temperature</span>
-                  <input
-                    type="number"
-                    min="0"
-                    max="2"
-                    step="0.1"
-                    value={editingCharacter.defaultSettings?.temperature ?? ''}
-                    onChange={(e) => updateCharacterSetting('temperature', e.target.value)}
-                  />
-                </label>
-                <label className="character-field">
-                  <span>Context Messages</span>
-                  <input
-                    type="number"
-                    min="1"
-                    step="1"
-                    value={editingCharacter.defaultSettings?.contextWindow ?? ''}
-                    onChange={(e) => updateCharacterSetting('contextWindow', e.target.value)}
-                  />
-                </label>
-              </fieldset>
-
               {editingCharacter.id && (
                 <div className="character-metadata field-wide">
                   <span>ID: {editingCharacter.id}</span>
@@ -512,6 +634,63 @@ export default function ChatPage(): JSX.Element{
               <button type="button" className="character-save" onClick={handleCharacterEditorSave} disabled={isSavingCharacter}>
                 {isSavingCharacter ? 'Saving...' : editingCharacter.id ? 'Save Changes' : 'Add Character'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {avatarCropSource && (
+        <div className="avatar-crop-backdrop" onClick={closeAvatarCropper}>
+          <div
+            className="avatar-crop-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="avatar-crop-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="avatar-crop-header">
+              <div id="avatar-crop-title" className="avatar-crop-title">Crop Avatar</div>
+              <button type="button" className="character-modal-close" onClick={closeAvatarCropper} aria-label="Close">×</button>
+            </div>
+            <div
+              ref={avatarCropViewportRef}
+              className={"avatar-crop-viewport " + (isDraggingAvatar ? 'dragging' : '')}
+              onPointerDown={handleAvatarCropPointerDown}
+              onPointerMove={handleAvatarCropPointerMove}
+              onPointerUp={handleAvatarCropPointerUp}
+              onPointerCancel={handleAvatarCropPointerUp}
+            >
+              <img
+                ref={avatarCropImageRef}
+                src={avatarCropSource}
+                alt=""
+                className={"avatar-crop-image fit-" + avatarCropFit}
+                style={{
+                  transform: `translate(-50%, -50%) translate(${avatarCropPosition.x}px, ${avatarCropPosition.y}px) scale(${avatarCropScale})`
+                }}
+                onLoad={(event) => {
+                  const image = event.currentTarget
+                  setAvatarCropFit(image.naturalWidth > image.naturalHeight ? 'wide' : 'tall')
+                  setAvatarCropPosition(prev => clampAvatarCropPosition(prev))
+                }}
+                draggable={false}
+              />
+              <div className="avatar-crop-grid" aria-hidden="true" />
+            </div>
+            <label className="avatar-zoom-control">
+              <span>Zoom</span>
+              <input
+                type="range"
+                min="1"
+                max="3"
+                step="0.01"
+                value={avatarCropScale}
+                onChange={handleAvatarCropScaleChange}
+              />
+            </label>
+            <div className="avatar-crop-actions">
+              <button type="button" className="character-cancel" onClick={closeAvatarCropper}>Cancel</button>
+              <button type="button" className="character-save" onClick={applyAvatarCrop}>Use Avatar</button>
             </div>
           </div>
         </div>

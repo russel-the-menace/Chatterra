@@ -24,11 +24,7 @@ export interface Character {
   language?: string
   background?: string
   systemPromptTemplate?: string
-  defaultSettings?: {
-    maxResponseTokens?: number
-    temperature?: number
-    contextWindow?: number
-  }
+  currentVersion?: number
   createdAt: string
   updatedAt: string
 }
@@ -65,6 +61,9 @@ export type MemoryType =
   | 'important_fact'
   | 'other'
 
+export type MemoryRepresentation = 'episodic' | 'semantic' | 'procedural' | 'summary'
+export type MemoryRetentionTier = 'working' | 'short_lived' | 'durable' | 'archived'
+
 export interface Memory {
   id: UUID
   userId: UUID
@@ -78,6 +77,15 @@ export interface Memory {
   lastAccessedAt?: string
   lastUpdatedAt?: string
   metadata?: Record<string, any>
+  representation?: MemoryRepresentation
+  retentionTier?: MemoryRetentionTier
+  retrievalStrength?: number
+  halfLifeHours?: number
+  sensitivity?: 'normal' | 'sensitive' | 'restricted'
+  validFrom?: string
+  validTo?: string
+  supersedesId?: UUID
+  confirmed?: boolean
 }
 
 export interface ConversationSummary {
@@ -86,4 +94,69 @@ export interface ConversationSummary {
   summaryText: string
   lastGeneratedAt: string
   coverage?: { start?: string; end?: string; topics?: string[] }
+}
+
+export type InteractionMode = 'companion' | 'practice'
+
+export interface CharacterInstance {
+  id: UUID
+  userId: UUID
+  characterId: UUID
+  templateVersion: number
+  mode: InteractionMode
+  eventSequence: number
+  lastInteractionAt?: string
+  nextActionAt?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface RelationshipState {
+  familiarity: number
+  trust: number
+  affinity: number
+  respect: number
+  reciprocity: number
+  boundaryComfort: number
+  unresolvedTension: number
+  bondStrength: number
+  version: number
+  asOf: string
+}
+
+export interface AffectState {
+  valence: number
+  arousal: number
+  dominance: number
+  warmth: number
+  stress: number
+  energy: number
+  baseline: Record<string, number>
+  lastEventId?: UUID
+  version: number
+  asOf: string
+}
+
+export interface SimulationState {
+  localTimezone: string
+  currentActivity: string
+  activityStartedAt: string
+  activityEndsAt?: string
+  lastSimulatedAt: string
+  nextWakeupAt?: string
+  version: number
+}
+
+export interface BehaviorSnapshot {
+  instance: CharacterInstance
+  relationship: RelationshipState
+  affect: AffectState
+  simulation: SimulationState
+  recentEvents: Array<{
+    id: UUID
+    eventType: string
+    occurredAt: string
+    payload: Record<string, any>
+  }>
+  emotionLabel: string
 }

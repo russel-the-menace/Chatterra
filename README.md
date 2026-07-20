@@ -24,4 +24,6 @@ npm run dev
 ```
 
 The frontend calls `http://localhost:3000`. Database design and migration details
-are documented in [`backend/DATABASE.md`](backend/DATABASE.md).
+are documented in [`backend/DATABASE.md`](backend/DATABASE.md). The target behavioral
+design, including the implemented Inference Orchestrator, is documented in
+[`AI_COMPANION_ARCHITECTURE.md`](AI_COMPANION_ARCHITECTURE.md).

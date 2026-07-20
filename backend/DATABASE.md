@@ -3,6 +3,10 @@
 Chatterra uses PostgreSQL as its application source of truth. The JSON files in
 `/data` are retained only as legacy migration inputs.
 
+The behavioral architecture is additive. Existing character, conversation, message,
+and memory records remain compatible while per-user simulation state is stored in
+separate versioned projections.
+
 ## Relationships
 
 ```mermaid
@@ -14,16 +18,44 @@ erDiagram
   CHARACTERS o|--o{ MEMORIES : scopes
   MESSAGES o|--o{ MEMORIES : originates
   CONVERSATIONS ||--o{ CONVERSATION_SUMMARIES : summarizes
+  CHARACTERS ||--o{ CHARACTER_VERSIONS : versions
+  USERS ||--o{ CHARACTER_INSTANCES : owns
+  CHARACTER_VERSIONS ||--o{ CHARACTER_INSTANCES : instantiates
+  CHARACTER_INSTANCES ||--|| RELATIONSHIP_STATES : projects
+  CHARACTER_INSTANCES ||--|| AFFECT_STATES : projects
+  CHARACTER_INSTANCES ||--|| SIMULATION_CURSORS : advances
+  CHARACTER_INSTANCES ||--o{ DOMAIN_EVENTS : records
+  DOMAIN_EVENTS ||--|| OUTBOX_RECORDS : publishes
+  DOMAIN_EVENTS ||--o{ DECISION_RECORDS : triggers
+  CHARACTER_INSTANCES ||--o{ INFERENCE_RECORDS : plans
+  CHARACTER_INSTANCES ||--o{ GENERATION_RECORDS : audits
+  INFERENCE_RECORDS ||--o{ GENERATION_RECORDS : produces
+  MEMORIES ||--o{ MEMORY_EVIDENCE : grounded_by
 ```
 
 ## Tables
 
 - `users`: user profile and flexible preference/consent JSONB documents.
-- `characters`: editable persona fields and model settings.
+- `characters`: editable persona fields. Legacy model-setting JSON is retained only
+  for migration compatibility and is not exposed or used for inference.
 - `conversations`: one user/character chat session.
 - `messages`: ordered user, assistant, and system messages.
 - `memories`: extracted facts scoped to a user and optionally a character/message.
 - `conversation_summaries`: generated summaries and flexible coverage metadata.
+- `character_versions`: immutable snapshots of editable character templates.
+- `character_instances`: one private user/character worldline and event sequence.
+- `relationship_states`: rebuildable, slowly changing relationship projection.
+- `affect_states`: compact, timestamped affect projection with passive decay.
+- `simulation_cursors`: lazy daily-life cursor and current activity.
+- `domain_events`: immutable causal event ledger ordered per character instance.
+- `outbox_records`: reliable asynchronous publication boundary for each event.
+- `memory_evidence`: message/event provenance for semantic memory records.
+- `decision_records`: selected action, mode, reason codes, and due time.
+- `inference_records`: route decision, policy version, response style, selected context,
+  and completion status for every direct/model/tool inference path.
+- `generation_records`: provider-specific model profile, parameters, selected context
+  IDs, and latency for actual model calls.
+- `user_learning_profiles`: user-owned correction policy and proficiency state.
 - `schema_migrations`: applied SQL migration versions.
 
 IDs use `TEXT` deliberately. Existing data contains legacy IDs such as `c1`,
@@ -38,8 +70,50 @@ Foreign keys define lifecycle behavior:
 - Deleted character/message references on memories become `NULL`.
 
 JSONB is limited to fields whose shape can evolve independently: user goals and
-preferences, character model settings, record metadata, structured message
-content, and summary coverage.
+preferences, record metadata, structured message content, inference manifests, and
+summary coverage. Model sampling settings are policy-owned, not character data.
+
+## Behavioral Request Flow
+
+For every incoming message, the API:
+
+1. Persists the message and ensures a private character instance exists.
+2. Advances passive time and current activity from the simulation cursor.
+3. Appends an ordered `user_message_received` event and outbox record.
+4. Applies bounded relationship and affect transitions.
+5. Extracts eligible deduplicated memory with evidence and provenance by default. An
+   explicit backend privacy opt-out suppresses capture and retrieval.
+6. Records a behavioral policy decision.
+7. The Inference Orchestrator decides whether a model is needed, retrieves context,
+   builds a token-budgeted prompt, and derives response length and provider parameters.
+8. Persists the assistant message, event, inference audit, and (for model routes) a
+   provider generation audit.
+
+State reads checkpoint decay only after a meaningful interval or activity change.
+They do not append domain events.
+
+## Current Delivery Boundary
+
+The current implementation includes the synchronous behavioral core and durable
+outbox. External queue publication, delayed companion replies, proactive initiation,
+media object storage, and embedding-based retrieval remain separate delivery slices.
+They should build on the existing event and instance IDs rather than change the chat
+contract again.
+
+Durable personal memory defaults to enabled for new users and for legacy users whose
+preference has never been set. The chat UI does not expose a memory switch. The
+`memoryPersonalization` flag remains a backend privacy control for explicit opt-out,
+and the behavioral extractor checks it transactionally before capture; the inference
+orchestrator also suppresses retrieval when it is disabled.
+
+Inference parameters are internal. `temperature`, `top_p`, `max_response_tokens`, and
+context message selection are derived by `Inference Orchestrator`; they are not accepted
+from character update payloads and are not returned by the character API.
+
+The `mode` columns on character instances, decisions, inferences, and generations are
+internal policy labels derived from the character definition. The chat API ignores a
+client-supplied mode, and public state does not expose one. Turn-level priorities such
+as `emotional_support` are stored in the inference response-style audit.
 
 ## JSON Import
 

@@ -3,27 +3,36 @@ import cors from 'cors'
 import dotenv from 'dotenv'
 import { closeDatabase, query } from './database'
 import {
-  appendMessage,
+  getBehaviorSnapshot,
+  prepareInteraction,
+  recordAssistantResponse,
+  recordInferenceFailure,
+  resolveCharacterMode,
+  resetBehaviorState
+} from './behavior'
+import { buildInferencePlan, postProcessInferenceOutput } from './inference-orchestrator'
+import { generateModelResponse, ModelGatewayError } from './model-gateway'
+import {
   clearChatHistory,
   createCharacter,
   createConversationWithStarter,
-  createMemory,
   getCharacter,
   getConversation,
+  getUserPreferences,
   listCharacters,
   listConversations,
   listMessages,
-  listRecentMessages,
   newId,
+  setUserMemoryConsent,
   updateCharacter
 } from './repository'
-import { Character, Conversation, Memory, Message } from './types'
+import { Character, Conversation, Message } from './types'
 
 dotenv.config()
 
 const app = express()
 app.use(cors())
-app.use(express.json())
+app.use(express.json({ limit: '2mb' }))
 
 const asyncRoute = (
   handler: (req: Request, res: Response, next: NextFunction) => Promise<any>
@@ -60,92 +69,15 @@ const characterFromPayload = (payload: any, existing?: Character): Character => 
     }
   })
 
-  const settings = payload?.defaultSettings
-  if (settings && typeof settings === 'object') {
-    character.defaultSettings = {
-      maxResponseTokens: Number.isFinite(Number(settings.maxResponseTokens))
-        ? Math.max(1, Math.round(Number(settings.maxResponseTokens)))
-        : existing?.defaultSettings?.maxResponseTokens,
-      temperature: Number.isFinite(Number(settings.temperature))
-        ? Math.min(2, Math.max(0, Number(settings.temperature)))
-        : existing?.defaultSettings?.temperature,
-      contextWindow: Number.isFinite(Number(settings.contextWindow))
-        ? Math.max(1, Math.round(Number(settings.contextWindow)))
-        : existing?.defaultSettings?.contextWindow
-    }
-  }
-
   return character
-}
-
-const interpolatePrompt = (template: string, character: Character) => {
-  const values: Record<string, string> = {
-    name: character.name || '',
-    role: character.role || '',
-    company: character.company || '',
-    personality: character.personality || '',
-    scenario: character.scenario || '',
-    goal: character.goal || '',
-    language: character.language || '',
-    background: character.background || ''
-  }
-
-  return template.replace(/\{\{\s*(\w+)\s*\}\}/g, (match, key) => values[key] ?? match)
-}
-
-const getSystemPrompt = (character?: Character) => {
-  if (!character) return 'You are a helpful conversation partner.'
-  if (character.systemPromptTemplate?.trim()) {
-    return interpolatePrompt(character.systemPromptTemplate, character)
-  }
-
-  return [
-    `You are ${character.name}.`,
-    character.role ? `Role: ${character.role}.` : '',
-    character.company ? `Company: ${character.company}.` : '',
-    character.personality ? `Personality: ${character.personality}.` : '',
-    character.background ? `Background: ${character.background}.` : '',
-    character.scenario ? `Scenario: ${character.scenario}.` : '',
-    character.goal ? `Goal: ${character.goal}.` : '',
-    character.language ? `Language: ${character.language}.` : '',
-    'Stay in character and ask useful follow-up questions.'
-  ].filter(Boolean).join('\n')
 }
 
 const getStarterMessage = (character?: Character) => {
   if (character?.id === 'c2') {
-    return 'Hi. First, I will correct your English and programmer mistakes, then I will help you practice naturally. Start by telling me about your current project.'
+    return 'Hi. I will help you practice English and point out useful mistakes when it helps, while keeping the conversation natural. Tell me about your current project.'
   }
 
   return `Hello, I'm ${character?.name || 'Interviewer'}. Let's start the interview. Tell me briefly about your background.`
-}
-
-const extractMemoryFromText = async (
-  userId: string,
-  characterId: string,
-  messageText: string,
-  originMessageId: string
-) => {
-  const lowered = messageText.toLowerCase()
-  if (!lowered.includes("i'm") && !lowered.includes('i am') && !lowered.includes('i was') && !lowered.includes('i worked')) {
-    return null
-  }
-
-  const now = new Date().toISOString()
-  const memory: Memory = {
-    id: newId(),
-    userId,
-    characterId,
-    originMessageId,
-    type: 'important_fact',
-    content: messageText,
-    importanceScore: 0.6,
-    confidence: 0.8,
-    createdAt: now,
-    lastUpdatedAt: now,
-    metadata: { source: 'heuristic' }
-  }
-  return createMemory(memory)
 }
 
 app.get('/api/health', asyncRoute(async (_req, res) => {
@@ -156,6 +88,19 @@ app.get('/api/health', asyncRoute(async (_req, res) => {
 app.get('/api/characters', asyncRoute(async (_req, res) => {
   const characters = await listCharacters()
   return res.json({ characters })
+}))
+
+app.get('/api/users/:id/preferences', asyncRoute(async (req, res) => {
+  const preferences = await getUserPreferences(req.params.id)
+  return res.json(preferences)
+}))
+
+app.put('/api/users/:id/preferences', asyncRoute(async (req, res) => {
+  if (typeof req.body?.memoryEnabled !== 'boolean') {
+    return res.status(400).json({ error: 'memoryEnabled must be a boolean' })
+  }
+  const memoryEnabled = await setUserMemoryConsent(req.params.id, req.body.memoryEnabled)
+  return res.json({ memoryEnabled })
 }))
 
 app.post('/api/characters', asyncRoute(async (req, res) => {
@@ -193,12 +138,43 @@ app.get('/api/conversations/:id/messages', asyncRoute(async (req, res) => {
   return res.json({ messages })
 }))
 
+app.get('/api/characters/:id/state', asyncRoute(async (req, res) => {
+  const userId = String(req.query.userId || '')
+  if (!userId) return res.status(400).json({ error: 'userId required' })
+
+  const character = await getCharacter(req.params.id)
+  if (!character) return res.status(404).json({ error: 'character not found' })
+
+  const mode = resolveCharacterMode(character)
+  const snapshot = await getBehaviorSnapshot(userId, character, mode)
+  const familiarity = snapshot.relationship.familiarity
+  const relationshipStage = familiarity < 0.15
+    ? 'new'
+    : familiarity < 0.45
+      ? 'familiar'
+      : familiarity < 0.75
+        ? 'close'
+        : 'established'
+  const publicState = {
+    instanceId: snapshot.instance.id,
+    currentActivity: snapshot.simulation.currentActivity,
+    emotion: snapshot.emotionLabel,
+    relationshipStage,
+    asOf: snapshot.affect.asOf
+  }
+  if (process.env.BEHAVIOR_DEBUG === 'true') {
+    return res.json({ state: publicState, debug: snapshot })
+  }
+  return res.json({ state: publicState })
+}))
+
 app.delete('/api/chat-history', asyncRoute(async (req, res) => {
   const { userId, characterId } = req.body || {}
   if (!userId) return res.status(400).json({ error: 'userId is required' })
   if (!characterId) return res.status(400).json({ error: 'characterId is required' })
 
   const result = await clearChatHistory(String(userId), String(characterId))
+  await resetBehaviorState(String(userId), String(characterId))
   return res.json({ ok: true, characterId, ...result })
 }))
 
@@ -208,14 +184,18 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
   if (!userId) return res.status(400).json({ error: 'userId is required' })
   if (!character?.id) return res.status(400).json({ error: 'character is required' })
 
+  const normalizedUserId = String(userId)
+  const normalizedMessage = String(message)
+
   const storedCharacter = await getCharacter(String(character.id))
   if (!storedCharacter) return res.status(400).json({ error: 'character not found' })
+  const mode = resolveCharacterMode(storedCharacter)
 
   let conversation = conversationId
     ? await getConversation(String(conversationId))
     : undefined
 
-  if (conversation && conversation.userId !== String(userId)) {
+  if (conversation && conversation.userId !== normalizedUserId) {
     return res.status(403).json({ error: 'conversation does not belong to this user' })
   }
   if (conversation && conversation.characterId !== storedCharacter.id) {
@@ -226,7 +206,7 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
     const now = new Date().toISOString()
     const nextConversation: Conversation = {
       id: conversationId || newId(),
-      userId: String(userId),
+      userId: normalizedUserId,
       characterId: storedCharacter.id,
       title: `${storedCharacter.name} chat`,
       status: 'active',
@@ -248,101 +228,107 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
     id: newId(),
     conversationId: conversation.id,
     senderRole: 'user',
-    senderId: String(userId),
-    content: String(message),
+    senderId: normalizedUserId,
+    content: normalizedMessage,
     createdAt: new Date().toISOString()
   }
-  await appendMessage(userMessage)
 
-  const systemPrompt = getSystemPrompt(storedCharacter)
-  const contextWindow = storedCharacter.defaultSettings?.contextWindow || 8
-  const recent = await listRecentMessages(conversation.id, contextWindow)
-  const conversationText = recent
-    .map(item => `${item.senderRole === 'user' ? 'Candidate' : 'Interviewer'}: ${item.content}`)
-    .join('\n')
+  const preparation = await prepareInteraction({
+    userId: normalizedUserId,
+    character: storedCharacter,
+    conversationId: conversation.id,
+    messageId: userMessage.id,
+    message: normalizedMessage,
+    mode,
+    now: new Date(userMessage.createdAt)
+  })
+  const inference = await buildInferencePlan({
+    userId: normalizedUserId,
+    character: storedCharacter,
+    conversationId: conversation.id,
+    currentMessageId: userMessage.id,
+    message: normalizedMessage,
+    mode,
+    snapshot: preparation.snapshot,
+    memoryEnabled: preparation.memoryEnabled
+  })
 
-  const apiMode = process.env.DEEPSEEK_API_MODE || 'live'
-  if (apiMode === 'mock') {
-    const reply = storedCharacter.id === 'c2'
-      ? `First, small correction: a more natural way to say that is: “${message}.” Now tell me a little more.`
-      : `(mock) ${storedCharacter.name}: Thanks — I heard: "${message}". Can you expand on that?`
-    const assistantMessage: Message = {
-      id: newId(),
-      conversationId: conversation.id,
-      senderRole: 'assistant',
-      senderId: storedCharacter.id,
-      content: reply,
-      createdAt: new Date().toISOString()
-    }
-    await appendMessage(assistantMessage)
-    await extractMemoryFromText(String(userId), storedCharacter.id, String(message), userMessage.id)
-    return res.json({ reply, conversationId: conversation.id })
-  }
-
-  const apiKey = process.env.DEEPSEEK_API_KEY
-  if (!apiKey) return res.status(500).json({ error: 'missing API key' })
-
-  const deepseekUrl = process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com/chat/completions'
-  const deepseekModel = process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash'
-
+  let rawReply = inference.directResponse || ''
+  let generation: {
+    provider?: string
+    model?: string
+    profile?: string
+    parameters?: Record<string, any>
+    contextManifest?: Record<string, any>
+    latencyMs?: number
+  } | undefined
+  const inferenceStartedAt = Date.now()
   try {
-    const response = await fetch(deepseekUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: deepseekModel,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: conversationText }
-        ],
-        max_tokens: storedCharacter.defaultSettings?.maxResponseTokens || 600,
-        temperature: storedCharacter.defaultSettings?.temperature ?? 0.7,
-        stream: false
-      })
-    })
-
-    let data: any
-    try {
-      data = await response.json()
-    } catch {
-      data = await response.text().catch(() => null)
+    if (inference.route === 'model') {
+      const result = await generateModelResponse(inference, storedCharacter)
+      rawReply = result.content
+      generation = {
+        provider: result.provider,
+        model: result.model,
+        profile: inference.model?.profile,
+        parameters: inference.parameters,
+        contextManifest: inference.contextManifest,
+        latencyMs: result.latencyMs
+      }
     }
-
-    if (!response.ok) {
-      console.error('DeepSeek returned error', response.status, data)
-      return res.status(502).json({ error: 'Upstream AI returned an error' })
-    }
-
-    let reply = ''
-    if (typeof data === 'string') reply = data
-    else if (typeof data?.reply === 'string') reply = data.reply
-    else if (typeof data?.result === 'string') reply = data.result
-    else if (data?.choices && Array.isArray(data.choices) && data.choices[0]) {
-      const first = data.choices[0]
-      reply = first.message?.content || first.text || first.output || ''
-    } else if (data?.output_text) reply = data.output_text
-
-    if (!reply) reply = 'Sorry, I could not generate a response.'
-
-    const assistantMessage: Message = {
-      id: newId(),
-      conversationId: conversation.id,
-      senderRole: 'assistant',
-      senderId: storedCharacter.id,
-      content: reply,
-      createdAt: new Date().toISOString()
-    }
-    await appendMessage(assistantMessage)
-    await extractMemoryFromText(String(userId), storedCharacter.id, String(message), userMessage.id)
-
-    return res.json({ reply, conversationId: conversation.id })
   } catch (error) {
-    console.error('AI request failed', error)
-    return res.status(500).json({ error: 'AI request failed' })
+    try {
+      await recordInferenceFailure({
+        userId: normalizedUserId,
+        character: storedCharacter,
+        conversationId: conversation.id,
+        decisionId: preparation.decisionId,
+        triggerEventId: preparation.triggerEventId,
+        mode,
+        inference,
+        latencyMs: Date.now() - inferenceStartedAt
+      })
+    } catch (auditError) {
+      console.error('Could not record failed inference', auditError)
+    }
+    if (error instanceof ModelGatewayError) {
+      return res.status(error.statusCode).json({ error: error.message })
+    }
+    throw error
   }
+
+  const reply = postProcessInferenceOutput(inference, rawReply)
+  const assistantMessage: Message = {
+    id: newId(),
+    conversationId: conversation.id,
+    senderRole: 'assistant',
+    senderId: storedCharacter.id,
+    content: reply,
+    createdAt: new Date().toISOString()
+  }
+  await recordAssistantResponse({
+    userId: normalizedUserId,
+    character: storedCharacter,
+    conversationId: conversation.id,
+    messageId: assistantMessage.id,
+    decisionId: preparation.decisionId,
+    triggerEventId: preparation.triggerEventId,
+    mode,
+    content: reply,
+    inference,
+    generation,
+    now: new Date(assistantMessage.createdAt)
+  })
+
+  return res.json({
+    reply,
+    conversationId: conversation.id,
+    behavior: {
+      emotion: preparation.snapshot.emotionLabel,
+      activity: preparation.snapshot.simulation.currentActivity,
+      decision: 'reply_now'
+    }
+  })
 }))
 
 app.use((error: any, _req: Request, res: Response, _next: NextFunction) => {
@@ -356,8 +342,19 @@ app.use((error: any, _req: Request, res: Response, _next: NextFunction) => {
 const port = process.env.PORT ? Number(process.env.PORT) : 3000
 
 const start = async () => {
-  const schemaResult = await query(`SELECT to_regclass('public.characters') AS table_name`)
-  if (!schemaResult.rows[0]?.table_name) {
+  const schemaResult = await query(
+    `SELECT
+       to_regclass('public.characters') AS characters_table,
+       to_regclass('public.character_instances') AS instances_table,
+       to_regclass('public.domain_events') AS events_table,
+       to_regclass('public.inference_records') AS inference_records_table`
+  )
+  if (
+    !schemaResult.rows[0]?.characters_table
+    || !schemaResult.rows[0]?.instances_table
+    || !schemaResult.rows[0]?.events_table
+    || !schemaResult.rows[0]?.inference_records_table
+  ) {
     throw new Error('Database schema is missing. Run npm run db:migrate first.')
   }
   app.listen(port, () => console.log(`Chatterra backend listening on ${port}`))
