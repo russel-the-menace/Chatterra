@@ -39,6 +39,25 @@ const persistAll = () => {
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok' }))
 
+// list conversations for a user
+app.get('/api/conversations', (req, res) => {
+  const userId = String(req.query.userId || '')
+  if (!userId) return res.status(400).json({ error: 'userId required' })
+  const list = conversations.filter(c => c.userId === userId)
+  // sort by lastMessageAt desc
+  list.sort((a,b) => (b.lastMessageAt || '')!.localeCompare(a.lastMessageAt || ''))
+  res.json({ conversations: list })
+})
+
+// messages for a conversation
+app.get('/api/conversations/:id/messages', (req, res) => {
+  const id = req.params.id
+  const list = messages.filter(m => m.conversationId === id)
+  // sort by createdAt
+  list.sort((a,b) => a.createdAt.localeCompare(b.createdAt))
+  res.json({ messages: list })
+})
+
 // lightweight memory extraction (rule-based MVP)
 function extractMemoryFromText(userId: string, conversationId: string, messageText: string, originMessageId: string) {
   // simple heuristics: look for "I am/I'm/I worked as/I was" patterns
