@@ -43,4 +43,9 @@ assert.equal(emptyOutput.accepted, false)
 assert.equal(emptyOutput.rejectionReason, 'empty_provider_output')
 assert.equal(emptyOutput.reply, null)
 
+const codeSwitchedOutput = diagnoseInferenceOutput(plan, '我而家 working，陣間覆你。')
+assert.equal(codeSwitchedOutput.accepted, false)
+assert.equal(codeSwitchedOutput.languageReason, 'latin_contamination')
+assert.equal(codeSwitchedOutput.rejectionReason, 'language_violation')
+
 console.log('language policy checks passed')

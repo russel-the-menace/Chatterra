@@ -37,6 +37,7 @@ import { Character, Conversation, Message, VoiceTranscriptMetadata } from './typ
 dotenv.config()
 
 const app = express()
+const REJECTED_OUTPUT_LOG_LIMIT = 4000
 app.use(cors())
 app.use(express.json({ limit: '2mb' }))
 
@@ -423,7 +424,16 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
         triggerEventId: preparation.triggerEventId,
         mode,
         inference,
-        diagnostics: trace.snapshot(),
+        diagnostics: {
+          ...trace.snapshot(),
+          rejectedOutput: {
+            content: rawReply.slice(0, REJECTED_OUTPUT_LOG_LIMIT),
+            originalLength: rawReply.length,
+            truncated: rawReply.length > REJECTED_OUTPUT_LOG_LIMIT,
+            languageReason: outputDiagnostics.languageReason,
+            rejectionReason
+          }
+        },
         latencyMs: generation?.latencyMs ?? Date.now() - inferenceStartedAt,
         failureReason: rejectionReason
       })

@@ -16,6 +16,13 @@ export type InferenceDiagnostics = {
   startedAt: string
   completedAt?: string
   events: InferenceTraceEvent[]
+  rejectedOutput?: {
+    content: string
+    originalLength: number
+    truncated: boolean
+    languageReason?: string
+    rejectionReason?: string
+  }
 }
 
 export type InferenceTrace = {

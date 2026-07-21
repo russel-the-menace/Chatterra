@@ -112,10 +112,15 @@ Inference parameters are internal. `temperature`, `top_p`, `max_response_tokens`
 context message selection are derived by `Inference Orchestrator`; they are not accepted
 from character update payloads and are not returned by the character API.
 
-Inference diagnostics are deliberately metadata-only. Each chat request emits structured
-JSON log lines with a `traceId` and records stages such as plan construction, provider
-response parsing, output validation, output rejection, and persistence. It does not
-store the API key, full prompt, or raw provider response. Query a recent trace with:
+Inference diagnostics are deliberately bounded and privacy-scoped. Each chat request
+emits structured JSON log lines with a `traceId` and records stages such as plan
+construction, provider response parsing, output validation, output rejection, and
+persistence. It does not store the API key, full prompt, or raw provider response
+envelope. Query a recent trace with:
+
+Accepted assistant output is stored in `messages`. Rejected assistant output is stored
+separately in `inference_records.diagnostics.rejectedOutput`, bounded to 4,000
+characters; prompts and retrieved context are never copied into that field.
 
 ```sql
 SELECT created_at, provider, model, status, diagnostics

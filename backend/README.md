@@ -64,6 +64,9 @@ Every chat request emits structured inference trace logs and returns a `traceId`
 same metadata is stored in `inference_records.diagnostics` and
 `generation_records.diagnostics`, including provider status, finish reason, extracted
 text length, output validation, and rejection reason. Prompts and secrets are not logged.
+Rejected assistant output is stored in the inference audit as
+`diagnostics.rejectedOutput`, bounded to 4,000 characters. This is the model's attempted
+assistant message only; prompts, API keys, and retrieved context remain excluded.
 
 `Character.language` is an output contract. A single-language value such as
 `Cantonese` or `Cantonese only` is treated as strict: starter messages, model prompts,
