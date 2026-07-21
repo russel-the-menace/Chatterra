@@ -4,12 +4,19 @@ import { InferenceTrace } from './inference-logger'
 
 export type ModelGatewayDiagnostics = {
   transport: 'mock' | 'http'
+  attempt: number
+  maxResponseTokens: number
   httpStatus?: number
   responseKeys?: string[]
+  messageKeys?: string[]
   choiceCount?: number
   finishReason?: string | null
   contentType?: string
   providerRequestId?: string
+  reasoningContentLength?: number
+  promptTokens?: number
+  completionTokens?: number
+  totalTokens?: number
   extractedTextLength: number
 }
 
@@ -31,22 +38,25 @@ export class ModelGatewayError extends Error {
   }
 }
 
-const extractText = (data: any) => {
-  const contentText = (value: any): string => {
-    if (typeof value === 'string') return value
-    if (Array.isArray(value)) {
-      return value.map(part => {
-        if (typeof part === 'string') return part
-        return typeof part?.text === 'string'
-          ? part.text
-          : typeof part?.content === 'string'
-            ? part.content
-            : ''
-      }).join('')
-    }
-    return typeof value?.text === 'string' ? value.text : ''
-  }
+const EMPTY_TRUNCATION_RETRY_MIN_TOKENS = 1024
+const EMPTY_TRUNCATION_RETRY_MAX_TOKENS = 2048
 
+const contentText = (value: any): string => {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) {
+    return value.map(part => {
+      if (typeof part === 'string') return part
+      return typeof part?.text === 'string'
+        ? part.text
+        : typeof part?.content === 'string'
+          ? part.content
+          : ''
+    }).join('')
+  }
+  return typeof value?.text === 'string' ? value.text : ''
+}
+
+const extractText = (data: any) => {
   if (typeof data === 'string') return data
   if (typeof data?.reply === 'string') return data.reply
   if (typeof data?.result === 'string') return data.result
@@ -58,25 +68,53 @@ const extractText = (data: any) => {
   return ''
 }
 
+const extractReasoningText = (data: any) => {
+  const firstChoice = data?.choices?.[0]
+  return contentText(firstChoice?.message?.reasoning_content)
+    || contentText(firstChoice?.message?.reasoning)
+    || contentText(firstChoice?.reasoning_content)
+}
+
+const finiteNumber = (value: any): number | undefined => {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
 const latestUserMessage = (plan: InferencePlan) => {
   return [...plan.messages].reverse().find(message => message.role === 'user')?.content || ''
 }
 
-export const generateModelResponse = async (
+export const shouldRetryEmptyTruncatedResponse = (result: ModelGatewayResult) => {
+  const finishReason = String(result.diagnostics.finishReason || '').toLowerCase()
+  return result.diagnostics.transport === 'http'
+    && !result.content.trim()
+    && (finishReason === 'length' || finishReason === 'max_tokens')
+}
+
+export const getEmptyTruncationRetryTokens = (initialTokens: number) => {
+  return Math.min(
+    EMPTY_TRUNCATION_RETRY_MAX_TOKENS,
+    Math.max(EMPTY_TRUNCATION_RETRY_MIN_TOKENS, Math.ceil(initialTokens * 2))
+  )
+}
+
+type ModelGatewayAttemptOptions = {
+  attempt: number
+  maxResponseTokens: number
+}
+
+const generateModelResponseAttempt = async (
   plan: InferencePlan,
   character: Character,
-  trace?: InferenceTrace
+  trace: InferenceTrace | undefined,
+  options: ModelGatewayAttemptOptions
 ): Promise<ModelGatewayResult> => {
-  if (plan.route !== 'model' || !plan.model) {
-    throw new ModelGatewayError('A model route is required', 500)
-  }
-
   const startedAt = Date.now()
   trace?.mark('provider_request_started', 'started', {
     provider: plan.model.provider,
     model: plan.model.model,
     messageCount: plan.messages.length,
-    maxResponseTokens: plan.parameters.maxResponseTokens
+    attempt: options.attempt,
+    maxResponseTokens: options.maxResponseTokens
   })
   if (plan.model.provider === 'mock') {
     const incoming = latestUserMessage(plan)
@@ -100,6 +138,8 @@ export const generateModelResponse = async (
           : `(mock) ${character.name}: I heard you. Can you expand on that?`
     const diagnostics: ModelGatewayDiagnostics = {
       transport: 'mock',
+      attempt: options.attempt,
+      maxResponseTokens: options.maxResponseTokens,
       extractedTextLength: content.length
     }
     trace?.mark('provider_response_parsed', 'completed', diagnostics)
@@ -127,7 +167,7 @@ export const generateModelResponse = async (
       body: JSON.stringify({
         model: plan.model.model,
         messages: plan.messages,
-        max_tokens: plan.parameters.maxResponseTokens,
+        max_tokens: options.maxResponseTokens,
         temperature: plan.parameters.temperature,
         top_p: plan.parameters.topP,
         stream: false
@@ -136,6 +176,7 @@ export const generateModelResponse = async (
   } catch (error) {
     console.error('Model provider request failed', error)
     trace?.mark('provider_request', 'failed', {
+      attempt: options.attempt,
       error: error instanceof Error ? error.name : 'unknown_error'
     })
     throw new ModelGatewayError('AI provider is unreachable')
@@ -151,6 +192,7 @@ export const generateModelResponse = async (
   if (!response.ok) {
     console.error('Model provider returned error', response.status, data)
     trace?.mark('provider_response', 'failed', {
+      attempt: options.attempt,
       httpStatus: response.status,
       responseKeys: data && typeof data === 'object' ? Object.keys(data).slice(0, 12) : []
     })
@@ -159,16 +201,26 @@ export const generateModelResponse = async (
 
   const content = extractText(data)
   const firstChoice = data?.choices?.[0]
+  const reasoningText = extractReasoningText(data)
   const diagnostics: ModelGatewayDiagnostics = {
     transport: 'http',
+    attempt: options.attempt,
+    maxResponseTokens: options.maxResponseTokens,
     httpStatus: response.status,
     responseKeys: data && typeof data === 'object' ? Object.keys(data).slice(0, 12) : [],
+    messageKeys: firstChoice?.message && typeof firstChoice.message === 'object'
+      ? Object.keys(firstChoice.message).slice(0, 12)
+      : [],
     choiceCount: Array.isArray(data?.choices) ? data.choices.length : 0,
     finishReason: firstChoice?.finish_reason ?? null,
     contentType: firstChoice?.message?.content == null
       ? firstChoice?.text == null ? 'missing' : typeof firstChoice.text
       : Array.isArray(firstChoice.message.content) ? 'array' : typeof firstChoice.message.content,
     providerRequestId: typeof data?.id === 'string' ? data.id.slice(0, 120) : undefined,
+    reasoningContentLength: reasoningText.length,
+    promptTokens: finiteNumber(data?.usage?.prompt_tokens),
+    completionTokens: finiteNumber(data?.usage?.completion_tokens),
+    totalTokens: finiteNumber(data?.usage?.total_tokens),
     extractedTextLength: content.length
   }
   if (!content.trim()) {
@@ -182,5 +234,50 @@ export const generateModelResponse = async (
     model: plan.model.model,
     latencyMs: Date.now() - startedAt,
     diagnostics
+  }
+}
+
+export const generateModelResponse = async (
+  plan: InferencePlan,
+  character: Character,
+  trace?: InferenceTrace
+): Promise<ModelGatewayResult> => {
+  if (plan.route !== 'model' || !plan.model) {
+    throw new ModelGatewayError('A model route is required', 500)
+  }
+
+  const startedAt = Date.now()
+  const initialResult = await generateModelResponseAttempt(plan, character, trace, {
+    attempt: 1,
+    maxResponseTokens: plan.parameters.maxResponseTokens
+  })
+  if (!shouldRetryEmptyTruncatedResponse(initialResult)) return initialResult
+
+  const retryMaxResponseTokens = getEmptyTruncationRetryTokens(plan.parameters.maxResponseTokens)
+  if (retryMaxResponseTokens <= plan.parameters.maxResponseTokens) return initialResult
+
+  trace?.mark('provider_retry_scheduled', 'started', {
+    reason: 'empty_content_after_length',
+    attempt: 2,
+    previousMaxResponseTokens: plan.parameters.maxResponseTokens,
+    retryMaxResponseTokens,
+    previousCompletionTokens: initialResult.diagnostics.completionTokens,
+    previousReasoningContentLength: initialResult.diagnostics.reasoningContentLength
+  })
+  const retryResult = await generateModelResponseAttempt(plan, character, trace, {
+    attempt: 2,
+    maxResponseTokens: retryMaxResponseTokens
+  })
+  trace?.mark('provider_retry_completed', retryResult.content.trim() ? 'completed' : 'failed', {
+    attempt: 2,
+    maxResponseTokens: retryMaxResponseTokens,
+    finishReason: retryResult.diagnostics.finishReason,
+    extractedTextLength: retryResult.diagnostics.extractedTextLength,
+    reasoningContentLength: retryResult.diagnostics.reasoningContentLength
+  })
+
+  return {
+    ...retryResult,
+    latencyMs: Date.now() - startedAt
   }
 }

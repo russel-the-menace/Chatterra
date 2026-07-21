@@ -375,7 +375,10 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
         provider: result.provider,
         model: result.model,
         profile: inference.model?.profile,
-        parameters: inference.parameters,
+        parameters: {
+          ...inference.parameters,
+          maxResponseTokens: result.diagnostics.maxResponseTokens
+        },
         contextManifest: inference.contextManifest,
         diagnostics: result.diagnostics,
         latencyMs: result.latencyMs

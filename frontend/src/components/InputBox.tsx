@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useRef, useState } from 'react'
 import { useVoiceInput } from '../voice/useVoiceInput'
 import { VoiceInputStatus, VoiceTranscriptMetadata } from '../voice/types'
 
@@ -31,6 +31,7 @@ const voiceStatusLabel = (status: VoiceInputStatus, error?: string) => {
 export default function InputBox({ onSend, language }: InputBoxProps): JSX.Element {
   const [text, setText] = useState('')
   const [voiceMetadata, setVoiceMetadata] = useState<VoiceTranscriptMetadata | undefined>()
+  const isComposing = useRef(false)
   const voice = useVoiceInput({
     language,
     onTranscriptChange: (transcript, metadata) => {
@@ -85,8 +86,20 @@ export default function InputBox({ onSend, language }: InputBoxProps): JSX.Eleme
         <textarea
           value={text}
           onChange={event => handleTextChange(event.target.value)}
+          onCompositionStart={() => {
+            isComposing.current = true
+          }}
+          onCompositionEnd={() => {
+            isComposing.current = false
+          }}
           onKeyDown={event => {
             if (event.key === 'Enter' && !event.shiftKey) {
+              if (
+                isComposing.current
+                || event.nativeEvent.isComposing
+                || event.nativeEvent.keyCode === 229
+              ) return
+
               event.preventDefault()
               submit()
             }
