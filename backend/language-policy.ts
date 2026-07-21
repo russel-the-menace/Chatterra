@@ -14,11 +14,12 @@ export type ResponseLanguagePolicy = {
   instruction: string
 }
 
-const CANTONESE_MARKERS = /(?:係|唔|喺|冇|咩|而家|嘅|啦|喎|囉|呀|吖|喇|啫|㗎|嗰|乜|哋|佢|啲|點|邊|緊|嚟|揾|睇|食|飲|傾|講|咁|得閒|係咪|做咩)/u
+const CANTONESE_MARKERS = /(?:係|唔|喺|冇|咩|而家|嘅|啦|喎|囉|呀|吖|喇|啫|㗎|嗰|乜|哋|佢|啲|點|点|邊|边|緊|紧|嚟|揾|睇|食|飲|傾|講|讲|咁|得閒|係咪|做咩)/u
 const STRONG_MANDARIN_PHRASES = /(?:我在|你現在|你现在|現在想|现在想|想聊|聊天|什麼事|什么事|怎麼了|怎么了|在哪裡|在哪里|為什麼|为什么|沒有|没有|告訴我|告诉我|我們|我们)/u
 const CJK = /[\u3400-\u9fff\uf900-\ufaff]/u
 const JAPANESE = /[\u3040-\u30ff]/u
 const LATIN = /[A-Za-z]/u
+const LATIN_WORDS = /[A-Za-z]+(?:['’-][A-Za-z]+)*/gu
 const NON_VERBAL = /^[\p{P}\p{S}\p{N}\s]+$/u
 
 export type ResponseLanguageAssessment = {
@@ -33,6 +34,7 @@ export type ResponseLanguageAssessment = {
     | 'not_cjk'
     | 'explicit_mandarin'
     | 'cantonese_marker'
+    | 'cantonese_code_switch'
     | 'ambiguous_cjk'
     | 'english'
     | 'mandarin'
@@ -51,7 +53,7 @@ const instructionFor = (code: ResponseLanguageCode, setting: string, strict: boo
 
   switch (code) {
     case 'cantonese':
-      return 'Output language contract: respond exclusively in natural, colloquial Cantonese. Do not answer in English, Mandarin, or another language. Do not translate the response or discuss this instruction. English words are not allowed except when reproducing an unavoidable proper name or exact user quote.'
+      return 'Output language contract: use natural, colloquial Cantonese as the dominant language. Do not answer in Mandarin, full English, or another language. Do not translate the response or discuss this instruction. A small number of common English loanwords or code-switches are allowed only when naturally embedded in Cantonese grammar.'
     case 'english':
       return 'Output language contract: respond exclusively in natural English. Do not answer in another language and do not translate the response.'
     case 'mandarin':
@@ -135,11 +137,17 @@ export const assessResponseLanguage = (
 
   switch (policy.code) {
     case 'cantonese':
-      if (LATIN.test(normalized)) return { compliant: false, reason: 'latin_contamination' }
       if (JAPANESE.test(normalized)) return { compliant: false, reason: 'japanese_contamination' }
       if (!CJK.test(normalized)) return { compliant: false, reason: 'not_cjk' }
       if (STRONG_MANDARIN_PHRASES.test(normalized)) return { compliant: false, reason: 'explicit_mandarin' }
-      if (CANTONESE_MARKERS.test(normalized)) return { compliant: true, reason: 'cantonese_marker' }
+      const hasCantoneseMarker = CANTONESE_MARKERS.test(normalized)
+      if (LATIN.test(normalized)) {
+        const latinWordCount = normalized.match(LATIN_WORDS)?.length || 0
+        return hasCantoneseMarker && latinWordCount <= 3
+          ? { compliant: true, reason: 'cantonese_code_switch' }
+          : { compliant: false, reason: 'latin_contamination' }
+      }
+      if (hasCantoneseMarker) return { compliant: true, reason: 'cantonese_marker' }
       // CJK-only replies are often dialect-ambiguous. Rejecting them
       // would discard valid, natural Cantonese.
       return { compliant: true, reason: 'ambiguous_cjk' }

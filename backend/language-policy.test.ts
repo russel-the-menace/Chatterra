@@ -44,8 +44,22 @@ assert.equal(emptyOutput.rejectionReason, 'empty_provider_output')
 assert.equal(emptyOutput.reply, null)
 
 const codeSwitchedOutput = diagnoseInferenceOutput(plan, '我而家 working，陣間覆你。')
-assert.equal(codeSwitchedOutput.accepted, false)
-assert.equal(codeSwitchedOutput.languageReason, 'latin_contamination')
-assert.equal(codeSwitchedOutput.rejectionReason, 'language_violation')
+assert.equal(codeSwitchedOutput.accepted, true)
+assert.equal(codeSwitchedOutput.languageReason, 'cantonese_code_switch')
+assert.equal(codeSwitchedOutput.reply, '我而家 working，陣間覆你。')
+
+const actualRejectedOutput = diagnoseInferenceOutput(
+  plan,
+  '我仲玩紧我个学粤语嘅app啊，你又丢我，点知你咁认真嘅。'
+)
+assert.equal(actualRejectedOutput.accepted, true)
+assert.equal(actualRejectedOutput.languageReason, 'cantonese_code_switch')
+
+const englishDominantOutput = diagnoseInferenceOutput(
+  plan,
+  '我係 actually working on a very important application today'
+)
+assert.equal(englishDominantOutput.accepted, false)
+assert.equal(englishDominantOutput.languageReason, 'latin_contamination')
 
 console.log('language policy checks passed')

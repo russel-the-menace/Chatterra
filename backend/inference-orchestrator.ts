@@ -606,7 +606,7 @@ const manifestBase = (
 export const buildInferencePlan = async (input: OrchestrationInput): Promise<InferencePlan> => {
   const responseLanguage = resolveResponseLanguagePolicy(input.character.language)
   const style = inferResponseStyle(input.character, input.snapshot, input.message, input.mode)
-  const maxResponseTokens = Math.round(clamp(style.targetWords * 1.55 + 32, 96, 600))
+  const maxResponseTokens = Math.round(clamp(style.targetWords * 2 + 128, 256, 800))
   const tokenBudget = MODEL_CONTEXT_LIMIT - CONTEXT_SAFETY_MARGIN - maxResponseTokens
   const parameters = {
     temperature: FIXED_TEMPERATURE,
