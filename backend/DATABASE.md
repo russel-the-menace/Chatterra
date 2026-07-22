@@ -118,6 +118,11 @@ construction, provider response parsing, output validation, output rejection, an
 persistence. It does not store the API key, full prompt, or raw provider response
 envelope. Query a recent trace with:
 
+Language policy is observe-only during post-processing. Non-empty normalized responses
+are not rejected for a language mismatch. A `language_policy_observed` trace event stores
+bounded script metrics and a likely cause when the configured language and response do
+not match, including substantial English in a Cantonese or Mandarin context.
+
 Accepted assistant output is stored in `messages`. Rejected assistant output is stored
 separately in `inference_records.diagnostics.rejectedOutput`, bounded to 4,000
 characters; prompts and retrieved context are never copied into that field.

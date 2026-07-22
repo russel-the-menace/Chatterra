@@ -414,6 +414,9 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
 
   const outputDiagnostics = diagnoseInferenceOutput(inference, rawReply)
   const { reply: processedReply, ...traceOutputDiagnostics } = outputDiagnostics
+  if (!outputDiagnostics.languageCompliant && processedReply) {
+    trace.mark('language_policy_observed', 'completed', outputDiagnostics.languageObservation)
+  }
   trace.mark('output_processed', 'completed', traceOutputDiagnostics)
   if (!outputDiagnostics.accepted || !processedReply) {
     const rejectionReason = outputDiagnostics.rejectionReason || 'output_rejected'

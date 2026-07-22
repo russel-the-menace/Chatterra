@@ -16,8 +16,9 @@ import {
   ResponseDecision
 } from './types'
 import {
-  assessResponseLanguage,
+  observeResponseLanguage,
   resolveResponseLanguagePolicy,
+  ResponseLanguageObservation,
   ResponseLanguagePolicy
 } from './language-policy'
 import { DIALOGUE_ONLY_INSTRUCTION, normalizeAssistantSpeech } from './response-format'
@@ -791,8 +792,9 @@ export type InferenceOutputDiagnostics = {
   sanitized: boolean
   languageCompliant: boolean
   languageReason: string
+  languageObservation: ResponseLanguageObservation
   accepted: boolean
-  rejectionReason?: 'empty_provider_output' | 'format_violation' | 'language_violation'
+  rejectionReason?: 'empty_provider_output' | 'format_violation'
   reply: string | null
 }
 
@@ -803,18 +805,21 @@ export const diagnoseInferenceOutput = (
   const raw = typeof output === 'string' ? output : ''
   const trimmed = raw.trim()
   const normalized = normalizeAssistantSpeech(raw)
-  const languageAssessment = plan.route === 'direct'
-    ? { compliant: true, reason: 'non_verbal' }
-    : assessResponseLanguage(normalized, plan.responseLanguage)
-  const languageCompliant = languageAssessment.compliant
+  const latestUserMessage = [...plan.messages].reverse()
+    .find(message => message.role === 'user')?.content
+  const languageObservation = observeResponseLanguage(normalized, plan.responseLanguage, {
+    sourceText: latestUserMessage
+  })
+  const languageCompliant = languageObservation.compliant
 
-  if (normalized && languageCompliant) {
+  if (normalized) {
     return {
       rawLength: raw.length,
       normalizedLength: normalized.length,
       sanitized: trimmed !== normalized,
-      languageCompliant: true,
-      languageReason: languageAssessment.reason,
+      languageCompliant,
+      languageReason: languageObservation.reason,
+      languageObservation,
       accepted: true,
       reply: normalized
     }
@@ -825,13 +830,12 @@ export const diagnoseInferenceOutput = (
     normalizedLength: normalized.length,
     sanitized: trimmed !== normalized,
     languageCompliant,
-    languageReason: languageAssessment.reason,
+    languageReason: languageObservation.reason,
+    languageObservation,
     accepted: false,
     rejectionReason: !trimmed
       ? 'empty_provider_output'
-      : !normalized
-        ? 'format_violation'
-        : 'language_violation',
+      : 'format_violation',
     reply: null
   }
 }

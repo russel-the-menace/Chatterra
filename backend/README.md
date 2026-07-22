@@ -67,7 +67,8 @@ text length, reasoning-content length, provider token usage, output validation, 
 rejection reason. If a provider ends because of its output limit without returning
 visible assistant text, the gateway retries once with a bounded output budget. This is
 a provider retry, not a generated fallback: the second response still passes the normal
-format and language checks, and an empty or invalid result remains a failed inference.
+format normalization and language observation, and an empty or format-only result
+remains a failed inference.
 Prompts and secrets are not logged.
 Rejected assistant output is stored in the inference audit as
 `diagnostics.rejectedOutput`, bounded to 4,000 characters. This is the model's attempted
@@ -75,13 +76,14 @@ assistant message only; prompts, API keys, and retrieved context remain excluded
 
 `Character.language` is an output contract. A single-language value such as
 `Cantonese` or `Cantonese only` is treated as strict: starter messages, model prompts,
-and mock responses use that language. Strict model output is validated before it is
-returned, so an English-dominant or explicitly Mandarin response cannot leak through
-for a Cantonese-only character. Natural Cantonese may contain up to three common
-English code-switch tokens when the surrounding grammar is clearly Cantonese; the
-audit records `languageReason: "cantonese_code_switch"`. CJK-only sentences that are
-linguistically ambiguous are accepted rather than falsely rejected. Invalid output is
-audited without generating a replacement message. Chat output also uses a
+and mock responses use that language. Post-response language checks are observational:
+they never suppress a non-empty normalized model response. A mismatch is recorded in
+the inference trace with script counts, English dominance, severity, and a likely cause
+such as user-language mirroring, mixed-language mirroring, dialect drift, or model
+language drift. In particular, substantial English in a Cantonese or Mandarin context
+is logged as `substantial_english_in_chinese_context` and still returned to the user.
+A short CJK term copied from the latest user message by an English teaching character
+is classified as a source-term reference rather than drift. Chat output still uses a
 dialogue-only contract: stage directions, facial-expression narration, inner thoughts,
 and roleplay markup are not shown to the user.
 
