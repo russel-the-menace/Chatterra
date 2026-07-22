@@ -4,6 +4,8 @@ import { VoiceInputStatus, VoiceTranscriptMetadata } from '../voice/types'
 
 type InputBoxProps = {
   onSend: (text: string, voice?: VoiceTranscriptMetadata) => void
+  draft: string
+  onDraftChange: (draft: string) => void
   language?: string
 }
 
@@ -28,21 +30,20 @@ const voiceStatusLabel = (status: VoiceInputStatus, error?: string) => {
   return ''
 }
 
-export default function InputBox({ onSend, language }: InputBoxProps): JSX.Element {
-  const [text, setText] = useState('')
+export default function InputBox({ onSend, draft, onDraftChange, language }: InputBoxProps): JSX.Element {
   const [voiceMetadata, setVoiceMetadata] = useState<VoiceTranscriptMetadata | undefined>()
   const isComposing = useRef(false)
   const voice = useVoiceInput({
     language,
     onTranscriptChange: (transcript, metadata) => {
-      setText(transcript)
+      onDraftChange(transcript)
       setVoiceMetadata(metadata.originalText ? metadata : undefined)
     }
   })
 
   const submit = () => {
     if (voice.status === 'recording' || voice.status === 'processing') return
-    const trimmed = text.trim()
+    const trimmed = draft.trim()
     if (!trimmed) return
 
     const finalVoice = voiceMetadata?.originalText
@@ -52,13 +53,13 @@ export default function InputBox({ onSend, language }: InputBoxProps): JSX.Eleme
         }
       : undefined
     onSend(trimmed, finalVoice)
-    setText('')
+    onDraftChange('')
     setVoiceMetadata(undefined)
     voice.reset()
   }
 
   const handleTextChange = (value: string) => {
-    setText(value)
+    onDraftChange(value)
     if (voiceMetadata && voice.status !== 'recording') {
       setVoiceMetadata(previous => previous
         ? {
@@ -84,7 +85,7 @@ export default function InputBox({ onSend, language }: InputBoxProps): JSX.Eleme
     <div className="input-box">
       <div className="input-compose-row">
         <textarea
-          value={text}
+          value={draft}
           onChange={event => handleTextChange(event.target.value)}
           onCompositionStart={() => {
             isComposing.current = true
@@ -111,7 +112,7 @@ export default function InputBox({ onSend, language }: InputBoxProps): JSX.Eleme
           <button
             type="button"
             className={`voice-button voice-${voice.status}`}
-            onClick={() => voice.toggle(text)}
+            onClick={() => voice.toggle(draft)}
             disabled={voice.status === 'processing'}
             aria-label={buttonLabel}
             aria-pressed={voice.status === 'recording'}
@@ -127,7 +128,7 @@ export default function InputBox({ onSend, language }: InputBoxProps): JSX.Eleme
             type="button"
             className="send"
             onClick={submit}
-            disabled={!text.trim() || voice.status === 'recording' || voice.status === 'processing'}
+            disabled={!draft.trim() || voice.status === 'recording' || voice.status === 'processing'}
           >
             Send
           </button>

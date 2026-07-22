@@ -60,6 +60,8 @@ export default function ChatPage(): JSX.Element{
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [characters, setCharacters] = useState<Character[]>(seedCharacters)
   const [selectedCharacter, setSelectedCharacter] = useState<Character>(seedCharacter)
+  const [messageDrafts, setMessageDrafts] = useState<Record<string, string>>({})
+  const [scrollToEndRequest, setScrollToEndRequest] = useState(0)
   const [behaviorStatus, setBehaviorStatus] = useState('Online')
   const [searchText, setSearchText] = useState('')
   const [proactivePreviews, setProactivePreviews] = useState<Record<string, string>>({})
@@ -411,6 +413,18 @@ export default function ChatPage(): JSX.Element{
     if (uid) void loadHistoryForCharacter(uid, nextCharacter)
   }
 
+  const handleDraftChange = (draft: string) => {
+    const characterId = selectedCharacter.id
+    setMessageDrafts(current => {
+      if (draft) return { ...current, [characterId]: draft }
+      if (!(characterId in current)) return current
+
+      const next = { ...current }
+      delete next[characterId]
+      return next
+    })
+  }
+
   const handleCharacterEditorSave = async () => {
     if (!editingCharacter) return
     if (!editingCharacter.name.trim()) {
@@ -494,6 +508,7 @@ export default function ChatPage(): JSX.Element{
 
   const sendMessage = (text: string, voice?: VoiceTranscriptMetadata) => {
     if (!text) return
+    setScrollToEndRequest(current => current + 1)
     const userMsg: Message = { id: makeMessageId(), sender: 'user', text }
     const loadingId = makeMessageId()
     const loadingMsg: Message = { id: loadingId, sender: 'ai', text: '', loading: true }
@@ -659,8 +674,15 @@ export default function ChatPage(): JSX.Element{
           messages={messages}
           character={selectedCharacter}
           onEditCharacter={() => openCharacterEditor(selectedCharacter)}
+          scrollToEndRequest={scrollToEndRequest}
         />
-        <InputBox onSend={sendMessage} language={selectedCharacter.language} />
+        <InputBox
+          key={selectedCharacter.id}
+          onSend={sendMessage}
+          draft={messageDrafts[selectedCharacter.id] || ''}
+          onDraftChange={handleDraftChange}
+          language={selectedCharacter.language}
+        />
       </main>
 
       {showCharacterEditor && editingCharacter && (
