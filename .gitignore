@@ -6,6 +6,7 @@ dist/
 .env.local
 .env.*
 !backend/.env.example
+!mobile/.env.example
 .DS_Store
 .vscode/
 .idea/

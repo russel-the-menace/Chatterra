@@ -23,6 +23,19 @@ npm install
 npm run dev
 ```
 
+3. Run the Expo/React Native client on an iPhone with Expo Go.
+
+```bash
+cd mobile
+npm install
+npm start
+```
+
+Keep the iPhone and Mac on the same Wi-Fi network, then scan the Metro QR code.
+The mobile client derives the backend LAN host automatically and supports an
+`EXPO_PUBLIC_API_URL` override. See [`mobile/README.md`](mobile/README.md) for
+the complete physical-device setup and Expo Go constraints.
+
 The frontend calls `http://localhost:3000`. Database design and migration details
 are documented in [`backend/DATABASE.md`](backend/DATABASE.md). The target behavioral
 design, including the implemented Inference Orchestrator, is documented in
