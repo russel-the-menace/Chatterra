@@ -18,6 +18,7 @@ import {
 import { generateModelResponse, ModelGatewayError } from './model-gateway'
 import { resolveResponseLanguagePolicy, starterMessageForPolicy } from './language-policy'
 import { createInferenceTrace } from './inference-logger'
+import { processDueProactiveActions } from './proactive-service'
 import {
   clearChatHistory,
   createCharacter,
@@ -100,6 +101,9 @@ const voiceMetadataFromPayload = (payload: any): VoiceTranscriptMetadata | undef
 
 const getStarterMessage = (character?: Character) => {
   const languagePolicy = resolveResponseLanguagePolicy(character?.language)
+  if (character?.id === 'c3') {
+    return "Hey, it's Maya. I just finished sorting out my notes for the day. Come keep me company for a minute?"
+  }
   if (character?.id === 'c2') {
     if (languagePolicy.code === 'english') {
       return 'Hi. I will help you practice English and point out useful mistakes when it helps, while keeping the conversation natural. Tell me about your current project.'
@@ -195,6 +199,13 @@ app.get('/api/characters/:id/state', asyncRoute(async (req, res) => {
     return res.json({ state: publicState, debug: snapshot })
   }
   return res.json({ state: publicState })
+}))
+
+app.post('/api/proactive/poll', asyncRoute(async (req, res) => {
+  const userId = typeof req.body?.userId === 'string' ? req.body.userId.trim() : ''
+  if (!userId) return res.status(400).json({ error: 'userId required' })
+  const deliveries = await processDueProactiveActions({ userId, limit: 2 })
+  return res.json({ deliveries })
 }))
 
 app.delete('/api/chat-history', asyncRoute(async (req, res) => {
@@ -524,6 +535,24 @@ app.use((error: any, _req: Request, res: Response, _next: NextFunction) => {
 })
 
 const port = process.env.PORT ? Number(process.env.PORT) : 3000
+const proactiveIntervalMs = Math.max(
+  10_000,
+  Number(process.env.PROACTIVE_SCHEDULER_INTERVAL_MS) || 30_000
+)
+let proactiveTimer: NodeJS.Timeout | undefined
+let proactiveSchedulerRunning = false
+
+const runProactiveScheduler = async () => {
+  if (proactiveSchedulerRunning) return
+  proactiveSchedulerRunning = true
+  try {
+    await processDueProactiveActions({ limit: 3 })
+  } catch (error) {
+    console.error('Proactive scheduler failed', error)
+  } finally {
+    proactiveSchedulerRunning = false
+  }
+}
 
 const start = async () => {
   const schemaResult = await query(
@@ -542,6 +571,12 @@ const start = async () => {
     throw new Error('Database schema is missing. Run npm run db:migrate first.')
   }
   app.listen(port, () => console.log(`Chatterra backend listening on ${port}`))
+  if (process.env.PROACTIVE_SCHEDULER_ENABLED !== 'false') {
+    proactiveTimer = setInterval(() => void runProactiveScheduler(), proactiveIntervalMs)
+    proactiveTimer.unref()
+    const initialRun = setTimeout(() => void runProactiveScheduler(), 1000)
+    initialRun.unref()
+  }
 }
 
 start().catch(error => {
@@ -550,6 +585,7 @@ start().catch(error => {
 })
 
 const shutdown = () => {
+  if (proactiveTimer) clearInterval(proactiveTimer)
   closeDatabase().finally(() => process.exit())
 }
 

@@ -3,6 +3,11 @@ import { v4 as uuidv4 } from 'uuid'
 import { query, withTransaction } from './database'
 import type { InferencePlan } from './inference-orchestrator'
 import type { InferenceDiagnostics } from './inference-logger'
+import {
+  deriveProactivePolicy,
+  nextProactiveActionAt,
+  ProactivePolicy
+} from './proactive-policy'
 import { decideResponse } from './response-decision'
 import {
   AffectState,
@@ -155,6 +160,12 @@ const activityForHour = (hour: number, character: Character) => {
   return 'available'
 }
 
+const timeZoneForCharacter = (character: Character) => {
+  const authored = `${character.company || ''} ${character.scenario || ''} ${character.background || ''}`.toLowerCase()
+  if (/\b(?:new york|nyc)\b/.test(authored)) return 'America/New_York'
+  return 'Asia/Shanghai'
+}
+
 export const resolveCharacterMode = (character: Character): InteractionMode => {
   const authoredPolicy = [
     character.role,
@@ -264,10 +275,10 @@ const ensureInstance = async (
     [instance.id]
   )
   await client.query(
-    `INSERT INTO simulation_cursors (instance_id)
-     VALUES ($1)
+    `INSERT INTO simulation_cursors (instance_id, local_timezone, routine_seed)
+     VALUES ($1, $2, $3)
      ON CONFLICT (instance_id) DO NOTHING`,
-    [instance.id]
+    [instance.id, timeZoneForCharacter(character), character.id]
   )
   await client.query(
     `INSERT INTO user_learning_profiles (user_id)
@@ -789,6 +800,13 @@ export const prepareInteraction = async ({
 }): Promise<InteractionPreparation> => {
   return withTransaction(async client => {
     const instance = await ensureInstance(client, userId, character, mode)
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [conversationId])
+    await client.query(
+      `UPDATE character_instances
+       SET next_action_at = NULL, updated_at = NOW()
+       WHERE id = $1`,
+      [instance.id]
+    )
     await client.query(
       `INSERT INTO messages (
          id, conversation_id, sender_role, sender_id, content, content_json, created_at
@@ -901,6 +919,244 @@ export const prepareInteraction = async ({
   })
 }
 
+export type ProactiveActionClaim = {
+  instanceId: string
+  userId: string
+  character: Character
+  conversationId: string
+  anchorMessageId: string
+  unansweredCount: number
+  proactiveAttempt: number
+  triggerEventId: string
+  decisionId: string
+  leaseUntil: string
+  policy: ProactivePolicy
+  snapshot: BehaviorSnapshot
+  memoryEnabled: boolean
+}
+
+const characterFromProactiveRow = (row: any): Character => ({
+  id: row.character_id,
+  name: row.character_name,
+  avatar: row.character_avatar || undefined,
+  role: row.character_role || undefined,
+  personality: row.character_personality || undefined,
+  company: row.character_company || undefined,
+  scenario: row.character_scenario || undefined,
+  goal: row.character_goal || undefined,
+  language: row.character_language || undefined,
+  background: row.character_background || undefined,
+  systemPromptTemplate: row.character_system_prompt_template || undefined,
+  currentVersion: Number(row.character_current_version || 1),
+  createdAt: iso(row.character_created_at)!,
+  updatedAt: iso(row.character_updated_at)!
+})
+
+export const claimDueProactiveAction = async ({
+  userId,
+  now = new Date(),
+  candidateLimit = 10
+}: {
+  userId?: string
+  now?: Date
+  candidateLimit?: number
+} = {}): Promise<ProactiveActionClaim | undefined> => {
+  return withTransaction(async client => {
+    const candidates = await client.query(
+      `SELECT
+         ci.*,
+         c.name AS character_name,
+         c.avatar AS character_avatar,
+         c.role AS character_role,
+         c.personality AS character_personality,
+         c.company AS character_company,
+         c.scenario AS character_scenario,
+         c.goal AS character_goal,
+         c.language AS character_language,
+         c.background AS character_background,
+         c.system_prompt_template AS character_system_prompt_template,
+         c.current_version AS character_current_version,
+         c.created_at AS character_created_at,
+         c.updated_at AS character_updated_at,
+         conversation.id AS conversation_id
+       FROM character_instances ci
+       JOIN characters c ON c.id = ci.character_id
+       JOIN LATERAL (
+         SELECT id
+         FROM conversations
+         WHERE user_id = ci.user_id
+           AND character_id = ci.character_id
+           AND status = 'active'
+         ORDER BY last_message_at DESC NULLS LAST, updated_at DESC
+         LIMIT 1
+       ) conversation ON TRUE
+       WHERE ci.mode = 'companion'
+         AND ci.next_action_at IS NOT NULL
+         AND ci.next_action_at <= $1
+         AND ($2::text IS NULL OR ci.user_id = $2)
+       ORDER BY ci.next_action_at, ci.id
+       LIMIT $3
+       FOR UPDATE OF ci SKIP LOCKED`,
+      [now.toISOString(), userId || null, Math.max(1, Math.min(50, Math.round(candidateLimit)))]
+    )
+
+    for (const row of candidates.rows) {
+      const character = characterFromProactiveRow(row)
+      const policy = deriveProactivePolicy(character)
+      if (!policy.enabled) {
+        await client.query('UPDATE character_instances SET next_action_at = NULL WHERE id = $1', [row.id])
+        continue
+      }
+
+      const recentMessages = await client.query(
+        `SELECT id, sender_role, content_json, created_at
+         FROM messages
+         WHERE conversation_id = $1
+         ORDER BY created_at DESC, id DESC
+         LIMIT $2`,
+        [row.conversation_id, policy.maxUnansweredMessages + 8]
+      )
+      const latestMessage = recentMessages.rows[0]
+      if (!latestMessage || latestMessage.sender_role !== 'assistant') {
+        await client.query('UPDATE character_instances SET next_action_at = NULL WHERE id = $1', [row.id])
+        continue
+      }
+
+      let unansweredCount = 0
+      for (const message of recentMessages.rows) {
+        if (message.sender_role === 'user') break
+        if (message.sender_role === 'assistant' && message.content_json?.origin === 'proactive') {
+          unansweredCount += 1
+        }
+      }
+      if (unansweredCount >= policy.maxUnansweredMessages) {
+        await client.query('UPDATE character_instances SET next_action_at = NULL WHERE id = $1', [row.id])
+        continue
+      }
+
+      const instance = mapInstance(row)
+      await advanceState(client, instance, character, now)
+      const refreshedInstanceResult = await client.query(
+        'SELECT * FROM character_instances WHERE id = $1',
+        [instance.id]
+      )
+      const refreshedInstance = mapInstance(refreshedInstanceResult.rows[0])
+      const snapshot = await loadSnapshot(client, refreshedInstance)
+      if (snapshot.simulation.currentActivity === 'sleeping') {
+        const nextAction = nextProactiveActionAt({
+          character,
+          now,
+          seed: `${instance.id}:sleeping:${refreshedInstance.eventSequence}`,
+          unansweredCount
+        })
+        await client.query(
+          'UPDATE character_instances SET next_action_at = $2, updated_at = NOW() WHERE id = $1',
+          [instance.id, nextAction?.toISOString() || null]
+        )
+        continue
+      }
+
+      const leaseUntil = new Date(now.getTime() + 10 * 60_000)
+      await client.query(
+        `UPDATE character_instances
+         SET next_action_at = $2, updated_at = NOW()
+         WHERE id = $1`,
+        [instance.id, leaseUntil.toISOString()]
+      )
+      const triggerEvent = await appendEvent(client, {
+        instanceId: instance.id,
+        userId: row.user_id,
+        characterId: character.id,
+        conversationId: row.conversation_id,
+        eventType: 'proactive_message_due',
+        actorRole: 'scheduler',
+        payload: {
+          unansweredCount,
+          proactiveAttempt: unansweredCount + 1,
+          topicDomains: policy.topicDomains,
+          activity: snapshot.simulation.currentActivity
+        },
+        occurredAt: now,
+        source: 'proactive_scheduler'
+      })
+      const decisionId = uuidv4()
+      await client.query(
+        `INSERT INTO decision_records (
+           id, instance_id, conversation_id, trigger_event_id, mode, action,
+           reason_codes, score_details, due_at
+         ) VALUES ($1, $2, $3, $4, 'companion', 'initiate_conversation', $5::jsonb, $6::jsonb, $7)`,
+        [
+          decisionId,
+          instance.id,
+          row.conversation_id,
+          triggerEvent.id,
+          JSON.stringify(['proactive_action_due', 'character_initiative', 'user_has_not_replied']),
+          JSON.stringify({
+            intensity: policy.intensity,
+            unansweredCount,
+            maxUnansweredMessages: policy.maxUnansweredMessages,
+            activity: snapshot.simulation.currentActivity,
+            topicDomains: policy.topicDomains
+          }),
+          now.toISOString()
+        ]
+      )
+      const consentResult = await client.query(
+        `SELECT CASE
+           WHEN consent_flags ->> 'memoryPersonalization' = 'false' THEN FALSE
+           ELSE TRUE
+         END AS enabled
+         FROM users
+         WHERE id = $1`,
+        [row.user_id]
+      )
+      const claimedInstanceResult = await client.query(
+        'SELECT * FROM character_instances WHERE id = $1',
+        [instance.id]
+      )
+
+      return {
+        instanceId: instance.id,
+        userId: row.user_id,
+        character,
+        conversationId: row.conversation_id,
+        anchorMessageId: latestMessage.id,
+        unansweredCount,
+        proactiveAttempt: unansweredCount + 1,
+        triggerEventId: triggerEvent.id,
+        decisionId,
+        leaseUntil: leaseUntil.toISOString(),
+        policy,
+        snapshot: await loadSnapshot(client, mapInstance(claimedInstanceResult.rows[0])),
+        memoryEnabled: Boolean(consentResult.rows[0]?.enabled)
+      }
+    }
+
+    return undefined
+  })
+}
+
+export const rescheduleProactiveAction = async ({
+  claim,
+  now = new Date()
+}: {
+  claim: ProactiveActionClaim
+  now?: Date
+}) => {
+  const nextAction = nextProactiveActionAt({
+    character: claim.character,
+    now,
+    seed: `${claim.instanceId}:retry:${claim.triggerEventId}`,
+    unansweredCount: claim.unansweredCount
+  })
+  await query(
+    `UPDATE character_instances
+     SET next_action_at = $2, updated_at = NOW()
+     WHERE id = $1 AND next_action_at = $3`,
+    [claim.instanceId, nextAction?.toISOString() || null, claim.leaseUntil]
+  )
+}
+
 export const recordAssistantResponse = async ({
   userId,
   character,
@@ -910,6 +1166,10 @@ export const recordAssistantResponse = async ({
   triggerEventId,
   mode = 'practice',
   content,
+  contentJson,
+  origin = 'reply',
+  proactiveAttempt = 0,
+  expectedLatestMessageId,
   inference,
   generation,
   diagnostics,
@@ -923,6 +1183,10 @@ export const recordAssistantResponse = async ({
   triggerEventId?: string
   mode?: InteractionMode
   content: string
+  contentJson?: Record<string, any>
+  origin?: 'reply' | 'proactive'
+  proactiveAttempt?: number
+  expectedLatestMessageId?: string
   inference: InferencePlan
   generation?: {
     provider?: string
@@ -938,11 +1202,30 @@ export const recordAssistantResponse = async ({
 }) => {
   return withTransaction(async client => {
     const instance = await ensureInstance(client, userId, character, mode)
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [conversationId])
+    if (expectedLatestMessageId) {
+      const latestMessageResult = await client.query(
+        `SELECT id
+         FROM messages
+         WHERE conversation_id = $1
+         ORDER BY created_at DESC, id DESC
+         LIMIT 1`,
+        [conversationId]
+      )
+      if (latestMessageResult.rows[0]?.id !== expectedLatestMessageId) return undefined
+    }
     await client.query(
       `INSERT INTO messages (
-         id, conversation_id, sender_role, sender_id, content, created_at
-       ) VALUES ($1, $2, 'assistant', $3, $4, $5)`,
-      [messageId, conversationId, character.id, content, now.toISOString()]
+         id, conversation_id, sender_role, sender_id, content, content_json, created_at
+       ) VALUES ($1, $2, 'assistant', $3, $4, $5::jsonb, $6)`,
+      [
+        messageId,
+        conversationId,
+        character.id,
+        content,
+        contentJson ? JSON.stringify(contentJson) : null,
+        now.toISOString()
+      ]
     )
     await client.query(
       `UPDATE conversations SET
@@ -958,22 +1241,52 @@ export const recordAssistantResponse = async ({
       characterId: character.id,
       conversationId,
       messageId,
-      eventType: 'assistant_message_committed',
+      eventType: origin === 'proactive' ? 'proactive_message_committed' : 'assistant_message_committed',
       actorRole: 'character',
       actorId: character.id,
-      payload: { length: content.length, mode, inferenceRoute: inference.route },
+      payload: {
+        length: content.length,
+        mode,
+        inferenceRoute: inference.route,
+        origin,
+        proactiveAttempt: origin === 'proactive' ? proactiveAttempt : undefined
+      },
       occurredAt: now,
-      source: 'chat'
+      source: origin === 'proactive' ? 'proactive_scheduler' : 'chat'
+    })
+    if (origin === 'proactive') {
+      await client.query(
+        `UPDATE relationship_states SET
+           familiarity = LEAST(1, familiarity + 0.002),
+           version = version + 1,
+           as_of = $2,
+           updated_at = NOW()
+         WHERE instance_id = $1`,
+        [instance.id, now.toISOString()]
+      )
+    } else {
+      await client.query(
+        `UPDATE relationship_states SET
+           familiarity = LEAST(1, familiarity + 0.004),
+           reciprocity = LEAST(1, reciprocity + 0.003),
+           version = version + 1,
+           as_of = $2,
+           updated_at = NOW()
+         WHERE instance_id = $1`,
+        [instance.id, now.toISOString()]
+      )
+    }
+    const nextAction = nextProactiveActionAt({
+      character,
+      now,
+      seed: `${instance.id}:${event.sequence}:${messageId}`,
+      unansweredCount: origin === 'proactive' ? proactiveAttempt : 0
     })
     await client.query(
-      `UPDATE relationship_states SET
-         familiarity = LEAST(1, familiarity + 0.004),
-         reciprocity = LEAST(1, reciprocity + 0.003),
-         version = version + 1,
-         as_of = $2,
-         updated_at = NOW()
-       WHERE instance_id = $1`,
-      [instance.id, now.toISOString()]
+      `UPDATE character_instances
+       SET next_action_at = $2, updated_at = NOW()
+       WHERE id = $1`,
+      [instance.id, nextAction?.toISOString() || null]
     )
     const latencyMs = generation?.latencyMs == null
       ? 0

@@ -11,6 +11,11 @@ type Point = { x: number; y: number }
 
 const makeMessageId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`
 const isImageAvatar = (avatar?: string) => Boolean(avatar && /^(data:image\/|blob:|https?:\/\/|\/)/.test(avatar))
+const mapServerMessages = (items: any[]): Message[] => items.map((message: any) => ({
+  id: String(message.id),
+  sender: message.senderRole === 'user' ? 'user' : 'ai',
+  text: message.content
+}))
 
 const avatarContent = (character: Pick<Character, 'avatar' | 'name'>) => {
   if (isImageAvatar(character.avatar)) {
@@ -57,6 +62,8 @@ export default function ChatPage(): JSX.Element{
   const [selectedCharacter, setSelectedCharacter] = useState<Character>(seedCharacter)
   const [behaviorStatus, setBehaviorStatus] = useState('Online')
   const [searchText, setSearchText] = useState('')
+  const [proactivePreviews, setProactivePreviews] = useState<Record<string, string>>({})
+  const [unreadCharacterIds, setUnreadCharacterIds] = useState<Set<string>>(() => new Set())
   const [showAddDrawer, setShowAddDrawer] = useState(false)
   const [showCharacterEditor, setShowCharacterEditor] = useState(false)
   const [editingCharacter, setEditingCharacter] = useState<Character | null>(null)
@@ -96,11 +103,7 @@ export default function ChatPage(): JSX.Element{
 
         const mRes = await fetch(`http://localhost:3000/api/conversations/${matchingConversation.id}/messages`)
         const mData = await mRes.json()
-        const mapped: Message[] = (mData.messages || []).map((m: any) => ({
-          id: String(m.id),
-          sender: m.senderRole === 'user' ? 'user' : 'ai',
-          text: m.content
-        }))
+        const mapped = mapServerMessages(mData.messages || [])
         setMessages(mapped)
         return
       }
@@ -295,10 +298,115 @@ export default function ChatPage(): JSX.Element{
     void loadCharacters()
   }, [])
 
+  useEffect(() => {
+    if (!userId) return
+    let stopped = false
+    let polling = false
+
+    const pollForProactiveMessages = async () => {
+      if (polling || document.visibilityState === 'hidden') return
+      polling = true
+      try {
+        const response = await fetch('http://localhost:3000/api/proactive/poll', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId })
+        })
+        if (!response.ok) return
+        const data = await response.json()
+        if (stopped || !Array.isArray(data.deliveries) || data.deliveries.length === 0) return
+        setProactivePreviews(current => {
+          const next = { ...current }
+          data.deliveries.forEach((delivery: any) => {
+            if (typeof delivery.characterId === 'string' && typeof delivery.content === 'string') {
+              next[delivery.characterId] = delivery.content
+            }
+          })
+          return next
+        })
+        setUnreadCharacterIds(current => {
+          const next = new Set(current)
+          data.deliveries.forEach((delivery: any) => {
+            if (delivery.characterId && delivery.characterId !== selectedCharacter.id) {
+              next.add(String(delivery.characterId))
+            }
+          })
+          return next
+        })
+      } catch {
+        // The regular chat request will surface backend availability when the user sends.
+      } finally {
+        polling = false
+      }
+    }
+
+    void pollForProactiveMessages()
+    const interval = window.setInterval(() => void pollForProactiveMessages(), 15_000)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') void pollForProactiveMessages()
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      stopped = true
+      window.clearInterval(interval)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [userId, selectedCharacter.id])
+
+  useEffect(() => {
+    if (!conversationId) return
+    let stopped = false
+    let syncing = false
+
+    const syncConversation = async () => {
+      if (syncing || document.visibilityState === 'hidden') return
+      syncing = true
+      try {
+        const response = await fetch(`http://localhost:3000/api/conversations/${conversationId}/messages`)
+        if (!response.ok) return
+        const data = await response.json()
+        if (stopped || !Array.isArray(data.messages)) return
+        const serverMessages = mapServerMessages(data.messages)
+        setMessages(current => {
+          if (current.some(message => message.loading)) return current
+          const unchanged = current.length === serverMessages.length
+            && current.every((message, index) => (
+              message.id === serverMessages[index]?.id
+              && message.sender === serverMessages[index]?.sender
+              && message.text === serverMessages[index]?.text
+            ))
+          return unchanged ? current : serverMessages
+        })
+      } catch {
+        // Keep the current local transcript until the backend is reachable again.
+      } finally {
+        syncing = false
+      }
+    }
+
+    const interval = window.setInterval(() => void syncConversation(), 15_000)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') void syncConversation()
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      stopped = true
+      window.clearInterval(interval)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [conversationId])
+
   const handleCharacterSelect = (nextCharacter: Character) => {
     setSelectedCharacter(nextCharacter)
     setBehaviorStatus('Online')
     localStorage.setItem('chatterra_characterId', nextCharacter.id)
+    setUnreadCharacterIds(current => {
+      if (!current.has(nextCharacter.id)) return current
+      const next = new Set(current)
+      next.delete(nextCharacter.id)
+      return next
+    })
     const uid = userId || localStorage.getItem('chatterra_userId')
     if (uid) void loadHistoryForCharacter(uid, nextCharacter)
   }
@@ -510,10 +618,11 @@ export default function ChatPage(): JSX.Element{
                 {avatarContent(ch)}
               </div>
               <div className="contact-meta">
-                <div className="contact-name">
-                  {ch.name}
+                <div className="contact-name-row">
+                  <div className="contact-name">{ch.name}</div>
+                  {unreadCharacterIds.has(ch.id) && <span className="contact-unread" aria-label="New message" />}
                 </div>
-                <div className="contact-preview">{ch.personality}</div>
+                <div className="contact-preview">{proactivePreviews[ch.id] || ch.personality}</div>
               </div>
             </button>
           ))}

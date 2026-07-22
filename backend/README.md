@@ -32,13 +32,19 @@ Environment variables:
   projections in the character-state endpoint.
 - `DEEPSEEK_LIGHT_MODEL`: optional provider model used for low-complexity companion
   turns. The orchestrator falls back to `DEEPSEEK_MODEL` when it is absent.
+- `PROACTIVE_SCHEDULER_ENABLED`: set to `false` to disable background character
+  initiation; enabled by default.
+- `PROACTIVE_SCHEDULER_INTERVAL_MS`: scheduler scan interval, default `30000`.
+- `PROACTIVE_MIN_DELAY_MINUTES` and `PROACTIVE_MAX_DELAY_MINUTES`: optional internal
+  development overrides for character-derived initiative timing. They are not user settings.
 - `PORT`: API port, default `3000`.
 
 The chat API does not accept a user-selected interaction mode. It derives an internal
 base policy from the stored character definition. Teaching characters retain their
 learning role, while the Inference Orchestrator can prioritize grief, distress, or
-relationship repair over correction for the current turn. Delayed and proactive
-delivery will use the persisted decision/outbox boundary in a later slice.
+relationship repair over correction for the current turn. Proactive companion
+initiation uses the same persisted decision, inference, generation, event, and outbox
+records as user-triggered chat.
 
 Memory is automatic by default. The UI intentionally has no memory toggle; the
 backend preference endpoint remains available for explicit privacy administration.
@@ -59,6 +65,15 @@ memory candidates, state changes, decision record, and `none` inference audit.
 Rejected or empty model output also produces no assistant message, but is recorded
 separately as `responseStatus: "inference_failed"`; it is never treated as a character
 decision and never replaced with synthetic dialogue.
+
+Characters whose authored persona explicitly expresses initiative derive a private
+proactive policy; there is no user-facing toggle or timing control. After an assistant
+turn, the policy writes a jittered `character_instances.next_action_at`. The scheduler
+claims due work with a lease, skips sleeping characters, verifies that the user has not
+replied during generation, and caps consecutive unanswered proactive messages. Topic
+selection happens inside the Inference Orchestrator from persona domains, current
+activity, recent conversation, memories, and affect. The prompt prohibits guilt,
+pressure, relationship tests, fabricated emergencies, and mention of scheduling.
 
 Every chat request emits structured inference trace logs and returns a `traceId`. The
 same metadata is stored in `inference_records.diagnostics` and

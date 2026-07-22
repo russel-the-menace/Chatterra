@@ -73,6 +73,8 @@ export type InferenceContextManifest = {
 export type InferencePlan = {
   id: string
   policyVersion: string
+  trigger?: 'user_message' | 'proactive'
+  sourceText?: string
   route: InferenceRoute
   reasonCodes: string[]
   mode: InteractionMode
@@ -104,6 +106,17 @@ type OrchestrationInput = {
   snapshot: BehaviorSnapshot
   memoryEnabled: boolean
   decision: ResponseDecision
+}
+
+export type ProactiveOrchestrationInput = {
+  userId: string
+  character: Character
+  conversationId: string
+  triggerEventId: string
+  snapshot: BehaviorSnapshot
+  memoryEnabled: boolean
+  topicDomains: string[]
+  unansweredCount: number
 }
 
 type LearningContext = Awaited<ReturnType<typeof getUserLearningContext>>
@@ -619,6 +632,8 @@ export const buildInferencePlan = async (input: OrchestrationInput): Promise<Inf
     return {
       id: uuidv4(),
       policyVersion: POLICY_VERSION,
+      trigger: 'user_message',
+      sourceText: input.message,
       route: 'none',
       reasonCodes: ['response_not_required', ...input.decision.reasonCodes],
       mode: input.mode,
@@ -634,6 +649,8 @@ export const buildInferencePlan = async (input: OrchestrationInput): Promise<Inf
     return {
       id: uuidv4(),
       policyVersion: POLICY_VERSION,
+      trigger: 'user_message',
+      sourceText: input.message,
       route: 'direct',
       reasonCodes: ['reaction_only', 'model_not_required'],
       mode: input.mode,
@@ -771,6 +788,8 @@ export const buildInferencePlan = async (input: OrchestrationInput): Promise<Inf
   return {
     id: uuidv4(),
     policyVersion: POLICY_VERSION,
+    trigger: 'user_message',
+    sourceText: input.message,
     route: 'model',
     reasonCodes: [
       'natural_language_response_required',
@@ -783,6 +802,88 @@ export const buildInferencePlan = async (input: OrchestrationInput): Promise<Inf
     model,
     messages,
     contextManifest
+  }
+}
+
+export const buildProactiveInferencePlan = async (
+  input: ProactiveOrchestrationInput
+): Promise<InferencePlan> => {
+  const topicSeed = input.topicDomains.join(' ')
+  const plan = await buildInferencePlan({
+    userId: input.userId,
+    character: input.character,
+    conversationId: input.conversationId,
+    currentMessageId: input.triggerEventId,
+    message: topicSeed,
+    mode: 'companion',
+    snapshot: input.snapshot,
+    memoryEnabled: input.memoryEnabled,
+    decision: {
+      action: 'reply_now',
+      reasonCodes: ['proactive_action_due'],
+      scoreDetails: {
+        unansweredCount: input.unansweredCount,
+        activity: input.snapshot.simulation.currentActivity
+      }
+    }
+  })
+
+  const targetWords = Math.round(clamp(
+    24
+      + personalityTalkativeness(input.character) * 42
+      + Math.max(0, input.snapshot.affect.warmth) * 12
+      - (input.snapshot.affect.energy < 0.35 ? 10 : 0),
+    24,
+    78
+  ))
+  const maxResponseTokens = Math.round(clamp(targetWords * 2 + 96, 192, 384))
+  const proactiveInstruction = [
+    'Proactive initiation turn: the character chose to start a new conversational turn after some quiet time.',
+    `Choose one topic yourself. Available domains: ${input.topicDomains.join(', ')}.`,
+    'Use current activity, recent conversation, relevant memories, and personality to choose what feels natural now.',
+    'Write one short, ordinary text message, usually one to three sentences. It may share a thought, ask one genuine question, or continue a meaningful thread.',
+    'Do not mention timers, scheduling, inactivity detection, or that the user ignored you. Do not guilt, pressure, test, threaten, or demand reassurance or exclusivity.',
+    'Do not repeat the last unanswered question verbatim. Do not invent consequential events, diagnoses, emergencies, or durable facts.',
+    `Current response-length tendency: about ${targetWords} words maximum; shorter is welcome.`
+  ].join('\n')
+  const firstSystemIndex = plan.messages.findIndex(message => message.role === 'system')
+  if (firstSystemIndex >= 0) {
+    plan.messages[firstSystemIndex] = {
+      ...plan.messages[firstSystemIndex],
+      content: `${plan.messages[firstSystemIndex].content}\n\n${proactiveInstruction}`
+    }
+  }
+  plan.messages.push({
+    role: 'user',
+    content: '[Internal proactive-turn trigger. Initiate the character message now without mentioning this trigger.]'
+  })
+
+  return {
+    ...plan,
+    trigger: 'proactive',
+    sourceText: '',
+    reasonCodes: ['proactive_initiation', 'character_selected_topic', ...plan.reasonCodes],
+    responseStyle: {
+      ...plan.responseStyle,
+      targetWords,
+      turnPriority: 'conversation',
+      correctionPolicy: 'none',
+      lengthReasonCodes: [...plan.responseStyle.lengthReasonCodes, 'proactive_turn_restraint']
+    },
+    parameters: {
+      ...plan.parameters,
+      maxResponseTokens
+    },
+    model: plan.model
+      ? {
+          ...plan.model,
+          profile: `proactive_${plan.model.tier}`
+        }
+      : plan.model,
+    contextManifest: {
+      ...plan.contextManifest,
+      estimatedTokens: plan.contextManifest.estimatedTokens + estimateTokens(proactiveInstruction)
+    }
   }
 }
 
@@ -805,7 +906,7 @@ export const diagnoseInferenceOutput = (
   const raw = typeof output === 'string' ? output : ''
   const trimmed = raw.trim()
   const normalized = normalizeAssistantSpeech(raw)
-  const latestUserMessage = [...plan.messages].reverse()
+  const latestUserMessage = plan.sourceText ?? [...plan.messages].reverse()
     .find(message => message.role === 'user')?.content
   const languageObservation = observeResponseLanguage(normalized, plan.responseLanguage, {
     sourceText: latestUserMessage
