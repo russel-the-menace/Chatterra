@@ -55,6 +55,15 @@ such as `👍` through a direct route without calling a model. It can also accep
 Decision Engine's `no_reply` action as a `none` route, skipping retrieval and model
 generation entirely. Model settings are not part of the character API.
 
+Response length is a conversational upper tendency, not a quota. Casual turns default
+to compact replies, while information demand, narrative depth, emotional importance,
+personality, energy, and relationship state can expand or contract the target. A
+separate message-cadence policy lets a character return one to three chat bubbles when
+their persona and established history support that style. The provider marks intentional
+bubble boundaries with an internal separator; the server validates and stores them in
+`messages.content_json.deliverySegments` while retaining one complete assistant turn for
+memory, context, and inference auditing.
+
 Companion turns do not automatically require a visible answer. The reply policy uses
 message demand, character personality and availability, affect, relationship warmth,
 and conversational momentum. Silence is deterministic and audited; it is never inferred

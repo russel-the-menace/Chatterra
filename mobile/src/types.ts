@@ -31,6 +31,7 @@ export type ServerMessage = {
   senderRole: 'user' | 'assistant' | 'system'
   senderId?: string
   content: string
+  contentJson?: Record<string, unknown>
   createdAt: string
 }
 
@@ -39,6 +40,10 @@ export type ChatMessage = {
   sender: 'user' | 'assistant'
   text: string
   loading?: boolean
+  groupIndex?: number
+  groupSize?: number
+  animateEntry?: boolean
+  animationDelayMs?: number
   createdAt?: string
 }
 
@@ -52,6 +57,8 @@ export type PublicCharacterState = {
 
 export type ChatResponse = {
   reply: string | null
+  replySegments?: string[]
+  messageId?: string
   conversationId: string
   behavior?: {
     emotion?: string
@@ -67,5 +74,6 @@ export type ProactiveDelivery = {
   conversationId?: string
   messageId?: string
   content: string
+  replySegments?: string[]
   createdAt?: string
 }

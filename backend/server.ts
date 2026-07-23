@@ -424,7 +424,11 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
   }
 
   const outputDiagnostics = diagnoseInferenceOutput(inference, rawReply)
-  const { reply: processedReply, ...traceOutputDiagnostics } = outputDiagnostics
+  const {
+    reply: processedReply,
+    deliverySegments,
+    ...traceOutputDiagnostics
+  } = outputDiagnostics
   if (!outputDiagnostics.languageCompliant && processedReply) {
     trace.mark('language_policy_observed', 'completed', outputDiagnostics.languageObservation)
   }
@@ -478,17 +482,20 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
     })
   }
   const reply = processedReply
+  const replySegments = deliverySegments.length > 0 ? deliverySegments : [reply]
   const assistantMessage: Message = {
     id: newId(),
     conversationId: conversation.id,
     senderRole: 'assistant',
     senderId: storedCharacter.id,
     content: reply,
+    contentJson: { deliverySegments: replySegments },
     createdAt: new Date().toISOString()
   }
   trace.mark('response_ready_for_persistence', 'completed', {
     messageId: assistantMessage.id,
-    replyLength: reply.length
+    replyLength: reply.length,
+    deliverySegmentCount: replySegments.length
   })
   try {
     await recordAssistantResponse({
@@ -500,6 +507,7 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
       triggerEventId: preparation.triggerEventId,
       mode,
       content: reply,
+      contentJson: assistantMessage.contentJson,
       inference,
       generation,
       diagnostics: trace.snapshot(),
@@ -516,6 +524,8 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
 
   return res.json({
     reply,
+    replySegments,
+    messageId: assistantMessage.id,
     conversationId: conversation.id,
     behavior: {
       emotion: preparation.snapshot.emotionLabel,

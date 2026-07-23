@@ -87,7 +87,8 @@ For every incoming message, the API:
 6. Records an explainable `reply_now` or `no_reply` behavioral policy decision.
 7. The Inference Orchestrator maps `no_reply` to a `none` route without retrieval or a
    provider call. Otherwise it decides whether a model is needed, retrieves context,
-   builds a token-budgeted prompt, and derives response length and provider parameters.
+   builds a token-budgeted prompt, and derives response length, message cadence, and
+   provider parameters.
 8. Persists either a no-reply event and inference audit, or the assistant message,
    event, inference audit, and (for model routes) provider generation audit.
 
@@ -130,6 +131,12 @@ not match, including substantial English in a Cantonese or Mandarin context.
 Accepted assistant output is stored in `messages`. Rejected assistant output is stored
 separately in `inference_records.diagnostics.rejectedOutput`, bounded to 4,000
 characters; prompts and retrieved context are never copied into that field.
+
+An assistant inference remains one durable `messages` row even when its delivery style
+uses multiple visible chat bubbles. The complete normalized turn is stored in `content`;
+validated bubble boundaries are stored as `content_json.deliverySegments`. This keeps
+retrieval, inference records, and generation records turn-oriented while allowing every
+client to render the same one-to-three-bubble cadence.
 
 ```sql
 SELECT created_at, provider, model, status, diagnostics

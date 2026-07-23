@@ -21,6 +21,7 @@ export type ProactiveDelivery = {
   conversationId: string
   characterId: string
   content: string
+  replySegments: string[]
   createdAt: string
 }
 
@@ -127,7 +128,7 @@ const processClaim = async (claim: ProactiveActionClaim): Promise<ProactiveDeliv
   }
 
   const outputDiagnostics = diagnoseInferenceOutput(inference, rawReply)
-  const { reply, ...traceOutputDiagnostics } = outputDiagnostics
+  const { reply, deliverySegments, ...traceOutputDiagnostics } = outputDiagnostics
   if (!outputDiagnostics.languageCompliant && reply) {
     trace.mark('language_policy_observed', 'completed', outputDiagnostics.languageObservation)
   }
@@ -154,6 +155,7 @@ const processClaim = async (claim: ProactiveActionClaim): Promise<ProactiveDeliv
     return undefined
   }
 
+  const replySegments = deliverySegments.length > 0 ? deliverySegments : [reply]
   const createdAt = new Date()
   const messageId = newId()
   const committedEventId = await recordAssistantResponse({
@@ -167,6 +169,7 @@ const processClaim = async (claim: ProactiveActionClaim): Promise<ProactiveDeliv
     content: reply,
     contentJson: {
       origin: 'proactive',
+      deliverySegments: replySegments,
       proactive: {
         attempt: claim.proactiveAttempt,
         topicDomains: claim.policy.topicDomains,
@@ -199,13 +202,15 @@ const processClaim = async (claim: ProactiveActionClaim): Promise<ProactiveDeliv
     messageId,
     conversationId: claim.conversationId,
     eventId: committedEventId,
-    replyLength: reply.length
+    replyLength: reply.length,
+    deliverySegmentCount: replySegments.length
   })
   return {
     messageId,
     conversationId: claim.conversationId,
     characterId: claim.character.id,
     content: reply,
+    replySegments,
     createdAt: createdAt.toISOString()
   }
 }

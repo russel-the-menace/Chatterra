@@ -10,7 +10,10 @@ import {
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   FlatList,
+  Keyboard,
+  KeyboardEvent,
   KeyboardAvoidingView,
   NativeScrollEvent,
   NativeSyntheticEvent,
@@ -28,18 +31,55 @@ import { api } from '@/src/api'
 import { useChat } from '@/src/chat-context'
 import { starterMessageForCharacter } from '@/src/starter-message'
 import { palette } from '@/src/theme'
-import { ChatMessage, ServerMessage } from '@/src/types'
+import { ChatMessage, ChatResponse, ServerMessage } from '@/src/types'
 
 const createLocalId = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`
 
+const deliverySegments = (message: ServerMessage): string[] => {
+  const stored = message.contentJson?.deliverySegments
+  if (message.senderRole === 'assistant' && Array.isArray(stored)) {
+    const segments = stored.filter((segment): segment is string => (
+      typeof segment === 'string' && Boolean(segment.trim())
+    ))
+    if (segments.length > 0) return segments
+  }
+  return [message.content]
+}
+
 const mapMessages = (messages: ServerMessage[]): ChatMessage[] => messages
   .filter(message => message.senderRole !== 'system')
-  .map(message => ({
-    id: message.id,
-    sender: message.senderRole === 'user' ? 'user' : 'assistant',
-    text: message.content,
-    createdAt: message.createdAt,
+  .flatMap(message => {
+    const segments = deliverySegments(message)
+    return segments.map((text, index) => ({
+      id: segments.length === 1 ? message.id : `${message.id}:segment:${index}`,
+      sender: message.senderRole === 'user' ? 'user' as const : 'assistant' as const,
+      text,
+      groupIndex: index,
+      groupSize: segments.length,
+      createdAt: message.createdAt,
+    }))
+  })
+
+const responseMessages = (response: ChatResponse): ChatMessage[] => {
+  const stored = Array.isArray(response.replySegments)
+    ? response.replySegments.filter((segment): segment is string => (
+        typeof segment === 'string' && Boolean(segment.trim())
+      ))
+    : []
+  const segments = stored.length > 0
+    ? stored
+    : typeof response.reply === 'string' ? [response.reply] : []
+  const baseId = response.messageId || createLocalId()
+  return segments.map((text, index) => ({
+    id: segments.length === 1 ? baseId : `${baseId}:segment:${index}`,
+    sender: 'assistant',
+    text,
+    groupIndex: index,
+    groupSize: segments.length,
+    animateEntry: true,
+    animationDelayMs: index * 90,
   }))
+}
 
 const formatActivity = (activity?: string) => {
   if (!activity) return 'Online'
@@ -59,16 +99,42 @@ function MessageRow({
   onEditCharacter: () => void
 }) {
   const isUser = message.sender === 'user'
+  const isContinuation = !isUser && (message.groupIndex || 0) > 0
+  const hasFollowingSegment = (message.groupIndex || 0) < (message.groupSize || 1) - 1
+  const entryProgress = useRef(new Animated.Value(message.animateEntry ? 0 : 1)).current
+
+  useEffect(() => {
+    if (!message.animateEntry) return
+    Animated.timing(entryProgress, {
+      toValue: 1,
+      duration: 230,
+      delay: message.animationDelayMs || 0,
+      useNativeDriver: true,
+    }).start()
+  }, [entryProgress, message.animateEntry, message.animationDelayMs])
 
   return (
-    <View style={[styles.messageRow, isUser ? styles.messageRowUser : styles.messageRowAssistant]}>
-      {!isUser && (
+    <Animated.View
+      style={[
+        styles.messageRow,
+        isUser ? styles.messageRowUser : styles.messageRowAssistant,
+        hasFollowingSegment && styles.messageRowGrouped,
+        {
+          opacity: entryProgress,
+          transform: [{
+            translateY: entryProgress.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }),
+          }],
+        },
+      ]}
+    >
+      {!isUser && !isContinuation && (
         <Pressable onPress={onEditCharacter} accessibilityLabel={`Edit ${characterName}`}>
           <Avatar avatar={characterAvatar} name={characterName} size={34} />
         </Pressable>
       )}
+      {isContinuation && <View style={styles.avatarSpacer} />}
       <View style={[styles.messageContent, isUser && styles.messageContentUser]}>
-        {!isUser && (
+        {!isUser && !isContinuation && (
           <Pressable onPress={onEditCharacter} hitSlop={5}>
             <Text style={styles.messageAuthor}>{characterName}</Text>
           </Pressable>
@@ -84,7 +150,7 @@ function MessageRow({
         </View>
       </View>
       {isUser && <Avatar name="Me" avatar="Me" size={34} muted />}
-    </View>
+    </Animated.View>
   )
 }
 
@@ -111,6 +177,7 @@ export default function ChatScreen() {
   const [activity, setActivity] = useState('Online')
   const [loadingHistory, setLoadingHistory] = useState(true)
   const [sending, setSending] = useState(false)
+  const [keyboardVisible, setKeyboardVisible] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const listRef = useRef<FlatList<ChatMessage> | null>(null)
   const historyRequestRef = useRef(0)
@@ -119,6 +186,31 @@ export default function ChatScreen() {
   const followLatestRef = useRef(true)
   const initialScrollRef = useRef(true)
   const pendingSendScrollRef = useRef<'auto' | 'animated' | null>(null)
+
+  useEffect(() => {
+    const handleKeyboardTransition = (event: KeyboardEvent, visible: boolean) => {
+      Keyboard.scheduleLayoutAnimation(event)
+      setKeyboardVisible(visible)
+      if (!atBottomRef.current && !followLatestRef.current) return
+      followLatestRef.current = true
+      requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }))
+    }
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow'
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide'
+    const showSubscription = Keyboard.addListener(
+      showEvent,
+      event => handleKeyboardTransition(event, true)
+    )
+    const hideSubscription = Keyboard.addListener(
+      hideEvent,
+      event => handleKeyboardTransition(event, false)
+    )
+
+    return () => {
+      showSubscription.remove()
+      hideSubscription.remove()
+    }
+  }, [])
 
   useEffect(() => {
     if (!characterId) return
@@ -188,7 +280,27 @@ export default function ChatScreen() {
     if (!conversationId || sendingRef.current) return
     try {
       const serverMessages = await api.listMessages(conversationId)
-      setMessages(current => current.some(message => message.loading) ? current : mapMessages(serverMessages))
+      const mapped = mapMessages(serverMessages)
+      setMessages(current => {
+        if (current.some(message => message.loading)) return current
+        const existingIds = new Set(current.map(message => message.id))
+        let animationIndex = 0
+        const next = mapped.map(message => {
+          if (message.sender !== 'assistant' || existingIds.has(message.id)) return message
+          const animatedMessage = {
+            ...message,
+            animateEntry: true,
+            animationDelayMs: animationIndex * 90,
+          }
+          animationIndex += 1
+          return animatedMessage
+        })
+        if (animationIndex > 0 && (atBottomRef.current || followLatestRef.current)) {
+          followLatestRef.current = true
+          pendingSendScrollRef.current = 'animated'
+        }
+        return next
+      })
     } catch {
       // Keep the current local transcript while connectivity recovers.
     }
@@ -287,10 +399,13 @@ export default function ChatScreen() {
       if (response.reply === null || response.behavior?.decision === 'no_reply') {
         setMessages(current => current.filter(message => message.id !== loadingId))
       } else if (typeof response.reply === 'string') {
-        setMessages(current => current.map(message => message.id === loadingId
-          ? { id: createLocalId(), sender: 'assistant', text: response.reply as string }
-          : message
-        ))
+        const incomingMessages = responseMessages(response)
+        if (incomingMessages.length === 0) throw new Error('The server returned no usable response.')
+        pendingSendScrollRef.current = 'animated'
+        followLatestRef.current = true
+        setMessages(current => current.flatMap(message => (
+          message.id === loadingId ? incomingMessages : [message]
+        )))
       } else {
         throw new Error('The server returned no usable response.')
       }
@@ -386,6 +501,7 @@ export default function ChatScreen() {
           style={styles.messageList}
           contentContainerStyle={styles.messageListContent}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
           onScroll={handleScroll}
           onScrollBeginDrag={() => {
             followLatestRef.current = false
@@ -402,7 +518,10 @@ export default function ChatScreen() {
           </Pressable>
         )}
 
-        <View style={[styles.composer, { paddingBottom: Math.max(8, insets.bottom) }]}>
+        <View style={[
+          styles.composer,
+          { paddingBottom: keyboardVisible ? 8 : Math.max(8, insets.bottom) },
+        ]}>
           <TextInput
             value={draft}
             onChangeText={text => setDraft(character.id, text)}
@@ -494,7 +613,7 @@ const styles = StyleSheet.create({
   messageListContent: {
     paddingHorizontal: 12,
     paddingTop: 18,
-    paddingBottom: 16,
+    paddingBottom: 8,
   },
   messageRow: {
     width: '100%',
@@ -502,6 +621,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: 8,
+  },
+  messageRowGrouped: {
+    marginBottom: 6,
   },
   messageRowAssistant: {
     justifyContent: 'flex-start',
@@ -515,6 +637,10 @@ const styles = StyleSheet.create({
   },
   messageContentUser: {
     alignItems: 'flex-end',
+  },
+  avatarSpacer: {
+    width: 34,
+    height: 1,
   },
   messageAuthor: {
     marginLeft: 2,

@@ -11,11 +11,41 @@ type Point = { x: number; y: number }
 
 const makeMessageId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`
 const isImageAvatar = (avatar?: string) => Boolean(avatar && /^(data:image\/|blob:|https?:\/\/|\/)/.test(avatar))
-const mapServerMessages = (items: any[]): Message[] => items.map((message: any) => ({
-  id: String(message.id),
-  sender: message.senderRole === 'user' ? 'user' : 'ai',
-  text: message.content
-}))
+const deliverySegments = (message: any): string[] => {
+  const stored = message?.contentJson?.deliverySegments
+  if (message?.senderRole === 'assistant' && Array.isArray(stored)) {
+    const segments = stored.filter((segment: unknown): segment is string => (
+      typeof segment === 'string' && Boolean(segment.trim())
+    ))
+    if (segments.length > 0) return segments
+  }
+  return [String(message?.content || '')]
+}
+const mapServerMessages = (items: any[]): Message[] => items.flatMap((message: any) => {
+  const segments = deliverySegments(message)
+  return segments.map((text, index) => ({
+    id: segments.length === 1 ? String(message.id) : `${String(message.id)}:segment:${index}`,
+    sender: message.senderRole === 'user' ? 'user' as const : 'ai' as const,
+    text
+  }))
+})
+
+const responseMessages = (data: any): Message[] => {
+  const segments = Array.isArray(data.replySegments)
+    ? data.replySegments.filter((segment: unknown): segment is string => (
+        typeof segment === 'string' && Boolean(segment.trim())
+      ))
+    : []
+  const usable = segments.length > 0 && typeof data.reply === 'string'
+    ? segments
+    : typeof data.reply === 'string' ? [data.reply] : []
+  const baseId = typeof data.messageId === 'string' ? data.messageId : makeMessageId()
+  return usable.map((text, index) => ({
+    id: usable.length === 1 ? baseId : `${baseId}:segment:${index}`,
+    sender: 'ai',
+    text
+  }))
+}
 
 const avatarContent = (character: Pick<Character, 'avatar' | 'name'>) => {
   if (isImageAvatar(character.avatar)) {
@@ -555,12 +585,9 @@ export default function ChatPage(): JSX.Element{
           } else if (typeof data.reply !== 'string') {
             throw new Error('The server returned no usable response.')
           } else {
-            const aiMsg: Message = {
-              id: makeMessageId(),
-              sender: 'ai',
-              text: typeof data.reply === 'string' ? data.reply : 'Sorry, I could not generate a response.'
-            }
-            setMessages(prev2 => prev2.map(m => m.id === loadingId ? aiMsg : m))
+            const aiMessages = responseMessages(data)
+            if (aiMessages.length === 0) throw new Error('The server returned no usable response.')
+            setMessages(prev2 => prev2.flatMap(m => m.id === loadingId ? aiMessages : [m]))
           }
         } catch (error) {
           console.error('Chat request failed', error)

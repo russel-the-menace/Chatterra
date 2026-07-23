@@ -3,7 +3,12 @@
   "main": "expo-router/entry",
   "version": "1.0.0",
   "scripts": {
+    "check:node": "node scripts/check-node-version.mjs",
+    "prestart": "npm run check:node",
+    "prestart:clear": "npm run check:node",
+    "prestart:tunnel": "npm run check:node",
     "start": "expo start --lan",
+    "start:clear": "expo start --lan --clear",
     "start:tunnel": "expo start --tunnel",
     "android": "expo start --android",
     "ios": "expo start --ios",

@@ -30,6 +30,17 @@ npm install
 npm start
 ```
 
+If Expo Go initially shows only a blank development background, stop Metro and
+restart once with `npm run start:clear`. Use the Node version in `.nvmrc`; Node
+23 is outside the supported engine range of the current React Native toolchain.
+
+With `nvm`, select the supported runtime before starting Metro:
+
+```bash
+nvm install
+nvm use
+```
+
 Scan the QR code with the iPhone Camera app and open it in Expo Go. The mobile
 client normally derives the Mac's LAN address from Metro and calls port `3000`.
 

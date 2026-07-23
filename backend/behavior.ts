@@ -1246,6 +1246,9 @@ export const recordAssistantResponse = async ({
       actorId: character.id,
       payload: {
         length: content.length,
+        deliverySegmentCount: Array.isArray(contentJson?.deliverySegments)
+          ? contentJson.deliverySegments.length
+          : 1,
         mode,
         inferenceRoute: inference.route,
         origin,

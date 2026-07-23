@@ -93,6 +93,7 @@ const run = async () => {
     assert.equal(deliveries.length, 1)
     assert.equal(deliveries[0].characterId, character.id)
     assert.equal(deliveries[0].conversationId, conversation.id)
+    assert.deepEqual(deliveries[0].replySegments, [deliveries[0].content])
 
     const proactiveMessages = await query(
       `SELECT content, content_json
@@ -103,6 +104,10 @@ const run = async () => {
     )
     assert.equal(proactiveMessages.rows.length, 1)
     assert.equal(proactiveMessages.rows[0].content_json?.proactive?.attempt, 1)
+    assert.deepEqual(
+      proactiveMessages.rows[0].content_json?.deliverySegments,
+      [proactiveMessages.rows[0].content]
+    )
 
     const audit = await query(
       `SELECT action
