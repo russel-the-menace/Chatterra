@@ -101,6 +101,15 @@ const voiceMetadataFromPayload = (payload: any): VoiceTranscriptMetadata | undef
 
 const getStarterMessage = (character?: Character) => {
   const languagePolicy = resolveResponseLanguagePolicy(character?.language)
+  if (character?.id === 'seed-arjun-client') {
+    return "Let us get straight to it. Which DJI model are you offering, what lawful route gets the complete units into India, and what is your landed unit price at the proposed volume? I will not accept 'we handle customs' as an answer."
+  }
+  if (character?.id === 'seed-minjun-friend') {
+    return '안녕, 민준이야. 오늘 수업 어땠어? 난 선형대수 과제에 아직도 붙잡혀 있어.'
+  }
+  if (character?.id === 'seed-ren-friend') {
+    return 'やあ、蓮だよ。今日の授業どうだった？こっちは解析の課題にずっと捕まってた。'
+  }
   if (character?.id === 'c3') {
     return "Hey, it's Maya. I just finished sorting out my notes for the day. Come keep me company for a minute?"
   }

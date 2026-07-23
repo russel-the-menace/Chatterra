@@ -3,6 +3,7 @@ export type ResponseLanguageCode =
   | 'english'
   | 'mandarin'
   | 'japanese'
+  | 'korean'
   | 'unknown'
 
 export type ResponseLanguagePolicy = {
@@ -18,9 +19,11 @@ const CANTONESE_MARKERS = /(?:係|唔|喺|冇|咩|而家|嘅|啦|喎|囉|呀|吖
 const STRONG_MANDARIN_PHRASES = /(?:我在|你現在|你现在|現在想|现在想|想聊|聊天|什麼事|什么事|怎麼了|怎么了|在哪裡|在哪里|為什麼|为什么|沒有|没有|告訴我|告诉我|我們|我们)/u
 const CJK = /[\u3400-\u9fff\uf900-\ufaff]/u
 const JAPANESE = /[\u3040-\u30ff]/u
+const KOREAN = /[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]/u
 const LATIN = /[A-Za-z]/u
 const LATIN_WORDS = /[A-Za-z]+(?:['’-][A-Za-z]+)*/gu
 const CJK_SEGMENTS = /[\u3400-\u9fff\uf900-\ufaff]+/gu
+const KOREAN_SEGMENTS = /[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]+/gu
 const NON_VERBAL = /^[\p{P}\p{S}\p{N}\s]+$/u
 const MAX_SOURCE_QUOTE_CJK_CHARACTERS = 12
 
@@ -33,7 +36,9 @@ export type ResponseLanguageAssessment = {
     | 'unknown_language'
     | 'latin_contamination'
     | 'japanese_contamination'
+    | 'korean_contamination'
     | 'not_cjk'
+    | 'not_korean'
     | 'explicit_mandarin'
     | 'cantonese_marker'
     | 'cantonese_code_switch'
@@ -43,6 +48,7 @@ export type ResponseLanguageAssessment = {
     | 'cjk_contamination'
     | 'mandarin'
     | 'japanese'
+    | 'korean'
 }
 
 export type ResponseLanguageContext = {
@@ -57,7 +63,11 @@ export type ResponseLanguageObservation = {
   enforcement: 'observe_only'
   languagePolicyAction: 'allow'
   severity: 'none' | 'notice' | 'strong_mismatch'
-  detection: 'language_matches_policy' | 'language_mismatch' | 'substantial_english_in_chinese_context'
+  detection:
+    | 'language_matches_policy'
+    | 'language_mismatch'
+    | 'substantial_english_in_chinese_context'
+    | 'substantial_english_in_non_english_context'
   likelyCause:
     | 'language_matches_policy'
     | 'natural_code_switching'
@@ -74,6 +84,7 @@ export type ResponseLanguageObservation = {
 
 type LanguageMetrics = {
   cjkCharacters: number
+  hangulCharacters: number
   latinCharacters: number
   latinWords: number
   latinShare: number
@@ -98,7 +109,9 @@ const instructionFor = (code: ResponseLanguageCode, setting: string, strict: boo
     case 'mandarin':
       return 'Output language contract: respond exclusively in natural Mandarin Chinese. Do not answer in Cantonese, English, or another language. Do not translate the response.'
     case 'japanese':
-      return 'Output language contract: respond exclusively in natural Japanese. Do not answer in another language and do not translate the response.'
+      return 'Output language contract: respond exclusively in natural Japanese. Understand English input when necessary, but do not mirror it or switch the answer to English. Do not translate the response unless the user explicitly asks for a translation.'
+    case 'korean':
+      return 'Output language contract: respond exclusively in natural Korean. Understand English input when necessary, but do not mirror it or switch the answer to English. Do not translate the response unless the user explicitly asks for a translation.'
     default:
       return `Output language contract: respond exclusively in ${setting}. Do not answer in another language and do not translate the response.`
   }
@@ -112,11 +125,13 @@ export const resolveResponseLanguagePolicy = (language?: string): ResponseLangua
       ? 'cantonese'
       : /mandarin|普通话|普通話|国语|國語/u.test(normalized)
         ? 'mandarin'
-        : /japanese|日本語|日语|日語/u.test(normalized)
-          ? 'japanese'
-          : /english|英语|英語/u.test(normalized)
-            ? 'english'
-            : 'unknown'
+        : /korean|한국어|韩语|韓語|朝鮮語|조선말/u.test(normalized)
+          ? 'korean'
+          : /japanese|日本語|日语|日語/u.test(normalized)
+            ? 'japanese'
+            : /english|英语|英語/u.test(normalized)
+              ? 'english'
+              : 'unknown'
   const strict = isStrictSetting(setting)
   const label = code === 'unknown'
     ? setting
@@ -127,9 +142,11 @@ export const resolveResponseLanguagePolicy = (language?: string): ResponseLangua
       ? 'zh-CN'
       : code === 'japanese'
         ? 'ja-JP'
-        : code === 'english'
-          ? 'en-US'
-          : 'und'
+        : code === 'korean'
+          ? 'ko-KR'
+          : code === 'english'
+            ? 'en-US'
+            : 'und'
 
   return {
     setting,
@@ -152,6 +169,8 @@ export const starterMessageForPolicy = (
       return `你好，我是${characterName}。你现在想聊什么？`
     case 'japanese':
       return `こんにちは、${characterName}です。今日は何を話したい？`
+    case 'korean':
+      return `안녕하세요, ${characterName}입니다. 오늘은 무슨 이야기를 할까요?`
     case 'english':
       return `Hello, I'm ${characterName}. What would you like to talk about?`
     default:
@@ -189,6 +208,7 @@ export const assessResponseLanguage = (
   switch (policy.code) {
     case 'cantonese':
       if (JAPANESE.test(normalized)) return { compliant: false, reason: 'japanese_contamination' }
+      if (KOREAN.test(normalized)) return { compliant: false, reason: 'korean_contamination' }
       if (!CJK.test(normalized)) return { compliant: false, reason: 'not_cjk' }
       if (STRONG_MANDARIN_PHRASES.test(normalized)) return { compliant: false, reason: 'explicit_mandarin' }
       const hasCantoneseMarker = CANTONESE_MARKERS.test(normalized)
@@ -203,20 +223,31 @@ export const assessResponseLanguage = (
       // would discard valid, natural Cantonese.
       return { compliant: true, reason: 'ambiguous_cjk' }
     case 'english':
-      if (!LATIN.test(normalized)) return { compliant: false, reason: 'latin_contamination' }
       if (JAPANESE.test(normalized)) return { compliant: false, reason: 'japanese_contamination' }
+      if (KOREAN.test(normalized)) return { compliant: false, reason: 'korean_contamination' }
+      if (!LATIN.test(normalized)) return { compliant: false, reason: 'latin_contamination' }
       if (!CJK.test(normalized)) return { compliant: true, reason: 'english' }
       return usesOnlyBoundedCjkSourceQuotes(normalized, context.sourceText)
         ? { compliant: true, reason: 'english_source_quote' }
         : { compliant: false, reason: 'cjk_contamination' }
     case 'mandarin':
-      return CJK.test(normalized) && !LATIN.test(normalized) && !JAPANESE.test(normalized)
+      return CJK.test(normalized) && !LATIN.test(normalized) && !JAPANESE.test(normalized) && !KOREAN.test(normalized)
         ? { compliant: true, reason: 'mandarin' }
         : { compliant: false, reason: LATIN.test(normalized) ? 'latin_contamination' : 'not_cjk' }
-    case 'japanese':
-      return JAPANESE.test(normalized) && !LATIN.test(normalized)
+    case 'japanese': {
+      const latinWordCount = normalized.match(LATIN_WORDS)?.length || 0
+      return JAPANESE.test(normalized) && !KOREAN.test(normalized) && latinWordCount <= 3
         ? { compliant: true, reason: 'japanese' }
-        : { compliant: false, reason: LATIN.test(normalized) ? 'latin_contamination' : 'japanese_contamination' }
+        : { compliant: false, reason: latinWordCount > 3 ? 'latin_contamination' : 'japanese_contamination' }
+    }
+    case 'korean': {
+      const latinWordCount = normalized.match(LATIN_WORDS)?.length || 0
+      if (JAPANESE.test(normalized)) return { compliant: false, reason: 'japanese_contamination' }
+      if (!KOREAN.test(normalized)) return { compliant: false, reason: 'not_korean' }
+      return latinWordCount <= 3
+        ? { compliant: true, reason: 'korean' }
+        : { compliant: false, reason: 'latin_contamination' }
+    }
     default:
       return { compliant: true, reason: 'unknown_language' }
   }
@@ -224,14 +255,16 @@ export const assessResponseLanguage = (
 
 const languageMetrics = (text = ''): LanguageMetrics => {
   const cjkCharacters = (text.match(CJK_SEGMENTS) || []).join('').length
+  const hangulCharacters = (text.match(KOREAN_SEGMENTS) || []).join('').length
   const latinCharacters = (text.match(/[A-Za-z]/g) || []).length
   const latinWords = text.match(LATIN_WORDS)?.length || 0
-  const scriptCharacters = cjkCharacters + latinCharacters
+  const scriptCharacters = cjkCharacters + hangulCharacters + latinCharacters
   const latinShare = scriptCharacters > 0
     ? Number((latinCharacters / scriptCharacters).toFixed(3))
     : 0
   return {
     cjkCharacters,
+    hangulCharacters,
     latinCharacters,
     latinWords,
     latinShare,
@@ -248,7 +281,8 @@ export const observeResponseLanguage = (
   const outputMetrics = languageMetrics(text)
   const sourceMetrics = languageMetrics(context.sourceText)
   const expectedChinese = policy.code === 'cantonese' || policy.code === 'mandarin'
-  const substantialEnglish = expectedChinese && outputMetrics.englishDominant
+  const expectedNonEnglish = policy.code !== 'english' && policy.code !== 'unknown'
+  const substantialEnglish = expectedNonEnglish && outputMetrics.englishDominant
 
   let detection: ResponseLanguageObservation['detection'] = assessment.compliant
     ? 'language_matches_policy'
@@ -263,7 +297,9 @@ export const observeResponseLanguage = (
   } else if (assessment.reason === 'english_source_quote') {
     likelyCause = 'source_term_reference'
   } else if (substantialEnglish) {
-    detection = 'substantial_english_in_chinese_context'
+    detection = expectedChinese
+      ? 'substantial_english_in_chinese_context'
+      : 'substantial_english_in_non_english_context'
     severity = 'strong_mismatch'
     likelyCause = sourceMetrics.englishDominant
       ? 'user_language_mirroring'

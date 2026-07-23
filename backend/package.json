@@ -7,6 +7,7 @@
     "dev": "ts-node-dev --respawn --transpile-only server.ts",
     "build": "tsc",
     "test:decision": "ts-node --transpile-only response-decision.test.ts",
+    "test:character-policy": "ts-node --transpile-only character-policy.test.ts",
     "test:language": "ts-node --transpile-only language-policy.test.ts",
     "test:response-style": "ts-node --transpile-only response-style.test.ts",
     "test:model-gateway": "ts-node --transpile-only model-gateway.test.ts",

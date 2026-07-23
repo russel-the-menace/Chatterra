@@ -160,13 +160,15 @@ const activityForHour = (hour: number, character: Character) => {
   return 'available'
 }
 
-const timeZoneForCharacter = (character: Character) => {
+export const timeZoneForCharacter = (character: Character) => {
   const authored = `${character.company || ''} ${character.scenario || ''} ${character.background || ''}`.toLowerCase()
   if (/\b(?:new york|nyc)\b/.test(authored)) return 'America/New_York'
+  if (/\b(?:india|bengaluru|bangalore|mumbai|delhi)\b/.test(authored)) return 'Asia/Kolkata'
   return 'Asia/Shanghai'
 }
 
 export const resolveCharacterMode = (character: Character): InteractionMode => {
+  const authoredRole = (character.role || '').toLowerCase()
   const authoredPolicy = [
     character.role,
     character.personality,
@@ -174,9 +176,20 @@ export const resolveCharacterMode = (character: Character): InteractionMode => {
     character.goal,
     character.systemPromptTemplate
   ].filter(Boolean).join(' ').toLowerCase()
+
+  if (/\b(?:teacher|tutor|interviewer|coach|trainer)\b/.test(authoredRole)) return 'practice'
+  if (/\b(?:friend|girlfriend|boyfriend|partner|client|customer|buyer|procurement)\b/.test(authoredRole)) {
+    return 'companion'
+  }
+
+  const commercialSimulation = /\b(?:procurement|buyer|customer|commercial)\b/.test(authoredPolicy)
+    && /\b(?:sales|negotiation|supplier)\b/.test(authoredPolicy)
+  if (commercialSimulation) return 'companion'
+
   const teachingSignals = [
     'teacher', 'tutor', 'interview', 'language practice', 'correct mistakes',
-    'correction', 'learning', 'lesson', 'evaluate communication'
+    'correction', 'learning', 'lesson', 'evaluate communication', 'sales practice',
+    'negotiation practice', 'training simulation', 'role-play', 'roleplay'
   ]
   return teachingSignals.some(signal => authoredPolicy.includes(signal))
     ? 'practice'

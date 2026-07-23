@@ -118,4 +118,21 @@ assert.equal(actualEnglishTeacherOutput.languageCompliant, true)
 assert.equal(actualEnglishTeacherOutput.languageReason, 'english_source_quote')
 assert.equal(actualEnglishTeacherOutput.languageObservation.likelyCause, 'source_term_reference')
 
+const korean = resolveResponseLanguagePolicy('Korean only; understands English input')
+assert.equal(korean.code, 'korean')
+assert.equal(korean.locale, 'ko-KR')
+assert.equal(korean.strict, true)
+assert.equal(isResponseLanguageCompliant('오늘 선형대수 수업 진짜 어려웠어.', korean), true)
+assert.equal(isResponseLanguageCompliant('I understood the homework.', korean), false)
+assert.equal(
+  assessResponseLanguage('I understood the homework and the lecture.', korean).reason,
+  'not_korean'
+)
+
+const japanese = resolveResponseLanguagePolicy('Japanese only; understands English input')
+assert.equal(japanese.code, 'japanese')
+assert.equal(japanese.locale, 'ja-JP')
+assert.equal(isResponseLanguageCompliant('今日の解析の授業、かなり難しかった。', japanese), true)
+assert.equal(isResponseLanguageCompliant('오늘 수업 어려웠어.', japanese), false)
+
 console.log('language policy checks passed')
