@@ -11,10 +11,11 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  Dimensions,
+  Easing,
   FlatList,
   Keyboard,
   KeyboardEvent,
-  KeyboardAvoidingView,
   NativeScrollEvent,
   NativeSyntheticEvent,
   Platform,
@@ -77,14 +78,63 @@ const responseMessages = (response: ChatResponse): ChatMessage[] => {
     groupIndex: index,
     groupSize: segments.length,
     animateEntry: true,
-    animationDelayMs: index * 90,
+    animationDelayMs: 0,
   }))
+}
+
+const simulatedTypingDuration = (text: string) => {
+  const characters = Array.from(text.trim()).length
+  const words = text.trim().split(/\s+/u).filter(Boolean).length
+  return Math.round(Math.min(3600, Math.max(850, 620 + words * 70 + characters * 12)))
 }
 
 const formatActivity = (activity?: string) => {
   if (!activity) return 'Online'
   const normalized = activity.replace(/_/g, ' ')
   return normalized.charAt(0).toUpperCase() + normalized.slice(1)
+}
+
+function TypingIndicator() {
+  const phase = useRef(new Animated.Value(0)).current
+
+  useEffect(() => {
+    const animation = Animated.loop(Animated.timing(phase, {
+      toValue: 1,
+      duration: 900,
+      easing: Easing.linear,
+      useNativeDriver: true,
+    }))
+    animation.start()
+    return () => animation.stop()
+  }, [phase])
+
+  return (
+    <View style={styles.typingIndicator} accessibilityLabel="Typing">
+      {[0, 1, 2].map(index => {
+        const start = 0.02 + index * 0.16
+        return (
+          <Animated.View
+            key={index}
+            style={[
+              styles.typingDot,
+              {
+                opacity: phase.interpolate({
+                  inputRange: [0, start, start + 0.14, start + 0.28, 1],
+                  outputRange: [0.35, 0.35, 1, 0.35, 0.35],
+                }),
+                transform: [{
+                  translateY: phase.interpolate({
+                    inputRange: [0, start, start + 0.14, start + 0.28, 1],
+                    outputRange: [0, 0, -3, 0, 0],
+                  }),
+                }],
+              },
+            ]}
+          />
+        )
+      })}
+    </View>
+  )
 }
 
 function MessageRow({
@@ -141,7 +191,7 @@ function MessageRow({
         )}
         <View style={[styles.bubble, isUser ? styles.userBubble : styles.assistantBubble]}>
           {message.loading ? (
-            <Text style={styles.typingText}>•••</Text>
+            <TypingIndicator />
           ) : (
             <Text style={[styles.messageText, isUser && styles.userMessageText]} selectable>
               {message.text}
@@ -177,7 +227,6 @@ export default function ChatScreen() {
   const [activity, setActivity] = useState('Online')
   const [loadingHistory, setLoadingHistory] = useState(true)
   const [sending, setSending] = useState(false)
-  const [keyboardVisible, setKeyboardVisible] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const listRef = useRef<FlatList<ChatMessage> | null>(null)
   const historyRequestRef = useRef(0)
@@ -185,31 +234,150 @@ export default function ChatScreen() {
   const atBottomRef = useRef(true)
   const followLatestRef = useRef(true)
   const initialScrollRef = useRef(true)
+  const initialScrollScheduledRef = useRef(false)
+  const initialScrollFrameRef = useRef<number | null>(null)
   const pendingSendScrollRef = useRef<'auto' | 'animated' | null>(null)
+  const keyboardVisibleRef = useRef(false)
+  const keyboardOffset = useRef(new Animated.Value(0)).current
+  const composerBottomPadding = useRef(new Animated.Value(Math.max(8, insets.bottom))).current
+  const stagedDeliveryTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set())
+
+  const settleInitialScroll = useCallback(() => {
+    if (!initialScrollRef.current || initialScrollScheduledRef.current) return
+    initialScrollScheduledRef.current = true
+    listRef.current?.scrollToEnd({ animated: false })
+    initialScrollFrameRef.current = requestAnimationFrame(() => {
+      listRef.current?.scrollToEnd({ animated: false })
+      initialScrollFrameRef.current = requestAnimationFrame(() => {
+        listRef.current?.scrollToEnd({ animated: false })
+        initialScrollRef.current = false
+        initialScrollScheduledRef.current = false
+        initialScrollFrameRef.current = null
+      })
+    })
+  }, [])
+
+  const scheduleDeliveryTask = useCallback((task: () => void, delay: number) => {
+    const timer = setTimeout(() => {
+      stagedDeliveryTimersRef.current.delete(timer)
+      task()
+    }, delay)
+    stagedDeliveryTimersRef.current.add(timer)
+  }, [])
+
+  const stageAssistantMessages = useCallback((
+    loadingId: string,
+    incomingMessages: ChatMessage[]
+  ) => {
+    const firstMessage = incomingMessages[0]
+    if (!firstMessage) return
+
+    const followIncoming = () => {
+      if (!atBottomRef.current && !followLatestRef.current) return
+      followLatestRef.current = true
+      pendingSendScrollRef.current = 'animated'
+    }
+
+    followIncoming()
+    setMessages(current => current.flatMap(message => (
+      message.id === loadingId ? [firstMessage] : [message]
+    )))
+
+    const queueMessage = (index: number) => {
+      const nextMessage = incomingMessages[index]
+      const previousMessage = incomingMessages[index - 1]
+      if (!nextMessage || !previousMessage) return
+
+      scheduleDeliveryTask(() => {
+        const typingId = `${nextMessage.id}:typing`
+        const typingMessage: ChatMessage = {
+          id: typingId,
+          sender: 'assistant',
+          text: '',
+          loading: true,
+          groupIndex: nextMessage.groupIndex,
+          groupSize: nextMessage.groupSize,
+          animateEntry: true,
+        }
+        followIncoming()
+        setMessages(current => {
+          if (current.some(message => message.id === typingId || message.id === nextMessage.id)) {
+            return current
+          }
+          const previousIndex = current.findIndex(message => message.id === previousMessage.id)
+          if (previousIndex < 0) return current
+          return [
+            ...current.slice(0, previousIndex + 1),
+            typingMessage,
+            ...current.slice(previousIndex + 1),
+          ]
+        })
+
+        scheduleDeliveryTask(() => {
+          followIncoming()
+          setMessages(current => current.map(message => (
+            message.id === typingId ? nextMessage : message
+          )))
+          queueMessage(index + 1)
+        }, simulatedTypingDuration(nextMessage.text))
+      }, 220)
+    }
+
+    queueMessage(1)
+  }, [scheduleDeliveryTask])
 
   useEffect(() => {
-    const handleKeyboardTransition = (event: KeyboardEvent, visible: boolean) => {
-      Keyboard.scheduleLayoutAnimation(event)
-      setKeyboardVisible(visible)
-      if (!atBottomRef.current && !followLatestRef.current) return
+    const handleKeyboardTransition = (event: KeyboardEvent, forcedVisible?: boolean) => {
+      const screenHeight = Dimensions.get('screen').height
+      const visible = forcedVisible ?? event.endCoordinates.screenY < screenHeight - 1
+      const shouldFollow = atBottomRef.current || followLatestRef.current
+      keyboardVisibleRef.current = visible
+
+      Animated.parallel([
+        Animated.timing(keyboardOffset, {
+          toValue: visible ? event.endCoordinates.height : 0,
+          duration: Math.max(160, event.duration || 250),
+          easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+          useNativeDriver: false,
+        }),
+        Animated.timing(composerBottomPadding, {
+          toValue: visible ? 8 : Math.max(8, insets.bottom),
+          duration: Math.max(160, event.duration || 250),
+          easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+          useNativeDriver: false,
+        }),
+      ]).start(({ finished }) => {
+        if (finished && shouldFollow) listRef.current?.scrollToEnd({ animated: false })
+      })
+
+      if (!shouldFollow) return
       followLatestRef.current = true
       requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }))
     }
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow'
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide'
-    const showSubscription = Keyboard.addListener(
-      showEvent,
-      event => handleKeyboardTransition(event, true)
-    )
-    const hideSubscription = Keyboard.addListener(
-      hideEvent,
-      event => handleKeyboardTransition(event, false)
-    )
+    const subscriptions = Platform.OS === 'ios'
+      ? [Keyboard.addListener('keyboardWillChangeFrame', handleKeyboardTransition)]
+      : [
+          Keyboard.addListener('keyboardDidShow', event => handleKeyboardTransition(event, true)),
+          Keyboard.addListener('keyboardDidHide', event => handleKeyboardTransition(event, false)),
+        ]
 
     return () => {
-      showSubscription.remove()
-      hideSubscription.remove()
+      subscriptions.forEach(subscription => subscription.remove())
     }
+  }, [composerBottomPadding, insets.bottom, keyboardOffset])
+
+  useEffect(() => {
+    if (!keyboardVisibleRef.current) {
+      composerBottomPadding.setValue(Math.max(8, insets.bottom))
+    }
+  }, [composerBottomPadding, insets.bottom])
+
+  useEffect(() => () => {
+    if (initialScrollFrameRef.current !== null) {
+      cancelAnimationFrame(initialScrollFrameRef.current)
+    }
+    stagedDeliveryTimersRef.current.forEach(timer => clearTimeout(timer))
+    stagedDeliveryTimersRef.current.clear()
   }, [])
 
   useEffect(() => {
@@ -244,7 +412,12 @@ export default function ChatScreen() {
         ))[0]
 
       if (requestId !== historyRequestRef.current) return
+      if (initialScrollFrameRef.current !== null) {
+        cancelAnimationFrame(initialScrollFrameRef.current)
+        initialScrollFrameRef.current = null
+      }
       initialScrollRef.current = !quiet
+      initialScrollScheduledRef.current = false
       followLatestRef.current = true
       atBottomRef.current = true
 
@@ -276,13 +449,19 @@ export default function ChatScreen() {
     void refreshState()
   }, [character, loadConversation, refreshState, userId])
 
+  useEffect(() => {
+    if (!loadingHistory && messages.length > 0) settleInitialScroll()
+  }, [loadingHistory, messages.length, settleInitialScroll])
+
   const syncMessages = useCallback(async () => {
     if (!conversationId || sendingRef.current) return
     try {
       const serverMessages = await api.listMessages(conversationId)
       const mapped = mapMessages(serverMessages)
       setMessages(current => {
-        if (current.some(message => message.loading)) return current
+        if (current.some(message => message.loading) || stagedDeliveryTimersRef.current.size > 0) {
+          return current
+        }
         const existingIds = new Set(current.map(message => message.id))
         let animationIndex = 0
         const next = mapped.map(message => {
@@ -339,7 +518,12 @@ export default function ChatScreen() {
         sender: 'assistant',
         text: starterMessageForCharacter(character),
       }])
+      if (initialScrollFrameRef.current !== null) {
+        cancelAnimationFrame(initialScrollFrameRef.current)
+        initialScrollFrameRef.current = null
+      }
       initialScrollRef.current = true
+      initialScrollScheduledRef.current = false
       setError(null)
     } catch (clearError) {
       setError(clearError instanceof Error ? clearError.message : 'Could not clear the conversation.')
@@ -401,11 +585,7 @@ export default function ChatScreen() {
       } else if (typeof response.reply === 'string') {
         const incomingMessages = responseMessages(response)
         if (incomingMessages.length === 0) throw new Error('The server returned no usable response.')
-        pendingSendScrollRef.current = 'animated'
-        followLatestRef.current = true
-        setMessages(current => current.flatMap(message => (
-          message.id === loadingId ? incomingMessages : [message]
-        )))
+        stageAssistantMessages(loadingId, incomingMessages)
       } else {
         throw new Error('The server returned no usable response.')
       }
@@ -427,8 +607,7 @@ export default function ChatScreen() {
 
   const handleContentSizeChange = () => {
     if (initialScrollRef.current) {
-      initialScrollRef.current = false
-      listRef.current?.scrollToEnd({ animated: false })
+      settleInitialScroll()
       return
     }
     if (pendingSendScrollRef.current) {
@@ -464,9 +643,6 @@ export default function ChatScreen() {
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <View style={styles.chatHeader}>
-        <Pressable onPress={() => router.back()} hitSlop={10} style={styles.headerIcon} accessibilityLabel="Back">
-          <Ionicons name="chevron-back" size={27} color={palette.text} />
-        </Pressable>
         <Pressable onPress={openEditor} style={styles.headerIdentity}>
           <Avatar avatar={character.avatar} name={character.name} size={42} />
           <View style={styles.headerText}>
@@ -481,11 +657,7 @@ export default function ChatScreen() {
         </Pressable>
       </View>
 
-      <KeyboardAvoidingView
-        style={styles.keyboardArea}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={0}
-      >
+      <Animated.View style={[styles.keyboardArea, { paddingBottom: keyboardOffset }]}>
         <FlatList
           ref={listRef}
           data={messages}
@@ -502,6 +674,7 @@ export default function ChatScreen() {
           contentContainerStyle={styles.messageListContent}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+          onLayout={settleInitialScroll}
           onScroll={handleScroll}
           onScrollBeginDrag={() => {
             followLatestRef.current = false
@@ -518,9 +691,9 @@ export default function ChatScreen() {
           </Pressable>
         )}
 
-        <View style={[
+        <Animated.View style={[
           styles.composer,
-          { paddingBottom: keyboardVisible ? 8 : Math.max(8, insets.bottom) },
+          { paddingBottom: composerBottomPadding },
         ]}>
           <TextInput
             value={draft}
@@ -547,8 +720,8 @@ export default function ChatScreen() {
               ? <ActivityIndicator size="small" color="#FFFFFF" />
               : <Ionicons name="arrow-up" size={22} color="#FFFFFF" />}
           </Pressable>
-        </View>
-      </KeyboardAvoidingView>
+        </Animated.View>
+      </Animated.View>
     </SafeAreaView>
   )
 }
@@ -583,6 +756,7 @@ const styles = StyleSheet.create({
   headerIdentity: {
     flex: 1,
     minWidth: 0,
+    paddingLeft: 8,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
@@ -672,10 +846,19 @@ const styles = StyleSheet.create({
   userMessageText: {
     color: '#FFFFFF',
   },
-  typingText: {
-    color: palette.textMuted,
-    fontSize: 15,
-    lineHeight: 20,
+  typingIndicator: {
+    height: 20,
+    minWidth: 26,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  typingDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: palette.textMuted,
   },
   errorBanner: {
     minHeight: 42,
