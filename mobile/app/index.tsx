@@ -244,7 +244,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#F5F7F9',
   },
   contactPinned: {
-    backgroundColor: '#F2F3F5',
+    backgroundColor: '#F6F7F8',
   },
   contactContent: {
     flex: 1,

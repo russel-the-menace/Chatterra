@@ -504,6 +504,7 @@ body.modal-open{overflow:hidden}
   line-height:1.4;
   white-space:pre-wrap;
   word-break:break-word;
+  animation:translation-reveal 0.14s ease-out;
 }
 .message-translation.error{border-color:#efc4c0;background:#fff5f4;color:#b42318}
 .translation-loading{
@@ -629,6 +630,10 @@ body.modal-open{overflow:hidden}
 }
 @keyframes voice-spin{to{transform:rotate(360deg)}}
 @keyframes translation-spin{to{transform:rotate(360deg)}}
+@keyframes translation-reveal{
+  from{opacity:0;transform:translateY(-2px)}
+  to{opacity:1;transform:translateY(0)}
+}
 .input-box .send{
   background:#1aad19;
   color:white;

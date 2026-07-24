@@ -70,7 +70,12 @@ export default function MessageBubble({
           )}
         </div>
         {msg.translationVisible && !msg.loading && (
-          <div className={`message-translation${msg.translationError ? ' error' : ''}`}>
+          <div
+            className={`message-translation${msg.translationError ? ' error' : ''}`}
+            role="status"
+            aria-live="polite"
+            aria-busy={msg.translationLoading || undefined}
+          >
             {msg.translationLoading
               ? (
                   <span className="translation-loading">
