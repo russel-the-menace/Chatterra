@@ -14,6 +14,9 @@ erDiagram
   USERS ||--o{ CONVERSATIONS : owns
   CHARACTERS ||--o{ CONVERSATIONS : powers
   CONVERSATIONS ||--o{ MESSAGES : contains
+  MESSAGES ||--o{ MESSAGE_TRANSLATIONS : translates
+  USERS ||--o{ USER_CHARACTER_PREFERENCES : configures
+  CHARACTERS ||--o{ USER_CHARACTER_PREFERENCES : pinned_by
   USERS ||--o{ MEMORIES : owns
   CHARACTERS o|--o{ MEMORIES : scopes
   MESSAGES o|--o{ MEMORIES : originates
@@ -40,6 +43,10 @@ erDiagram
   for migration compatibility and is not exposed or used for inference.
 - `conversations`: one user/character chat session.
 - `messages`: ordered user, assistant, and system messages.
+- `message_translations`: provider-attributed translations cached per durable message,
+  visible delivery segment, and target language.
+- `user_character_preferences`: per-user durable contact pins. A row exists while the
+  character is pinned.
 - `memories`: extracted facts scoped to a user and optionally a character/message.
 - `conversation_summaries`: generated summaries and flexible coverage metadata.
 - `character_versions`: immutable snapshots of editable character templates.
@@ -67,6 +74,8 @@ Foreign keys define lifecycle behavior:
 
 - Deleting a user cascades through conversations, messages, summaries, and memories.
 - Deleting a conversation cascades through messages and summaries.
+- Deleting a message cascades through its cached translations.
+- Deleting a user or character cascades through its contact-pin relationships.
 - Characters referenced by conversations cannot be deleted.
 - Deleted character/message references on memories become `NULL`.
 

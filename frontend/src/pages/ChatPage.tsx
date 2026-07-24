@@ -1,13 +1,18 @@
 import React, {useState, useEffect, useMemo, useRef} from 'react'
 import ChatWindow from '../components/ChatWindow'
 import InputBox from '../components/InputBox'
+import { ChatMessage } from '../components/MessageBubble'
 import seedCharacter, {characters as seedCharacters, Character} from '../data/character'
 import { VoiceTranscriptMetadata } from '../voice/types'
 import { starterMessageForCharacter } from '../languagePolicy'
 
-type Message = { id: string; sender: 'ai' | 'user'; text: string; loading?: boolean }
 type CharacterTextKey = 'name' | 'role' | 'company' | 'scenario' | 'goal' | 'language' | 'personality' | 'background' | 'systemPromptTemplate'
 type Point = { x: number; y: number }
+type ConversationCacheEntry = {
+  conversationId: string | null
+  messages: ChatMessage[]
+  behaviorStatus: string
+}
 
 const makeMessageId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`
 const isImageAvatar = (avatar?: string) => Boolean(avatar && /^(data:image\/|blob:|https?:\/\/|\/)/.test(avatar))
@@ -21,16 +26,23 @@ const deliverySegments = (message: any): string[] => {
   }
   return [String(message?.content || '')]
 }
-const mapServerMessages = (items: any[]): Message[] => items.flatMap((message: any) => {
+const mapServerMessages = (items: any[]): ChatMessage[] => items.flatMap((message: any) => {
   const segments = deliverySegments(message)
+  const englishTranslations = message?.contentJson?.translations?.en
   return segments.map((text, index) => ({
     id: segments.length === 1 ? String(message.id) : `${String(message.id)}:segment:${index}`,
     sender: message.senderRole === 'user' ? 'user' as const : 'ai' as const,
-    text
+    text,
+    sourceMessageId: String(message.id),
+    segmentIndex: index,
+    translation: typeof englishTranslations?.[String(index)] === 'string'
+      ? englishTranslations[String(index)]
+      : undefined,
+    translationVisible: typeof englishTranslations?.[String(index)] === 'string'
   }))
 })
 
-const responseMessages = (data: any): Message[] => {
+const responseMessages = (data: any): ChatMessage[] => {
   const segments = Array.isArray(data.replySegments)
     ? data.replySegments.filter((segment: unknown): segment is string => (
         typeof segment === 'string' && Boolean(segment.trim())
@@ -43,9 +55,34 @@ const responseMessages = (data: any): Message[] => {
   return usable.map((text, index) => ({
     id: usable.length === 1 ? baseId : `${baseId}:segment:${index}`,
     sender: 'ai',
-    text
+    text,
+    sourceMessageId: typeof data.messageId === 'string' ? data.messageId : undefined,
+    segmentIndex: index
   }))
 }
+
+const mergeMessageUiState = (current: ChatMessage[], incoming: ChatMessage[]) => {
+  const currentById = new Map(current.map(message => [message.id, message]))
+  return incoming.map(message => {
+    const existing = currentById.get(message.id)
+    if (!existing) return message
+    return {
+      ...message,
+      translation: existing.translation || message.translation,
+      translationVisible: existing.translation !== undefined
+        || existing.translationLoading
+        || existing.translationError
+        ? existing.translationVisible
+        : message.translationVisible,
+      translationLoading: existing.translationLoading,
+      translationError: existing.translationError
+    }
+  })
+}
+
+const stableMessagesForCache = (messages: ChatMessage[]) => messages
+  .filter(message => !message.loading)
+  .map(({ translationLoading: _translationLoading, translationError: _translationError, ...message }) => message)
 
 const avatarContent = (character: Pick<Character, 'avatar' | 'name'>) => {
   if (isImageAvatar(character.avatar)) {
@@ -85,7 +122,7 @@ const createCharacterDraft = (): Character => ({
 })
 
 export default function ChatPage(): JSX.Element{
-  const [messages, setMessages] = useState<Message[]>([])
+  const [messages, setMessages] = useState<ChatMessage[]>([])
   const [userId, setUserIdentifier] = useState<string | null>(null)
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [characters, setCharacters] = useState<Character[]>(seedCharacters)
@@ -96,7 +133,9 @@ export default function ChatPage(): JSX.Element{
   const [searchText, setSearchText] = useState('')
   const [proactivePreviews, setProactivePreviews] = useState<Record<string, string>>({})
   const [unreadCharacterIds, setUnreadCharacterIds] = useState<Set<string>>(() => new Set())
+  const [pinnedCharacterIds, setPinnedCharacterIds] = useState<Set<string>>(() => new Set())
   const [showAddDrawer, setShowAddDrawer] = useState(false)
+  const [showConversationMenu, setShowConversationMenu] = useState(false)
   const [showCharacterEditor, setShowCharacterEditor] = useState(false)
   const [editingCharacter, setEditingCharacter] = useState<Character | null>(null)
   const [isSavingCharacter, setIsSavingCharacter] = useState(false)
@@ -110,15 +149,41 @@ export default function ChatPage(): JSX.Element{
   const avatarCropViewportRef = useRef<HTMLDivElement | null>(null)
   const avatarCropImageRef = useRef<HTMLImageElement | null>(null)
   const avatarDragRef = useRef<{ pointerId: number; pointerX: number; pointerY: number; x: number; y: number } | null>(null)
+  const conversationCacheRef = useRef<Record<string, ConversationCacheEntry>>({})
+  const historyRequestRef = useRef(0)
+  const selectedCharacterIdRef = useRef(selectedCharacter.id)
 
   const visibleCharacters = useMemo(() => {
     const query = searchText.trim().toLowerCase()
-    if (!query) return characters
-    return characters.filter(ch => [ch.name, ch.role, ch.company, ch.personality].join(' ').toLowerCase().includes(query))
-  }, [characters, searchText])
+    return characters
+      .map((character, index) => ({ character, index }))
+      .filter(({ character }) => !query || (
+        [character.name, character.role, character.company, character.personality]
+          .join(' ')
+          .toLowerCase()
+          .includes(query)
+      ))
+      .sort((left, right) => {
+        const leftPinned = pinnedCharacterIds.has(left.character.id)
+        const rightPinned = pinnedCharacterIds.has(right.character.id)
+        if (leftPinned !== rightPinned) return rightPinned ? 1 : -1
+        return left.index - right.index
+      })
+      .map(({ character }) => character)
+  }, [characters, pinnedCharacterIds, searchText])
 
   const loadHistoryForCharacter = async (uid: string, nextCharacter: Character) => {
-    setConversationId(null)
+    const requestId = historyRequestRef.current + 1
+    historyRequestRef.current = requestId
+    const cached = conversationCacheRef.current[nextCharacter.id]
+    if (cached) {
+      setConversationId(cached.conversationId)
+      setMessages(cached.messages)
+      setBehaviorStatus(cached.behaviorStatus)
+    } else {
+      setConversationId(null)
+      setMessages([])
+    }
 
     try {
       const cRes = await fetch(`http://localhost:3000/api/conversations?userId=${uid}`)
@@ -129,21 +194,41 @@ export default function ChatPage(): JSX.Element{
         .filter((conv: any) => conv.characterId === nextCharacter.id)
         .sort((a: any, b: any) => (b.lastMessageAt || b.updatedAt || b.createdAt || '').localeCompare(a.lastMessageAt || a.updatedAt || a.createdAt || ''))[0]
 
-      if (matchingConversation) {
-        setConversationId(matchingConversation.id)
-        localStorage.setItem('chatterra_conversationId', matchingConversation.id)
+      if (requestId !== historyRequestRef.current || selectedCharacterIdRef.current !== nextCharacter.id) return
 
+      if (matchingConversation) {
         const mRes = await fetch(`http://localhost:3000/api/conversations/${matchingConversation.id}/messages`)
         const mData = await mRes.json()
-        const mapped = mapServerMessages(mData.messages || [])
+        if (requestId !== historyRequestRef.current || selectedCharacterIdRef.current !== nextCharacter.id) return
+        const mapped = mergeMessageUiState(cached?.messages || [], mapServerMessages(mData.messages || []))
+        setConversationId(matchingConversation.id)
         setMessages(mapped)
+        localStorage.setItem('chatterra_conversationId', matchingConversation.id)
+        conversationCacheRef.current[nextCharacter.id] = {
+          conversationId: matchingConversation.id,
+          messages: mapped,
+          behaviorStatus: cached?.behaviorStatus || 'Online'
+        }
         return
       }
     } catch (e) {
       // fall through to default greeting
     }
 
-    setMessages([{ id: makeMessageId(), sender: 'ai', text: starterMessageForCharacter(nextCharacter) }])
+    if (requestId !== historyRequestRef.current || selectedCharacterIdRef.current !== nextCharacter.id) return
+    if (!cached) {
+      const starterMessages: ChatMessage[] = [{
+        id: `starter-${nextCharacter.id}`,
+        sender: 'ai',
+        text: starterMessageForCharacter(nextCharacter)
+      }]
+      setMessages(starterMessages)
+      conversationCacheRef.current[nextCharacter.id] = {
+        conversationId: null,
+        messages: starterMessages,
+        behaviorStatus: 'Online'
+      }
+    }
   }
 
   const openCharacterEditor = (character: Character) => {
@@ -302,6 +387,18 @@ export default function ChatPage(): JSX.Element{
       localStorage.setItem('chatterra_userId', uid)
     }
     setUserIdentifier(uid)
+    const loadContactPreferences = async () => {
+      try {
+        const response = await fetch(`http://localhost:3000/api/users/${encodeURIComponent(uid)}/contact-preferences`)
+        if (!response.ok) return
+        const data = await response.json()
+        if (Array.isArray(data.pinnedCharacterIds)) {
+          setPinnedCharacterIds(new Set(data.pinnedCharacterIds.map(String)))
+        }
+      } catch {
+        // Contact ordering remains usable while the preference endpoint is unavailable.
+      }
+    }
     const loadCharacters = async () => {
       try {
         const res = await fetch('http://localhost:3000/api/characters')
@@ -311,6 +408,7 @@ export default function ChatPage(): JSX.Element{
             setCharacters(data.characters)
             const savedCharacterId = localStorage.getItem('chatterra_characterId')
             const initialCharacter = data.characters.find((c: Character) => c.id === savedCharacterId) || data.characters[0]
+            selectedCharacterIdRef.current = initialCharacter.id
             setSelectedCharacter(initialCharacter)
             await loadHistoryForCharacter(uid, initialCharacter)
             return
@@ -322,13 +420,24 @@ export default function ChatPage(): JSX.Element{
 
       const savedCharacterId = localStorage.getItem('chatterra_characterId')
       const initialCharacter = seedCharacters.find(c => c.id === savedCharacterId) || seedCharacter
+      selectedCharacterIdRef.current = initialCharacter.id
       setCharacters(seedCharacters)
       setSelectedCharacter(initialCharacter)
       void loadHistoryForCharacter(uid, initialCharacter)
     }
 
+    void loadContactPreferences()
     void loadCharacters()
   }, [])
+
+  useEffect(() => {
+    if (selectedCharacterIdRef.current !== selectedCharacter.id) return
+    conversationCacheRef.current[selectedCharacter.id] = {
+      conversationId,
+      messages: stableMessagesForCache(messages),
+      behaviorStatus
+    }
+  }, [behaviorStatus, conversationId, messages, selectedCharacter.id])
 
   useEffect(() => {
     if (!userId) return
@@ -402,13 +511,16 @@ export default function ChatPage(): JSX.Element{
         const serverMessages = mapServerMessages(data.messages)
         setMessages(current => {
           if (current.some(message => message.loading)) return current
-          const unchanged = current.length === serverMessages.length
+          const mergedMessages = mergeMessageUiState(current, serverMessages)
+          const unchanged = current.length === mergedMessages.length
             && current.every((message, index) => (
-              message.id === serverMessages[index]?.id
-              && message.sender === serverMessages[index]?.sender
-              && message.text === serverMessages[index]?.text
+              message.id === mergedMessages[index]?.id
+              && message.sender === mergedMessages[index]?.sender
+              && message.text === mergedMessages[index]?.text
+              && message.translation === mergedMessages[index]?.translation
+              && message.translationVisible === mergedMessages[index]?.translationVisible
             ))
-          return unchanged ? current : serverMessages
+          return unchanged ? current : mergedMessages
         })
       } catch {
         // Keep the current local transcript until the backend is reachable again.
@@ -430,8 +542,18 @@ export default function ChatPage(): JSX.Element{
   }, [conversationId])
 
   const handleCharacterSelect = (nextCharacter: Character) => {
+    conversationCacheRef.current[selectedCharacter.id] = {
+      conversationId,
+      messages: stableMessagesForCache(messages),
+      behaviorStatus
+    }
+    selectedCharacterIdRef.current = nextCharacter.id
     setSelectedCharacter(nextCharacter)
-    setBehaviorStatus('Online')
+    setShowConversationMenu(false)
+    const cached = conversationCacheRef.current[nextCharacter.id]
+    setConversationId(cached?.conversationId || null)
+    setMessages(cached?.messages || [])
+    setBehaviorStatus(cached?.behaviorStatus || 'Online')
     localStorage.setItem('chatterra_characterId', nextCharacter.id)
     setUnreadCharacterIds(current => {
       if (!current.has(nextCharacter.id)) return current
@@ -441,6 +563,158 @@ export default function ChatPage(): JSX.Element{
     })
     const uid = userId || localStorage.getItem('chatterra_userId')
     if (uid) void loadHistoryForCharacter(uid, nextCharacter)
+  }
+
+  const updateMessagesForCharacter = (
+    characterId: string,
+    update: (current: ChatMessage[]) => ChatMessage[]
+  ) => {
+    if (selectedCharacterIdRef.current === characterId) {
+      setMessages(update)
+      return
+    }
+    const cached = conversationCacheRef.current[characterId] || {
+      conversationId: null,
+      messages: [],
+      behaviorStatus: 'Online'
+    }
+    conversationCacheRef.current[characterId] = {
+      ...cached,
+      messages: stableMessagesForCache(update(cached.messages))
+    }
+  }
+
+  const updateConversationForCharacter = (characterId: string, nextConversationId: string) => {
+    const cached = conversationCacheRef.current[characterId] || {
+      conversationId: null,
+      messages: [],
+      behaviorStatus: 'Online'
+    }
+    conversationCacheRef.current[characterId] = {
+      ...cached,
+      conversationId: nextConversationId
+    }
+    if (selectedCharacterIdRef.current === characterId) {
+      setConversationId(nextConversationId)
+      localStorage.setItem('chatterra_conversationId', nextConversationId)
+    }
+  }
+
+  const updateBehaviorForCharacter = (characterId: string, nextBehaviorStatus: string) => {
+    const cached = conversationCacheRef.current[characterId] || {
+      conversationId: null,
+      messages: [],
+      behaviorStatus: 'Online'
+    }
+    conversationCacheRef.current[characterId] = {
+      ...cached,
+      behaviorStatus: nextBehaviorStatus
+    }
+    if (selectedCharacterIdRef.current === characterId) {
+      setBehaviorStatus(nextBehaviorStatus)
+    }
+  }
+
+  const togglePinnedCharacter = async () => {
+    const uid = userId || localStorage.getItem('chatterra_userId')
+    if (!uid) return
+    const characterId = selectedCharacter.id
+    const nextPinned = !pinnedCharacterIds.has(characterId)
+    setShowConversationMenu(false)
+    setPinnedCharacterIds(current => {
+      const next = new Set(current)
+      if (nextPinned) next.add(characterId)
+      else next.delete(characterId)
+      return next
+    })
+
+    try {
+      const response = await fetch(
+        `http://localhost:3000/api/users/${encodeURIComponent(uid)}/characters/${encodeURIComponent(characterId)}/pin`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pinned: nextPinned })
+        }
+      )
+      if (!response.ok) throw new Error('Could not update pin preference')
+    } catch {
+      setPinnedCharacterIds(current => {
+        const next = new Set(current)
+        if (nextPinned) next.delete(characterId)
+        else next.add(characterId)
+        return next
+      })
+    }
+  }
+
+  const toggleMessageTranslation = (message: ChatMessage) => {
+    const characterId = selectedCharacter.id
+    if (message.translationVisible) {
+      updateMessagesForCharacter(characterId, current => current.map(item => item.id === message.id
+        ? { ...item, translationVisible: false, translationError: undefined }
+        : item))
+      return
+    }
+    if (message.translationLoading || message.translation) {
+      updateMessagesForCharacter(characterId, current => current.map(item => item.id === message.id
+        ? { ...item, translationVisible: true, translationError: undefined }
+        : item))
+      return
+    }
+
+    updateMessagesForCharacter(characterId, current => current.map(item => item.id === message.id
+      ? { ...item, translationVisible: true, translationLoading: true, translationError: undefined }
+      : item))
+
+    void (async () => {
+      try {
+        const response = message.sourceMessageId
+          ? await fetch(
+              `http://localhost:3000/api/messages/${encodeURIComponent(message.sourceMessageId)}/translations`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  userId: userId || localStorage.getItem('chatterra_userId'),
+                  targetLanguage: 'en',
+                  segmentIndex: message.segmentIndex || 0
+                })
+              }
+            )
+          : await fetch(
+              'http://localhost:3000/api/translations',
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  text: message.text,
+                  targetLanguage: 'en'
+                })
+              }
+            )
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok || typeof data.translation?.text !== 'string') {
+          throw new Error(data.error || 'Translation unavailable')
+        }
+        updateMessagesForCharacter(characterId, current => current.map(item => item.id === message.id
+          ? {
+              ...item,
+              translation: data.translation.text,
+              translationLoading: false,
+              translationError: undefined
+            }
+          : item))
+      } catch (error) {
+        updateMessagesForCharacter(characterId, current => current.map(item => item.id === message.id
+          ? {
+              ...item,
+              translationLoading: false,
+              translationError: error instanceof Error ? error.message : 'Translation unavailable'
+            }
+          : item))
+      }
+    })()
   }
 
   const handleDraftChange = (draft: string) => {
@@ -485,6 +759,7 @@ export default function ChatPage(): JSX.Element{
         : prev.map(character => character.id === savedCharacter.id ? savedCharacter : character))
 
       if (isNewCharacter) {
+        selectedCharacterIdRef.current = savedCharacter.id
         setSelectedCharacter(savedCharacter)
         localStorage.setItem('chatterra_characterId', savedCharacter.id)
         const uid = userId || localStorage.getItem('chatterra_userId')
@@ -508,16 +783,30 @@ export default function ChatPage(): JSX.Element{
   const clearCurrentCharacterHistory = async () => {
     const uid = userId || localStorage.getItem('chatterra_userId')
     if (!uid) return
+    const targetCharacter = selectedCharacter
 
     await fetch('http://localhost:3000/api/chat-history', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: uid, characterId: selectedCharacter.id })
+      body: JSON.stringify({ userId: uid, characterId: targetCharacter.id })
     })
 
-    setConversationId(null)
-    setMessages([{ id: makeMessageId(), sender: 'ai', text: starterMessageForCharacter(selectedCharacter) }])
-    localStorage.removeItem('chatterra_conversationId')
+    const starterMessages: ChatMessage[] = [{
+      id: `starter-${targetCharacter.id}-${Date.now()}`,
+      sender: 'ai',
+      text: starterMessageForCharacter(targetCharacter)
+    }]
+    conversationCacheRef.current[targetCharacter.id] = {
+      conversationId: null,
+      messages: starterMessages,
+      behaviorStatus: 'Online'
+    }
+    if (selectedCharacterIdRef.current === targetCharacter.id) {
+      setConversationId(null)
+      setMessages(starterMessages)
+      setBehaviorStatus('Online')
+      localStorage.removeItem('chatterra_conversationId')
+    }
   }
 
   const handleAddAction = (action: 'group' | 'character' | 'clear') => {
@@ -538,65 +827,77 @@ export default function ChatPage(): JSX.Element{
 
   const sendMessage = (text: string, voice?: VoiceTranscriptMetadata) => {
     if (!text) return
+    const targetCharacter = selectedCharacter
+    const targetCharacterId = targetCharacter.id
+    const targetConversationId = conversationId
     setScrollToEndRequest(current => current + 1)
-    const userMsg: Message = { id: makeMessageId(), sender: 'user', text }
+    const userMsg: ChatMessage = { id: makeMessageId(), sender: 'user', text, segmentIndex: 0 }
     const loadingId = makeMessageId()
-    const loadingMsg: Message = { id: loadingId, sender: 'ai', text: '', loading: true }
+    const loadingMsg: ChatMessage = { id: loadingId, sender: 'ai', text: '', loading: true }
 
-    setMessages(prev => {
-      const updated = [...prev, userMsg, loadingMsg]
+    setMessages(prev => [...prev, userMsg, loadingMsg])
 
-      ;(async () => {
-        try {
-          const res = await fetch('http://localhost:3000/api/chat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              message: text,
-              history: updated,
-              character: selectedCharacter,
-              userId: userId || localStorage.getItem('chatterra_userId'),
-              conversationId,
-              voice: voice
-                ? {
-                    originalText: voice.originalText,
-                    correctedText: voice.correctedText,
-                    detectedLanguage: voice.detectedLanguage,
-                    confidence: voice.confidence,
-                    audioAvailable: voice.audioAvailable
-                  }
-                : undefined
-            })
+    void (async () => {
+      try {
+        const res = await fetch('http://localhost:3000/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: text,
+            character: targetCharacter,
+            userId: userId || localStorage.getItem('chatterra_userId'),
+            conversationId: targetConversationId,
+            voice: voice
+              ? {
+                  originalText: voice.originalText,
+                  correctedText: voice.correctedText,
+                  detectedLanguage: voice.detectedLanguage,
+                  confidence: voice.confidence,
+                  audioAvailable: voice.audioAvailable
+                }
+              : undefined
           })
-          const data = await res.json().catch(() => ({}))
-          if (!res.ok) throw new Error(data.error || 'Chat request failed')
-          if (data.conversationId && !conversationId) {
-            setConversationId(data.conversationId)
-            localStorage.setItem('chatterra_conversationId', data.conversationId)
-          }
-          if (data.behavior) {
-            const activity = String(data.behavior.activity || 'Online')
-              .replace(/_/g, ' ')
-              .replace(/^./, value => value.toUpperCase())
-            setBehaviorStatus(activity)
-          }
-          if (data.behavior?.decision === 'no_reply' || data.reply === null) {
-            setMessages(prev2 => prev2.filter(m => m.id !== loadingId))
-          } else if (typeof data.reply !== 'string') {
-            throw new Error('The server returned no usable response.')
-          } else {
-            const aiMessages = responseMessages(data)
-            if (aiMessages.length === 0) throw new Error('The server returned no usable response.')
-            setMessages(prev2 => prev2.flatMap(m => m.id === loadingId ? aiMessages : [m]))
-          }
-        } catch (error) {
-          console.error('Chat request failed', error)
-          setMessages(prev2 => prev2.filter(m => m.id !== loadingId))
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(data.error || 'Chat request failed')
+        if (typeof data.conversationId === 'string') {
+          updateConversationForCharacter(targetCharacterId, data.conversationId)
         }
-      })()
-
-      return updated
-    })
+        if (typeof data.userMessageId === 'string') {
+          updateMessagesForCharacter(targetCharacterId, prev2 => prev2.map(message => message.id === userMsg.id
+            ? {
+                ...message,
+                id: data.userMessageId,
+                sourceMessageId: data.userMessageId,
+                segmentIndex: 0
+              }
+            : message))
+        }
+        if (data.behavior) {
+          const activity = String(data.behavior.activity || 'Online')
+            .replace(/_/g, ' ')
+            .replace(/^./, value => value.toUpperCase())
+          updateBehaviorForCharacter(targetCharacterId, activity)
+        }
+        if (data.behavior?.decision === 'no_reply' || data.reply === null) {
+          updateMessagesForCharacter(targetCharacterId, prev2 => prev2.filter(m => m.id !== loadingId))
+        } else if (typeof data.reply !== 'string') {
+          throw new Error('The server returned no usable response.')
+        } else {
+          const aiMessages = responseMessages(data)
+          if (aiMessages.length === 0) throw new Error('The server returned no usable response.')
+          updateMessagesForCharacter(targetCharacterId, prev2 => {
+            const hasLoadingMessage = prev2.some(message => message.id === loadingId)
+            return hasLoadingMessage
+              ? prev2.flatMap(message => message.id === loadingId ? aiMessages : [message])
+              : [...prev2, ...aiMessages]
+          })
+        }
+      } catch (error) {
+        console.error('Chat request failed', error)
+        updateMessagesForCharacter(targetCharacterId, prev2 => prev2.filter(m => m.id !== loadingId))
+      }
+    })()
   }
 
   return (
@@ -653,7 +954,11 @@ export default function ChatPage(): JSX.Element{
             <button
               type="button"
               key={ch.id}
-              className={"contact-item " + (selectedCharacter.id === ch.id ? 'active' : '')}
+              className={[
+                'contact-item',
+                selectedCharacter.id === ch.id ? 'active' : '',
+                pinnedCharacterIds.has(ch.id) ? 'pinned' : ''
+              ].filter(Boolean).join(' ')}
               onClick={() => handleCharacterSelect(ch)}
             >
               <div className="contact-avatar">
@@ -695,6 +1000,54 @@ export default function ChatPage(): JSX.Element{
               <div className="status">{selectedCharacter.role || 'Conversation partner'} · {behaviorStatus}</div>
             </div>
           </div>
+          <div className="conversation-menu-wrap">
+            <button
+              type="button"
+              className="conversation-menu-button"
+              onClick={() => setShowConversationMenu(current => !current)}
+              aria-label="Conversation options"
+              aria-expanded={showConversationMenu}
+              title="Conversation options"
+            >
+              <span aria-hidden="true">...</span>
+            </button>
+            {showConversationMenu && (
+              <>
+                <button
+                  type="button"
+                  className="conversation-menu-backdrop"
+                  aria-label="Close conversation menu"
+                  onClick={() => setShowConversationMenu(false)}
+                />
+                <div className="conversation-menu" role="menu" aria-label="Conversation options">
+                  <button type="button" role="menuitem" onClick={() => void togglePinnedCharacter()}>
+                    {pinnedCharacterIds.has(selectedCharacter.id) ? 'Unpin Conversation' : 'Pin Conversation'}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setShowConversationMenu(false)
+                      openCharacterEditor(selectedCharacter)
+                    }}
+                  >
+                    Edit Character
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="danger"
+                    onClick={() => {
+                      setShowConversationMenu(false)
+                      void clearCurrentCharacterHistory()
+                    }}
+                  >
+                    Clear History
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
         <ChatWindow
@@ -702,6 +1055,7 @@ export default function ChatPage(): JSX.Element{
           character={selectedCharacter}
           onEditCharacter={() => openCharacterEditor(selectedCharacter)}
           scrollToEndRequest={scrollToEndRequest}
+          onToggleTranslation={toggleMessageTranslation}
         />
         <InputBox
           key={selectedCharacter.id}

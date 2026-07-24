@@ -11,6 +11,7 @@
     "test:language": "ts-node --transpile-only language-policy.test.ts",
     "test:response-style": "ts-node --transpile-only response-style.test.ts",
     "test:model-gateway": "ts-node --transpile-only model-gateway.test.ts",
+    "test:translation": "ts-node --transpile-only translation-service.test.ts",
     "test:proactive": "ts-node --transpile-only proactive-policy.test.ts",
     "test:proactive-integration": "ts-node --transpile-only proactive-service.integration.test.ts",
     "db:migrate": "ts-node scripts/migrate.ts",

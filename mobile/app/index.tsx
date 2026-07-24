@@ -18,7 +18,7 @@ import { useChat } from '@/src/chat-context'
 import { layout, palette } from '@/src/theme'
 import { Character } from '@/src/types'
 
-function ContactRow({ character }: { character: Character }) {
+function ContactRow({ character, pinned }: { character: Character; pinned: boolean }) {
   const {
     proactivePreviews,
     unreadCharacterIds,
@@ -35,7 +35,11 @@ function ContactRow({ character }: { character: Character }) {
       onPress={openConversation}
       accessibilityRole="button"
       accessibilityLabel={`Chat with ${character.name}`}
-      style={({ pressed }) => [styles.contactRow, pressed && styles.contactPressed]}
+      style={({ pressed }) => [
+        styles.contactRow,
+        pinned && styles.contactPinned,
+        pressed && styles.contactPressed,
+      ]}
     >
       <Avatar avatar={character.avatar} name={character.name} size={layout.avatarSize} />
       <View style={styles.contactContent}>
@@ -49,6 +53,7 @@ function ContactRow({ character }: { character: Character }) {
           {proactivePreviews[character.id] || character.personality || character.role || 'Conversation partner'}
         </Text>
       </View>
+      {pinned && <Ionicons name="pin" size={14} color="#7B8492" accessibilityLabel="Pinned" />}
       <Ionicons name="chevron-forward" size={18} color="#98A2B3" />
     </Pressable>
   )
@@ -60,6 +65,7 @@ export default function ContactsScreen() {
     ready,
     characters,
     connectionError,
+    pinnedCharacterIds,
     refreshCharacters,
   } = useChat()
   const [search, setSearch] = useState('')
@@ -67,15 +73,17 @@ export default function ContactsScreen() {
 
   const visibleCharacters = useMemo(() => {
     const query = search.trim().toLocaleLowerCase()
-    if (!query) return characters
-    return characters.filter(character => (
+    const filtered = query ? characters.filter(character => (
       [character.name, character.role, character.company, character.personality]
         .filter(Boolean)
         .join(' ')
         .toLocaleLowerCase()
         .includes(query)
+    )) : characters
+    return [...filtered].sort((left, right) => (
+      Number(pinnedCharacterIds.has(right.id)) - Number(pinnedCharacterIds.has(left.id))
     ))
-  }, [characters, search])
+  }, [characters, pinnedCharacterIds, search])
 
   const refresh = async () => {
     setRefreshing(true)
@@ -137,7 +145,9 @@ export default function ContactsScreen() {
         <FlatList
           data={visibleCharacters}
           keyExtractor={item => item.id}
-          renderItem={({ item }) => <ContactRow character={item} />}
+          renderItem={({ item }) => (
+            <ContactRow character={item} pinned={pinnedCharacterIds.has(item.id)} />
+          )}
           contentContainerStyle={styles.listContent}
           keyboardShouldPersistTaps="handled"
           refreshControl={(
@@ -232,6 +242,9 @@ const styles = StyleSheet.create({
   },
   contactPressed: {
     backgroundColor: '#F5F7F9',
+  },
+  contactPinned: {
+    backgroundColor: '#F2F3F5',
   },
   contactContent: {
     flex: 1,

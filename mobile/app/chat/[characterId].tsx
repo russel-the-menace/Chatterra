@@ -1,4 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons'
+import * as Clipboard from 'expo-clipboard'
 import { router, useLocalSearchParams } from 'expo-router'
 import {
   useCallback,
@@ -10,12 +11,10 @@ import {
 import {
   ActivityIndicator,
   Alert,
-  Animated,
-  Dimensions,
+  Animated as RNAnimated,
   Easing,
   FlatList,
-  Keyboard,
-  KeyboardEvent,
+  Modal,
   NativeScrollEvent,
   NativeSyntheticEvent,
   Platform,
@@ -23,8 +22,13 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native'
+import Reanimated, {
+  useAnimatedKeyboard,
+  useAnimatedStyle,
+} from 'react-native-reanimated'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { Avatar } from '@/components/avatar'
@@ -51,15 +55,48 @@ const mapMessages = (messages: ServerMessage[]): ChatMessage[] => messages
   .filter(message => message.senderRole !== 'system')
   .flatMap(message => {
     const segments = deliverySegments(message)
+    const translations = message.contentJson?.translations
+    const englishTranslations = translations && typeof translations === 'object'
+      ? (translations as Record<string, unknown>).en
+      : undefined
     return segments.map((text, index) => ({
       id: segments.length === 1 ? message.id : `${message.id}:segment:${index}`,
+      sourceMessageId: message.id,
+      segmentIndex: index,
       sender: message.senderRole === 'user' ? 'user' as const : 'assistant' as const,
       text,
+      translation: englishTranslations && typeof englishTranslations === 'object'
+        && typeof (englishTranslations as Record<string, unknown>)[String(index)] === 'string'
+        ? String((englishTranslations as Record<string, unknown>)[String(index)])
+        : undefined,
+      translationVisible: Boolean(
+        englishTranslations && typeof englishTranslations === 'object'
+          && typeof (englishTranslations as Record<string, unknown>)[String(index)] === 'string'
+      ),
       groupIndex: index,
       groupSize: segments.length,
       createdAt: message.createdAt,
     }))
   })
+
+const mergeMessageUiState = (current: ChatMessage[], incoming: ChatMessage[]) => {
+  const currentById = new Map(current.map(message => [message.id, message]))
+  return incoming.map(message => {
+    const existing = currentById.get(message.id)
+    if (!existing) return message
+    return {
+      ...message,
+      translation: existing.translation || message.translation,
+      translationVisible: existing.translation !== undefined
+        || existing.translationLoading
+        || existing.translationError
+        ? existing.translationVisible
+        : message.translationVisible,
+      translationLoading: existing.translationLoading,
+      translationError: existing.translationError,
+    }
+  })
+}
 
 const responseMessages = (response: ChatResponse): ChatMessage[] => {
   const stored = Array.isArray(response.replySegments)
@@ -73,6 +110,8 @@ const responseMessages = (response: ChatResponse): ChatMessage[] => {
   const baseId = response.messageId || createLocalId()
   return segments.map((text, index) => ({
     id: segments.length === 1 ? baseId : `${baseId}:segment:${index}`,
+    sourceMessageId: baseId,
+    segmentIndex: index,
     sender: 'assistant',
     text,
     groupIndex: index,
@@ -95,10 +134,10 @@ const formatActivity = (activity?: string) => {
 }
 
 function TypingIndicator() {
-  const phase = useRef(new Animated.Value(0)).current
+  const phase = useRef(new RNAnimated.Value(0)).current
 
   useEffect(() => {
-    const animation = Animated.loop(Animated.timing(phase, {
+    const animation = RNAnimated.loop(RNAnimated.timing(phase, {
       toValue: 1,
       duration: 900,
       easing: Easing.linear,
@@ -113,7 +152,7 @@ function TypingIndicator() {
       {[0, 1, 2].map(index => {
         const start = 0.02 + index * 0.16
         return (
-          <Animated.View
+          <RNAnimated.View
             key={index}
             style={[
               styles.typingDot,
@@ -142,20 +181,22 @@ function MessageRow({
   characterName,
   characterAvatar,
   onEditCharacter,
+  onLongPress,
 }: {
   message: ChatMessage
   characterName: string
   characterAvatar?: string
   onEditCharacter: () => void
+  onLongPress: (message: ChatMessage, pageX: number, pageY: number) => void
 }) {
   const isUser = message.sender === 'user'
   const isContinuation = !isUser && (message.groupIndex || 0) > 0
   const hasFollowingSegment = (message.groupIndex || 0) < (message.groupSize || 1) - 1
-  const entryProgress = useRef(new Animated.Value(message.animateEntry ? 0 : 1)).current
+  const entryProgress = useRef(new RNAnimated.Value(message.animateEntry ? 0 : 1)).current
 
   useEffect(() => {
     if (!message.animateEntry) return
-    Animated.timing(entryProgress, {
+    RNAnimated.timing(entryProgress, {
       toValue: 1,
       duration: 230,
       delay: message.animationDelayMs || 0,
@@ -164,7 +205,7 @@ function MessageRow({
   }, [entryProgress, message.animateEntry, message.animationDelayMs])
 
   return (
-    <Animated.View
+    <RNAnimated.View
       style={[
         styles.messageRow,
         isUser ? styles.messageRowUser : styles.messageRowAssistant,
@@ -189,18 +230,44 @@ function MessageRow({
             <Text style={styles.messageAuthor}>{characterName}</Text>
           </Pressable>
         )}
-        <View style={[styles.bubble, isUser ? styles.userBubble : styles.assistantBubble]}>
+        <Pressable
+          delayLongPress={280}
+          disabled={message.loading}
+          onLongPress={event => onLongPress(
+            message,
+            event.nativeEvent.pageX,
+            event.nativeEvent.pageY
+          )}
+          style={[styles.bubble, isUser ? styles.userBubble : styles.assistantBubble]}
+        >
           {message.loading ? (
             <TypingIndicator />
           ) : (
-            <Text style={[styles.messageText, isUser && styles.userMessageText]} selectable>
+            <Text style={[styles.messageText, isUser && styles.userMessageText]}>
               {message.text}
             </Text>
           )}
-        </View>
+        </Pressable>
+        {message.translationVisible && (message.translationLoading || message.translation || message.translationError) && (
+          <View style={styles.translationBox}>
+            {message.translationLoading ? (
+              <View style={styles.translationLoadingRow}>
+                <ActivityIndicator size="small" color={palette.textMuted} />
+                <Text style={styles.translationMeta}>Translating...</Text>
+              </View>
+            ) : (
+              <Text style={[
+                styles.translationText,
+                message.translationError && styles.translationErrorText,
+              ]}>
+                {message.translationError || message.translation}
+              </Text>
+            )}
+          </View>
+        )}
       </View>
       {isUser && <Avatar name="Me" avatar="Me" size={34} muted />}
-    </Animated.View>
+    </RNAnimated.View>
   )
 }
 
@@ -208,6 +275,7 @@ export default function ChatScreen() {
   const params = useLocalSearchParams<{ characterId: string | string[] }>()
   const characterId = Array.isArray(params.characterId) ? params.characterId[0] : params.characterId
   const insets = useSafeAreaInsets()
+  const window = useWindowDimensions()
   const {
     ready,
     userId,
@@ -216,18 +284,31 @@ export default function ChatScreen() {
     getDraft,
     setDraft,
     setActiveCharacter,
+    pinnedCharacterIds,
+    setCharacterPinned,
+    getConversationCache,
+    setConversationCache,
+    clearConversationCache,
   } = useChat()
   const character = useMemo(
     () => characters.find(item => item.id === characterId),
     [characterId, characters]
   )
   const draft = characterId ? getDraft(characterId) : ''
-  const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [conversationId, setConversationId] = useState<string | null>(null)
+  const initialCacheRef = useRef(characterId ? getConversationCache(characterId) : undefined)
+  const [messages, setMessages] = useState<ChatMessage[]>(() => initialCacheRef.current?.messages || [])
+  const [conversationId, setConversationId] = useState<string | null>(
+    initialCacheRef.current?.conversationId || null
+  )
   const [activity, setActivity] = useState('Online')
-  const [loadingHistory, setLoadingHistory] = useState(true)
+  const [loadingHistory, setLoadingHistory] = useState(!initialCacheRef.current)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [messageActionMenu, setMessageActionMenu] = useState<{
+    message: ChatMessage
+    pageX: number
+    pageY: number
+  } | null>(null)
   const listRef = useRef<FlatList<ChatMessage> | null>(null)
   const historyRequestRef = useRef(0)
   const sendingRef = useRef(false)
@@ -237,9 +318,12 @@ export default function ChatScreen() {
   const initialScrollScheduledRef = useRef(false)
   const initialScrollFrameRef = useRef<number | null>(null)
   const pendingSendScrollRef = useRef<'auto' | 'animated' | null>(null)
-  const keyboardVisibleRef = useRef(false)
-  const keyboardOffset = useRef(new Animated.Value(0)).current
-  const composerBottomPadding = useRef(new Animated.Value(Math.max(8, insets.bottom))).current
+  const keyboard = useAnimatedKeyboard()
+  const keyboardAreaAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{
+      translateY: -Math.max(0, keyboard.height.value - insets.bottom + 8),
+    }],
+  }), [insets.bottom])
   const stagedDeliveryTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set())
 
   const settleInitialScroll = useCallback(() => {
@@ -326,52 +410,6 @@ export default function ChatScreen() {
     queueMessage(1)
   }, [scheduleDeliveryTask])
 
-  useEffect(() => {
-    const handleKeyboardTransition = (event: KeyboardEvent, forcedVisible?: boolean) => {
-      const screenHeight = Dimensions.get('screen').height
-      const visible = forcedVisible ?? event.endCoordinates.screenY < screenHeight - 1
-      const shouldFollow = atBottomRef.current || followLatestRef.current
-      keyboardVisibleRef.current = visible
-
-      Animated.parallel([
-        Animated.timing(keyboardOffset, {
-          toValue: visible ? event.endCoordinates.height : 0,
-          duration: Math.max(160, event.duration || 250),
-          easing: Easing.bezier(0.25, 0.1, 0.25, 1),
-          useNativeDriver: false,
-        }),
-        Animated.timing(composerBottomPadding, {
-          toValue: visible ? 8 : Math.max(8, insets.bottom),
-          duration: Math.max(160, event.duration || 250),
-          easing: Easing.bezier(0.25, 0.1, 0.25, 1),
-          useNativeDriver: false,
-        }),
-      ]).start(({ finished }) => {
-        if (finished && shouldFollow) listRef.current?.scrollToEnd({ animated: false })
-      })
-
-      if (!shouldFollow) return
-      followLatestRef.current = true
-      requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }))
-    }
-    const subscriptions = Platform.OS === 'ios'
-      ? [Keyboard.addListener('keyboardWillChangeFrame', handleKeyboardTransition)]
-      : [
-          Keyboard.addListener('keyboardDidShow', event => handleKeyboardTransition(event, true)),
-          Keyboard.addListener('keyboardDidHide', event => handleKeyboardTransition(event, false)),
-        ]
-
-    return () => {
-      subscriptions.forEach(subscription => subscription.remove())
-    }
-  }, [composerBottomPadding, insets.bottom, keyboardOffset])
-
-  useEffect(() => {
-    if (!keyboardVisibleRef.current) {
-      composerBottomPadding.setValue(Math.max(8, insets.bottom))
-    }
-  }, [composerBottomPadding, insets.bottom])
-
   useEffect(() => () => {
     if (initialScrollFrameRef.current !== null) {
       cancelAnimationFrame(initialScrollFrameRef.current)
@@ -423,16 +461,29 @@ export default function ChatScreen() {
 
       if (!matching) {
         setConversationId(null)
-        setMessages([{
+        const starterMessages: ChatMessage[] = [{
           id: `starter-${character.id}`,
           sender: 'assistant',
           text: starterMessageForCharacter(character),
-        }])
+        }]
+        setMessages(starterMessages)
+        setConversationCache(character.id, {
+          conversationId: null,
+          messages: starterMessages,
+          cachedAt: Date.now(),
+        })
       } else {
         const serverMessages = await api.listMessages(matching.id)
         if (requestId !== historyRequestRef.current) return
+        const cachedMessages = getConversationCache(character.id)?.messages || []
+        const mappedMessages = mergeMessageUiState(cachedMessages, mapMessages(serverMessages))
         setConversationId(matching.id)
-        setMessages(mapMessages(serverMessages))
+        setMessages(mappedMessages)
+        setConversationCache(character.id, {
+          conversationId: matching.id,
+          messages: mappedMessages,
+          cachedAt: Date.now(),
+        })
       }
       setError(null)
     } catch (loadError) {
@@ -441,13 +492,22 @@ export default function ChatScreen() {
     } finally {
       if (requestId === historyRequestRef.current) setLoadingHistory(false)
     }
-  }, [character, userId])
+  }, [character, getConversationCache, setConversationCache, userId])
 
   useEffect(() => {
     if (!character || !userId) return
-    void loadConversation()
+    void loadConversation(Boolean(getConversationCache(character.id)))
     void refreshState()
-  }, [character, loadConversation, refreshState, userId])
+  }, [character, getConversationCache, loadConversation, refreshState, userId])
+
+  useEffect(() => {
+    if (!characterId || loadingHistory || messages.some(message => message.loading)) return
+    setConversationCache(characterId, {
+      conversationId,
+      messages,
+      cachedAt: Date.now(),
+    })
+  }, [characterId, conversationId, loadingHistory, messages, setConversationCache])
 
   useEffect(() => {
     if (!loadingHistory && messages.length > 0) settleInitialScroll()
@@ -464,7 +524,7 @@ export default function ChatScreen() {
         }
         const existingIds = new Set(current.map(message => message.id))
         let animationIndex = 0
-        const next = mapped.map(message => {
+        const next = mergeMessageUiState(current, mapped).map(message => {
           if (message.sender !== 'assistant' || existingIds.has(message.id)) return message
           const animatedMessage = {
             ...message,
@@ -512,6 +572,7 @@ export default function ChatScreen() {
     if (!userId || !character) return
     try {
       await api.clearHistory(userId, character.id)
+      clearConversationCache(character.id)
       setConversationId(null)
       setMessages([{
         id: `starter-${character.id}-${Date.now()}`,
@@ -531,7 +592,15 @@ export default function ChatScreen() {
   }
 
   const showConversationActions = () => {
+    if (!character) return
+    const pinned = pinnedCharacterIds.has(character.id)
     Alert.alert(character?.name || 'Conversation', undefined, [
+      {
+        text: pinned ? 'Unpin' : 'Pin to top',
+        onPress: () => void setCharacterPinned(character.id, !pinned).catch(pinError => {
+          Alert.alert('Could not update pin', pinError instanceof Error ? pinError.message : undefined)
+        }),
+      },
       { text: 'Edit character', onPress: openEditor },
       {
         text: 'Clear history',
@@ -547,6 +616,73 @@ export default function ChatScreen() {
       },
       { text: 'Cancel', style: 'cancel' },
     ])
+  }
+
+  const translateMessage = async (message: ChatMessage) => {
+    setMessageActionMenu(null)
+    if (message.translationVisible) {
+      setMessages(current => current.map(item => (
+        item.id === message.id
+          ? { ...item, translationVisible: false, translationError: undefined }
+          : item
+      )))
+      return
+    }
+    if (message.translationLoading || message.translation) {
+      setMessages(current => current.map(item => (
+        item.id === message.id
+          ? { ...item, translationVisible: true, translationError: undefined }
+          : item
+      )))
+      return
+    }
+    if (message.sourceMessageId && !userId) return
+    setMessages(current => current.map(item => (
+      item.id === message.id
+        ? {
+            ...item,
+            translationVisible: true,
+            translationLoading: true,
+            translationError: undefined,
+          }
+        : item
+    )))
+    try {
+      let translation: Awaited<ReturnType<typeof api.translateText>>
+      if (message.sourceMessageId) {
+        if (!userId) throw new Error('Could not translate this message.')
+        translation = await api.translateMessage(userId, message.sourceMessageId, message.segmentIndex || 0)
+      } else {
+        translation = await api.translateText(message.text)
+      }
+      setMessages(current => current.map(item => (
+        item.id === message.id
+          ? {
+              ...item,
+              translation: translation.text,
+              translationLoading: false,
+              translationError: undefined,
+            }
+          : item
+      )))
+    } catch (translationError) {
+      setMessages(current => current.map(item => (
+        item.id === message.id
+          ? {
+              ...item,
+              translationLoading: false,
+              translationError: translationError instanceof Error
+                ? translationError.message
+                : 'Could not translate this message.',
+            }
+          : item
+      )))
+    }
+  }
+
+  const copyMessage = async (message: ChatMessage) => {
+    setMessageActionMenu(null)
+    await Clipboard.setStringAsync(message.text)
   }
 
   const sendMessage = async () => {
@@ -577,6 +713,18 @@ export default function ChatScreen() {
         userId,
         character,
       })
+      if (response.userMessageId) {
+        setMessages(current => current.map(message => (
+          message.id === userMessage.id
+            ? {
+                ...message,
+                id: response.userMessageId!,
+                sourceMessageId: response.userMessageId,
+                segmentIndex: 0,
+              }
+            : message
+        )))
+      }
       setConversationId(response.conversationId)
       if (response.behavior?.activity) setActivity(formatActivity(response.behavior.activity))
 
@@ -657,7 +805,7 @@ export default function ChatScreen() {
         </Pressable>
       </View>
 
-      <Animated.View style={[styles.keyboardArea, { paddingBottom: keyboardOffset }]}>
+      <Reanimated.View style={[styles.keyboardArea, keyboardAreaAnimatedStyle]}>
         <FlatList
           ref={listRef}
           data={messages}
@@ -668,6 +816,7 @@ export default function ChatScreen() {
               characterName={character.name}
               characterAvatar={character.avatar}
               onEditCharacter={openEditor}
+              onLongPress={(message, pageX, pageY) => setMessageActionMenu({ message, pageX, pageY })}
             />
           )}
           style={styles.messageList}
@@ -691,9 +840,9 @@ export default function ChatScreen() {
           </Pressable>
         )}
 
-        <Animated.View style={[
+        <View style={[
           styles.composer,
-          { paddingBottom: composerBottomPadding },
+          { paddingBottom: Math.max(8, insets.bottom) },
         ]}>
           <TextInput
             value={draft}
@@ -704,6 +853,11 @@ export default function ChatScreen() {
             maxLength={20_000}
             style={styles.composerInput}
             textAlignVertical="center"
+            onFocus={() => {
+              if (!atBottomRef.current && !followLatestRef.current) return
+              followLatestRef.current = true
+              requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }))
+            }}
           />
           <Pressable
             onPress={() => void sendMessage()}
@@ -720,8 +874,61 @@ export default function ChatScreen() {
               ? <ActivityIndicator size="small" color="#FFFFFF" />
               : <Ionicons name="arrow-up" size={22} color="#FFFFFF" />}
           </Pressable>
-        </Animated.View>
-      </Animated.View>
+        </View>
+      </Reanimated.View>
+
+      <Modal
+        visible={Boolean(messageActionMenu)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMessageActionMenu(null)}
+      >
+        <Pressable style={styles.messageActionBackdrop} onPress={() => setMessageActionMenu(null)}>
+          {messageActionMenu && (
+            <View
+              onStartShouldSetResponder={() => true}
+              style={[
+                styles.messageActionMenu,
+                {
+                  left: Math.max(8, Math.min(window.width - 192, messageActionMenu.pageX - 88)),
+                  top: Math.max(
+                    insets.top + 8,
+                    Math.min(
+                      window.height - insets.bottom - 64,
+                      messageActionMenu.pageY > 84
+                        ? messageActionMenu.pageY - 66
+                        : messageActionMenu.pageY + 12
+                    )
+                  ),
+                },
+              ]}
+            >
+              <Pressable
+                onPress={() => void copyMessage(messageActionMenu.message)}
+                style={({ pressed }) => [styles.messageAction, pressed && styles.messageActionPressed]}
+              >
+                <Ionicons name="copy-outline" size={18} color="#FFFFFF" />
+                <Text style={styles.messageActionLabel}>Copy</Text>
+              </Pressable>
+              <View style={styles.messageActionDivider} />
+              <Pressable
+                onPress={() => void translateMessage(messageActionMenu.message)}
+                style={({ pressed }) => [
+                  styles.messageAction,
+                  pressed && styles.messageActionPressed,
+                ]}
+              >
+                <Ionicons name="language-outline" size={18} color="#FFFFFF" />
+                <Text style={styles.messageActionLabel}>
+                  {messageActionMenu.message.translationVisible
+                    ? 'Stop Translate'
+                    : 'Translate'}
+                </Text>
+              </Pressable>
+            </View>
+          )}
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   )
 }
@@ -730,6 +937,7 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: palette.surface,
+    overflow: 'hidden',
   },
   loadingScreen: {
     flex: 1,
@@ -739,6 +947,7 @@ const styles = StyleSheet.create({
     backgroundColor: palette.background,
   },
   chatHeader: {
+    zIndex: 2,
     height: 66,
     paddingHorizontal: 8,
     flexDirection: 'row',
@@ -846,6 +1055,35 @@ const styles = StyleSheet.create({
   userMessageText: {
     color: '#FFFFFF',
   },
+  translationBox: {
+    width: '100%',
+    marginTop: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#D5DAE1',
+    backgroundColor: '#E9ECEF',
+  },
+  translationLoadingRow: {
+    minHeight: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  translationMeta: {
+    color: palette.textMuted,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  translationText: {
+    color: '#3F4752',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  translationErrorText: {
+    color: palette.danger,
+  },
   typingIndicator: {
     height: 20,
     minWidth: 26,
@@ -919,6 +1157,48 @@ const styles = StyleSheet.create({
   },
   sendButtonPressed: {
     backgroundColor: palette.accentPressed,
+  },
+  messageActionBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'transparent',
+  },
+  messageActionMenu: {
+    position: 'absolute',
+    width: 184,
+    height: 54,
+    paddingHorizontal: 5,
+    borderRadius: 7,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#2B2D30',
+    shadowColor: '#000000',
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 8,
+  },
+  messageAction: {
+    flex: 1,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+  },
+  messageActionPressed: {
+    opacity: 0.65,
+  },
+  messageActionDisabled: {
+    opacity: 0.35,
+  },
+  messageActionLabel: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    lineHeight: 14,
+  },
+  messageActionDivider: {
+    width: StyleSheet.hairlineWidth,
+    height: 30,
+    backgroundColor: '#5A5D62',
   },
   errorTitle: {
     color: palette.text,

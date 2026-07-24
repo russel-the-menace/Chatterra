@@ -52,6 +52,18 @@ export interface Message {
   createdAt: string
 }
 
+export interface MessageTranslation {
+  id: UUID
+  messageId: UUID
+  segmentIndex: number
+  targetLanguage: string
+  translatedText: string
+  provider: string
+  model: string
+  createdAt: string
+  updatedAt: string
+}
+
 export interface VoiceTranscriptMetadata {
   originalText: string
   correctedText?: string

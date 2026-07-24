@@ -15,7 +15,13 @@ import {
 
 import { API_BASE_URL, api } from './api'
 import { getOrCreateUserId } from './storage'
-import { Character } from './types'
+import { Character, ChatMessage } from './types'
+
+type ConversationCacheEntry = {
+  conversationId: string | null
+  messages: ChatMessage[]
+  cachedAt: number
+}
 
 type ChatContextValue = {
   apiBaseUrl: string
@@ -26,12 +32,17 @@ type ChatContextValue = {
   proactivePreviews: Record<string, string>
   unreadCharacterIds: Set<string>
   conversationVersions: Record<string, number>
+  pinnedCharacterIds: Set<string>
   getDraft: (characterId: string) => string
   setDraft: (characterId: string, draft: string) => void
   refreshCharacters: () => Promise<void>
   saveCharacter: (character: Character | Omit<Character, 'id'>) => Promise<Character>
   markCharacterRead: (characterId: string) => void
   setActiveCharacter: (characterId: string | null) => void
+  setCharacterPinned: (characterId: string, pinned: boolean) => Promise<void>
+  getConversationCache: (characterId: string) => ConversationCacheEntry | undefined
+  setConversationCache: (characterId: string, entry: ConversationCacheEntry) => void
+  clearConversationCache: (characterId: string) => void
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null)
@@ -49,7 +60,9 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const [proactivePreviews, setProactivePreviews] = useState<Record<string, string>>({})
   const [unreadCharacterIds, setUnreadCharacterIds] = useState<Set<string>>(() => new Set())
   const [conversationVersions, setConversationVersions] = useState<Record<string, number>>({})
+  const [pinnedCharacterIds, setPinnedCharacterIds] = useState<Set<string>>(() => new Set())
   const activeCharacterRef = useRef<string | null>(null)
+  const conversationCacheRef = useRef<Map<string, ConversationCacheEntry>>(new Map())
   const pollingRef = useRef(false)
   const appStateRef = useRef<AppStateStatus>(AppState.currentState)
 
@@ -72,7 +85,11 @@ export function ChatProvider({ children }: PropsWithChildren) {
         const storedUserId = await getOrCreateUserId()
         if (cancelled) return
         setUserId(storedUserId)
-        await refreshCharacters()
+        const [pinnedIds] = await Promise.all([
+          api.listPinnedCharacterIds(storedUserId),
+          refreshCharacters(),
+        ])
+        if (!cancelled) setPinnedCharacterIds(new Set(pinnedIds))
       } catch {
         // The contacts screen exposes the connection error and retry action.
       } finally {
@@ -181,6 +198,49 @@ export function ChatProvider({ children }: PropsWithChildren) {
     if (characterId) markCharacterRead(characterId)
   }, [markCharacterRead])
 
+  const setCharacterPinned = useCallback(async (characterId: string, pinned: boolean) => {
+    if (!userId) throw new Error('User is not ready.')
+    const previous = pinnedCharacterIds.has(characterId)
+    setPinnedCharacterIds(current => {
+      const next = new Set(current)
+      if (pinned) next.add(characterId)
+      else next.delete(characterId)
+      return next
+    })
+    try {
+      await api.setCharacterPinned(userId, characterId, pinned)
+    } catch (error) {
+      setPinnedCharacterIds(current => {
+        const next = new Set(current)
+        if (previous) next.add(characterId)
+        else next.delete(characterId)
+        return next
+      })
+      throw error
+    }
+  }, [pinnedCharacterIds, userId])
+
+  const getConversationCache = useCallback((characterId: string) => (
+    conversationCacheRef.current.get(characterId)
+  ), [])
+
+  const setConversationCache = useCallback((characterId: string, entry: ConversationCacheEntry) => {
+    const stableMessages = entry.messages
+      .filter(message => !message.loading)
+      .map(({
+        animateEntry: _animateEntry,
+        animationDelayMs: _animationDelayMs,
+        translationLoading: _translationLoading,
+        translationError: _translationError,
+        ...message
+      }) => message)
+    conversationCacheRef.current.set(characterId, { ...entry, messages: stableMessages })
+  }, [])
+
+  const clearConversationCache = useCallback((characterId: string) => {
+    conversationCacheRef.current.delete(characterId)
+  }, [])
+
   const value = useMemo<ChatContextValue>(() => ({
     apiBaseUrl: API_BASE_URL,
     ready,
@@ -190,23 +250,33 @@ export function ChatProvider({ children }: PropsWithChildren) {
     proactivePreviews,
     unreadCharacterIds,
     conversationVersions,
+    pinnedCharacterIds,
     getDraft,
     setDraft,
     refreshCharacters,
     saveCharacter,
     markCharacterRead,
     setActiveCharacter,
+    setCharacterPinned,
+    getConversationCache,
+    setConversationCache,
+    clearConversationCache,
   }), [
     characters,
     connectionError,
     conversationVersions,
+    clearConversationCache,
     getDraft,
+    getConversationCache,
     markCharacterRead,
     proactivePreviews,
+    pinnedCharacterIds,
     ready,
     refreshCharacters,
     saveCharacter,
     setActiveCharacter,
+    setCharacterPinned,
+    setConversationCache,
     setDraft,
     unreadCharacterIds,
     userId,

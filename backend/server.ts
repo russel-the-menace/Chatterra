@@ -19,18 +19,24 @@ import { generateModelResponse, ModelGatewayError } from './model-gateway'
 import { resolveResponseLanguagePolicy, starterMessageForPolicy } from './language-policy'
 import { createInferenceTrace } from './inference-logger'
 import { processDueProactiveActions } from './proactive-service'
+import { translateToEnglish, TranslationServiceError } from './translation-service'
 import {
   clearChatHistory,
   createCharacter,
   createConversationWithStarter,
   getCharacter,
   getConversation,
+  getMessageTranslation,
+  getOwnedMessage,
   getUserPreferences,
   listCharacters,
   listConversations,
   listMessages,
+  listPinnedCharacterIds,
   newId,
+  setCharacterPinned,
   setUserMemoryConsent,
+  upsertMessageTranslation,
   updateCharacter
 } from './repository'
 import { Character, Conversation, Message, VoiceTranscriptMetadata } from './types'
@@ -145,6 +151,20 @@ app.put('/api/users/:id/preferences', asyncRoute(async (req, res) => {
   return res.json({ memoryEnabled })
 }))
 
+app.get('/api/users/:id/contact-preferences', asyncRoute(async (req, res) => {
+  const pinnedCharacterIds = await listPinnedCharacterIds(req.params.id)
+  return res.json({ pinnedCharacterIds })
+}))
+
+app.put('/api/users/:id/characters/:characterId/pin', asyncRoute(async (req, res) => {
+  if (typeof req.body?.pinned !== 'boolean') {
+    return res.status(400).json({ error: 'pinned must be a boolean' })
+  }
+  const pinned = await setCharacterPinned(req.params.id, req.params.characterId, req.body.pinned)
+  if (pinned === undefined) return res.status(404).json({ error: 'character not found' })
+  return res.json({ characterId: req.params.characterId, pinned })
+}))
+
 app.post('/api/characters', asyncRoute(async (req, res) => {
   const character = characterFromPayload(req.body || {})
   if (!character.name) return res.status(400).json({ error: 'name is required' })
@@ -178,6 +198,87 @@ app.get('/api/conversations', asyncRoute(async (req, res) => {
 app.get('/api/conversations/:id/messages', asyncRoute(async (req, res) => {
   const messages = await listMessages(req.params.id)
   return res.json({ messages })
+}))
+
+app.post('/api/translations', asyncRoute(async (req, res) => {
+  const text = typeof req.body?.text === 'string' ? req.body.text.trim() : ''
+  const targetLanguage = typeof req.body?.targetLanguage === 'string'
+    ? req.body.targetLanguage.trim().toLowerCase()
+    : ''
+  if (!text) return res.status(400).json({ error: 'text is required' })
+  if (targetLanguage !== 'en') {
+    return res.status(400).json({ error: 'only English translation is currently supported' })
+  }
+
+  const generated = await translateToEnglish(text)
+  return res.status(201).json({
+    translation: {
+      targetLanguage,
+      text: generated.text,
+      cached: false
+    }
+  })
+}))
+
+app.post('/api/messages/:id/translations', asyncRoute(async (req, res) => {
+  const userId = typeof req.body?.userId === 'string' ? req.body.userId.trim() : ''
+  const targetLanguage = typeof req.body?.targetLanguage === 'string'
+    ? req.body.targetLanguage.trim().toLowerCase()
+    : ''
+  const segmentIndex = Number(req.body?.segmentIndex ?? 0)
+  if (!userId) return res.status(400).json({ error: 'userId is required' })
+  if (targetLanguage !== 'en') {
+    return res.status(400).json({ error: 'only English translation is currently supported' })
+  }
+  if (!Number.isInteger(segmentIndex) || segmentIndex < 0) {
+    return res.status(400).json({ error: 'segmentIndex must be a non-negative integer' })
+  }
+
+  const message = await getOwnedMessage(userId, req.params.id)
+  if (!message) return res.status(404).json({ error: 'message not found' })
+  const segments = Array.isArray(message.contentJson?.deliverySegments)
+    ? message.contentJson.deliverySegments.filter((value: unknown): value is string => typeof value === 'string')
+    : [message.content]
+  const sourceText = segments[segmentIndex]
+  if (typeof sourceText !== 'string' || !sourceText.trim()) {
+    return res.status(400).json({ error: 'message segment does not exist' })
+  }
+
+  const cachedTranslation = await getMessageTranslation(message.id, segmentIndex, targetLanguage)
+  if (cachedTranslation) {
+    return res.json({
+      translation: {
+        messageId: message.id,
+        segmentIndex,
+        targetLanguage,
+        text: cachedTranslation.translatedText,
+        cached: true
+      }
+    })
+  }
+
+  const generated = await translateToEnglish(sourceText)
+  const now = new Date().toISOString()
+  const translation = await upsertMessageTranslation({
+    id: newId(),
+    messageId: message.id,
+    segmentIndex,
+    targetLanguage,
+    translatedText: generated.text,
+    provider: generated.provider,
+    model: generated.model,
+    createdAt: now,
+    updatedAt: now
+  })
+  return res.status(201).json({
+    translation: {
+      messageId: message.id,
+      segmentIndex,
+      targetLanguage,
+      text: translation.translatedText,
+      cached: false
+    }
+  })
 }))
 
 app.get('/api/characters/:id/state', asyncRoute(async (req, res) => {
@@ -366,6 +467,7 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
     }
     return res.json({
       reply: null,
+      userMessageId: userMessage.id,
       conversationId: conversation.id,
       behavior: {
         emotion: preparation.snapshot.emotionLabel,
@@ -480,6 +582,7 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
     }
     return res.json({
       reply: null,
+      userMessageId: userMessage.id,
       conversationId: conversation.id,
       behavior: {
         emotion: preparation.snapshot.emotionLabel,
@@ -535,6 +638,7 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
     reply,
     replySegments,
     messageId: assistantMessage.id,
+    userMessageId: userMessage.id,
     conversationId: conversation.id,
     behavior: {
       emotion: preparation.snapshot.emotionLabel,
@@ -547,6 +651,15 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
 
 app.use((error: any, _req: Request, res: Response, _next: NextFunction) => {
   console.error('Request failed', error)
+  if (
+    error?.type === 'entity.parse.failed'
+    || (error instanceof SyntaxError && Number((error as any).status) === 400)
+  ) {
+    return res.status(400).json({ error: 'request body contains invalid JSON' })
+  }
+  if (error instanceof TranslationServiceError) {
+    return res.status(error.statusCode).json({ error: error.message })
+  }
   if (error?.code === '23505') {
     return res.status(409).json({ error: 'record already exists' })
   }

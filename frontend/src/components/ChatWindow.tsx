@@ -1,9 +1,10 @@
-import React, {useEffect, useLayoutEffect, useRef} from 'react'
-import MessageBubble from './MessageBubble'
+import React, {useEffect, useLayoutEffect, useRef, useState} from 'react'
+import { createPortal } from 'react-dom'
+import MessageBubble, { ChatMessage } from './MessageBubble'
 import { Character } from '../data/character'
 
-type Message = { id: string; sender: 'ai'|'user'; text: string; loading?: boolean }
 type ScrollPosition = { top: number; atBottom: boolean }
+type MessageMenu = { message: ChatMessage; x: number; y: number }
 
 const bottomThreshold = 4
 
@@ -11,12 +12,14 @@ export default function ChatWindow({
   messages,
   character,
   onEditCharacter,
-  scrollToEndRequest
+  scrollToEndRequest,
+  onToggleTranslation
 }:{
-  messages: Message[]
+  messages: ChatMessage[]
   character: Character
   onEditCharacter: () => void
   scrollToEndRequest: number
+  onToggleTranslation: (message: ChatMessage) => void
 }): JSX.Element{
   const ref = useRef<HTMLDivElement | null>(null)
   const scrollPositionsRef = useRef<Record<string, ScrollPosition>>({})
@@ -24,6 +27,7 @@ export default function ChatWindow({
   const handledScrollRequestRef = useRef(scrollToEndRequest)
   const ignoreScrollEventsRef = useRef(false)
   const scrollReleaseTimerRef = useRef<number | null>(null)
+  const [messageMenu, setMessageMenu] = useState<MessageMenu | null>(null)
 
   const releaseScrollCapture = (delay: number) => {
     if (scrollReleaseTimerRef.current !== null) {
@@ -86,7 +90,42 @@ export default function ChatWindow({
     }
   }, [])
 
+  useEffect(() => {
+    setMessageMenu(null)
+  }, [character.id])
+
+  useEffect(() => {
+    if (!messageMenu) return
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMessageMenu(null)
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [messageMenu])
+
+  const openMessageMenu = (event: React.MouseEvent<HTMLDivElement>, message: ChatMessage) => {
+    if (message.loading) return
+    event.preventDefault()
+    const menuWidth = 190
+    const menuHeight = 48
+    setMessageMenu({
+      message,
+      x: Math.max(8, Math.min(event.clientX, window.innerWidth - menuWidth - 8)),
+      y: Math.max(8, Math.min(event.clientY, window.innerHeight - menuHeight - 8))
+    })
+  }
+
+  const copyMessage = async (message: ChatMessage) => {
+    setMessageMenu(null)
+    try {
+      await navigator.clipboard.writeText(message.text)
+    } catch {
+      window.alert('Could not copy this message.')
+    }
+  }
+
   const handleScroll = () => {
+    setMessageMenu(null)
     const element = ref.current
     if (!element || ignoreScrollEventsRef.current) return
     const distanceFromBottom = element.scrollHeight - element.clientHeight - element.scrollTop
@@ -114,8 +153,36 @@ export default function ChatWindow({
           msg={m}
           character={character}
           onEditCharacter={onEditCharacter}
+          onMessageContextMenu={openMessageMenu}
         />
       ))}
+      {messageMenu && createPortal(
+        <div className="message-menu-backdrop" onMouseDown={() => setMessageMenu(null)}>
+          <div
+            className="message-context-menu"
+            role="menu"
+            aria-label="Message actions"
+            style={{ left: messageMenu.x, top: messageMenu.y }}
+            onMouseDown={event => event.stopPropagation()}
+          >
+            <button type="button" role="menuitem" onClick={() => void copyMessage(messageMenu.message)}>
+              Copy
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                const message = messageMenu.message
+                setMessageMenu(null)
+                onToggleTranslation(message)
+              }}
+            >
+              {messageMenu.message.translationVisible ? 'Stop Translate' : 'Translate'}
+            </button>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   )
 }

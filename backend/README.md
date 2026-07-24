@@ -31,7 +31,8 @@ Environment variables:
 - `BEHAVIOR_DEBUG`: set to `true` only in local development to include raw behavioral
   projections in the character-state endpoint.
 - `DEEPSEEK_LIGHT_MODEL`: optional provider model used for low-complexity companion
-  turns. The orchestrator falls back to `DEEPSEEK_MODEL` when it is absent.
+  turns and message translation. The orchestrator falls back to `DEEPSEEK_MODEL`
+  when it is absent.
 - `PROACTIVE_SCHEDULER_ENABLED`: set to `false` to disable background character
   initiation; enabled by default.
 - `PROACTIVE_SCHEDULER_INTERVAL_MS`: scheduler scan interval, default `30000`.
@@ -116,3 +117,15 @@ uses Web Speech recognition and session-scoped audio capture, then stores transc
 metadata in `messages.content_json.voice` through the normal chat request. Raw audio is
 not uploaded; see the repository-level voice architecture document for the future
 realtime adapter boundary.
+
+Message translation uses the local Chatterra HTTP API, not a provider API from either
+client. `POST /api/messages/:id/translations` verifies that the message belongs to the
+requesting user, translates one visible delivery segment into English through the
+configured lightweight provider, and caches the result in PostgreSQL. Calling the same
+endpoint again returns the cached translation. This keeps provider credentials out of
+web and Expo bundles and leaves room for a future local model adapter without changing
+the clients; it is not offline unless that provider adapter itself runs locally.
+
+Contact pinning is user-specific and durable. The contact-preferences endpoint returns
+pinned character IDs, while the per-character pin endpoint updates that relationship.
+Clients optimistically reorder contacts and then reconcile with the API.

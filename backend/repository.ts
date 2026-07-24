@@ -1,7 +1,14 @@
 import { PoolClient } from 'pg'
 import { v4 as uuidv4 } from 'uuid'
 import { query, withTransaction } from './database'
-import { Character, Conversation, ConversationSummary, Memory, Message } from './types'
+import {
+  Character,
+  Conversation,
+  ConversationSummary,
+  Memory,
+  Message,
+  MessageTranslation
+} from './types'
 
 const iso = (value: Date | string | null | undefined): string | undefined => {
   if (!value) return undefined
@@ -37,15 +44,42 @@ const mapConversation = (row: any): Conversation => ({
   updatedAt: iso(row.updated_at)!
 })
 
-const mapMessage = (row: any): Message => ({
+const mapMessage = (row: any): Message => {
+  const englishTranslations = row.english_translations || {}
+  const hasEnglishTranslations = Object.keys(englishTranslations).length > 0
+  const existingContentJson = row.content_json || {}
+  const contentJson = hasEnglishTranslations
+    ? {
+        ...existingContentJson,
+        translations: {
+          ...(existingContentJson.translations || {}),
+          en: englishTranslations
+        }
+      }
+    : row.content_json ?? undefined
+
+  return {
+    id: row.id,
+    conversationId: row.conversation_id,
+    senderRole: row.sender_role,
+    senderId: row.sender_id ?? undefined,
+    content: row.content,
+    contentJson,
+    tokenCount: row.token_count ?? undefined,
+    createdAt: iso(row.created_at)!
+  }
+}
+
+const mapMessageTranslation = (row: any): MessageTranslation => ({
   id: row.id,
-  conversationId: row.conversation_id,
-  senderRole: row.sender_role,
-  senderId: row.sender_id ?? undefined,
-  content: row.content,
-  contentJson: row.content_json ?? undefined,
-  tokenCount: row.token_count ?? undefined,
-  createdAt: iso(row.created_at)!
+  messageId: row.message_id,
+  segmentIndex: Number(row.segment_index),
+  targetLanguage: row.target_language,
+  translatedText: row.translated_text,
+  provider: row.provider,
+  model: row.model,
+  createdAt: iso(row.created_at)!,
+  updatedAt: iso(row.updated_at)!
 })
 
 const mapMemory = (row: any): Memory => ({
@@ -149,6 +183,50 @@ export const setUserMemoryConsent = async (userId: string, enabled: boolean) => 
       [userId, JSON.stringify(enabled)]
     )
     return Boolean(result.rows[0]?.consent_flags?.memoryPersonalization)
+  })
+}
+
+export const listPinnedCharacterIds = async (userId: string): Promise<string[]> => {
+  return withTransaction(async client => {
+    await ensureUser(client, userId)
+    const result = await client.query(
+      `SELECT character_id
+       FROM user_character_preferences
+       WHERE user_id = $1
+       ORDER BY pinned_at DESC, character_id`,
+      [userId]
+    )
+    return result.rows.map(row => String(row.character_id))
+  })
+}
+
+export const setCharacterPinned = async (
+  userId: string,
+  characterId: string,
+  pinned: boolean
+): Promise<boolean | undefined> => {
+  return withTransaction(async client => {
+    await ensureUser(client, userId)
+    const characterResult = await client.query('SELECT 1 FROM characters WHERE id = $1', [characterId])
+    if (!characterResult.rowCount) return undefined
+
+    if (pinned) {
+      await client.query(
+        `INSERT INTO user_character_preferences (user_id, character_id, pinned_at)
+         VALUES ($1, $2, NOW())
+         ON CONFLICT (user_id, character_id)
+         DO UPDATE SET pinned_at = EXCLUDED.pinned_at`,
+        [userId, characterId]
+      )
+    } else {
+      await client.query(
+        `DELETE FROM user_character_preferences
+         WHERE user_id = $1 AND character_id = $2`,
+        [userId, characterId]
+      )
+    }
+
+    return pinned
   })
 }
 
@@ -267,12 +345,75 @@ export const getConversation = async (id: string): Promise<Conversation | undefi
 
 export const listMessages = async (conversationId: string): Promise<Message[]> => {
   const result = await query(
-    `SELECT * FROM messages
+    `SELECT
+       messages.*,
+       COALESCE((
+         SELECT jsonb_object_agg(translation.segment_index::text, translation.translated_text)
+         FROM message_translations translation
+         WHERE translation.message_id = messages.id
+           AND translation.target_language = 'en'
+       ), '{}'::jsonb) AS english_translations
+     FROM messages
      WHERE conversation_id = $1
      ORDER BY created_at, id`,
     [conversationId]
   )
   return result.rows.map(mapMessage)
+}
+
+export const getOwnedMessage = async (
+  userId: string,
+  messageId: string
+): Promise<Message | undefined> => {
+  const result = await query(
+    `SELECT messages.*
+     FROM messages
+     JOIN conversations ON conversations.id = messages.conversation_id
+     WHERE messages.id = $1 AND conversations.user_id = $2`,
+    [messageId, userId]
+  )
+  return result.rows[0] ? mapMessage(result.rows[0]) : undefined
+}
+
+export const getMessageTranslation = async (
+  messageId: string,
+  segmentIndex: number,
+  targetLanguage: string
+): Promise<MessageTranslation | undefined> => {
+  const result = await query(
+    `SELECT * FROM message_translations
+     WHERE message_id = $1 AND segment_index = $2 AND target_language = $3`,
+    [messageId, segmentIndex, targetLanguage]
+  )
+  return result.rows[0] ? mapMessageTranslation(result.rows[0]) : undefined
+}
+
+export const upsertMessageTranslation = async (translation: MessageTranslation) => {
+  const result = await query(
+    `INSERT INTO message_translations (
+       id, message_id, segment_index, target_language, translated_text,
+       provider, model, created_at, updated_at
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     ON CONFLICT (message_id, segment_index, target_language)
+     DO UPDATE SET
+       translated_text = EXCLUDED.translated_text,
+       provider = EXCLUDED.provider,
+       model = EXCLUDED.model,
+       updated_at = EXCLUDED.updated_at
+     RETURNING *`,
+    [
+      translation.id,
+      translation.messageId,
+      translation.segmentIndex,
+      translation.targetLanguage,
+      translation.translatedText,
+      translation.provider,
+      translation.model,
+      translation.createdAt,
+      translation.updatedAt
+    ]
+  )
+  return mapMessageTranslation(result.rows[0])
 }
 
 export const listRecentMessages = async (conversationId: string, limit: number): Promise<Message[]> => {

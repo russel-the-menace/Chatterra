@@ -37,8 +37,14 @@ export type ServerMessage = {
 
 export type ChatMessage = {
   id: string
+  sourceMessageId?: string
+  segmentIndex?: number
   sender: 'user' | 'assistant'
   text: string
+  translation?: string
+  translationVisible?: boolean
+  translationLoading?: boolean
+  translationError?: string
   loading?: boolean
   groupIndex?: number
   groupSize?: number
@@ -59,6 +65,7 @@ export type ChatResponse = {
   reply: string | null
   replySegments?: string[]
   messageId?: string
+  userMessageId?: string
   conversationId: string
   behavior?: {
     emotion?: string
@@ -67,6 +74,14 @@ export type ChatResponse = {
     responseStatus?: string
   }
   traceId?: string
+}
+
+export type MessageTranslationResponse = {
+  messageId?: string
+  segmentIndex?: number
+  targetLanguage: 'en'
+  text: string
+  cached: boolean
 }
 
 export type ProactiveDelivery = {

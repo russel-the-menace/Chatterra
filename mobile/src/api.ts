@@ -7,6 +7,7 @@ import {
   ProactiveDelivery,
   PublicCharacterState,
   ServerMessage,
+  MessageTranslationResponse,
 } from './types'
 
 const normalizeBaseUrl = (value: string) => value.trim().replace(/\/+$/, '')
@@ -102,6 +103,39 @@ export const api = {
       `/api/conversations/${encodeURIComponent(conversationId)}/messages`
     )
     return result.messages
+  },
+
+  async listPinnedCharacterIds(userId: string) {
+    const result = await request<{ pinnedCharacterIds: string[] }>(
+      `/api/users/${encodeURIComponent(userId)}/contact-preferences`
+    )
+    return result.pinnedCharacterIds
+  },
+
+  async setCharacterPinned(userId: string, characterId: string, pinned: boolean) {
+    return request<{ characterId: string; pinned: boolean }>(
+      `/api/users/${encodeURIComponent(userId)}/characters/${encodeURIComponent(characterId)}/pin`,
+      { method: 'PUT', body: JSON.stringify({ pinned }) }
+    )
+  },
+
+  async translateMessage(userId: string, messageId: string, segmentIndex = 0) {
+    const result = await request<{ translation: MessageTranslationResponse }>(
+      `/api/messages/${encodeURIComponent(messageId)}/translations`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ userId, targetLanguage: 'en', segmentIndex }),
+      }
+    )
+    return result.translation
+  },
+
+  async translateText(text: string) {
+    const result = await request<{ translation: MessageTranslationResponse }>('/api/translations', {
+      method: 'POST',
+      body: JSON.stringify({ text, targetLanguage: 'en' }),
+    })
+    return result.translation
   },
 
   async getCharacterState(userId: string, characterId: string) {
