@@ -76,6 +76,29 @@ Rejected or empty model output also produces no assistant message, but is record
 separately as `responseStatus: "inference_failed"`; it is never treated as a character
 decision and never replaced with synthetic dialogue.
 
+## Docker deployment
+
+The production image is defined in `backend/Dockerfile`. When the deployment
+platform supports a Docker build configuration, use:
+
+- Base directory: `/backend`
+- Build pack: `Dockerfile`
+- Dockerfile location: `/Dockerfile`
+- Exposed application port: `3000` (or the platform-provided `PORT`)
+- Healthcheck path: `/api/health`
+
+The image compiles TypeScript into `dist`, installs production dependencies only,
+waits for PostgreSQL, applies pending migrations, and then starts
+`dist/server.js`. Set `DATABASE_URL`, `DATABASE_SSL`, `DEEPSEEK_API_KEY`,
+`DEEPSEEK_API_URL`, `DEEPSEEK_MODEL`, `DEEPSEEK_LIGHT_MODEL`, and the scheduler
+variables in the platform's environment-variable panel. Do not copy `.env` into
+the image or commit it.
+
+The image intentionally does not import `/data/*.json` during startup. JSON is a
+legacy migration input and should be imported once as a controlled database setup
+operation. Automatic startup imports would make deployment behavior depend on
+whether old seed files happen to be present in the image.
+
 Characters whose authored persona explicitly expresses initiative derive a private
 proactive policy; there is no user-facing toggle or timing control. After an assistant
 turn, the policy writes a jittered `character_instances.next_action_at`. The scheduler

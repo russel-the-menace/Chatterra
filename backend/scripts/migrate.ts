@@ -13,7 +13,14 @@ const run = async () => {
      )`
   )
 
-  const migrationsDir = path.join(__dirname, '..', 'migrations')
+  const migrationDirectories = [
+    path.join(__dirname, '..', 'migrations'),
+    path.join(__dirname, '..', '..', 'migrations')
+  ]
+  const migrationsDir = migrationDirectories.find(directory => fs.existsSync(directory))
+  if (!migrationsDir) {
+    throw new Error('Migration directory not found')
+  }
   const files = fs.readdirSync(migrationsDir).filter(file => file.endsWith('.sql')).sort()
 
   for (const file of files) {

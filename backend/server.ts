@@ -702,7 +702,7 @@ const start = async () => {
   ) {
     throw new Error('Database schema is missing. Run npm run db:migrate first.')
   }
-  app.listen(port, () => console.log(`Chatterra backend listening on ${port}`))
+  app.listen(port, '0.0.0.0', () => console.log(`Chatterra backend listening on ${port}`))
   if (process.env.PROACTIVE_SCHEDULER_ENABLED !== 'false') {
     proactiveTimer = setInterval(() => void runProactiveScheduler(), proactiveIntervalMs)
     proactiveTimer.unref()
