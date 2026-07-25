@@ -1,9 +1,14 @@
 FROM node:20-alpine AS build
 
 WORKDIR /app
+ARG NPM_PROXY
+ARG NPM_HTTPS_PROXY
 
 COPY package*.json ./
-RUN npm ci
+RUN npm config set registry https://registry.npmmirror.com \
+    && if [ -n "${NPM_PROXY:-}" ]; then npm config set proxy "$NPM_PROXY"; fi \
+    && if [ -n "${NPM_HTTPS_PROXY:-}" ]; then npm config set https-proxy "$NPM_HTTPS_PROXY"; fi \
+    && npm ci
 
 COPY tsconfig.json ./
 COPY *.ts ./
@@ -16,9 +21,17 @@ FROM node:20-alpine AS runtime
 
 WORKDIR /app
 ENV NODE_ENV=production
+ARG NPM_PROXY
+ARG NPM_HTTPS_PROXY
 
 COPY package*.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+RUN npm config set registry https://registry.npmmirror.com \
+    && if [ -n "${NPM_PROXY:-}" ]; then npm config set proxy "$NPM_PROXY"; fi \
+    && if [ -n "${NPM_HTTPS_PROXY:-}" ]; then npm config set https-proxy "$NPM_HTTPS_PROXY"; fi \
+    && npm ci --omit=dev \
+    && npm config delete proxy \
+    && npm config delete https-proxy \
+    && npm cache clean --force
 
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/migrations ./migrations
