@@ -32,7 +32,8 @@ Environment variables:
   projections in the character-state endpoint.
 - `DEEPSEEK_LIGHT_MODEL`: optional provider model used for low-complexity companion
   turns and message translation. The orchestrator falls back to `DEEPSEEK_MODEL`
-  when it is absent.
+  when it is absent. If the provider explicitly rejects a configured lightweight
+  model as invalid, the gateway retries that turn once with the primary model.
 - `PROACTIVE_SCHEDULER_ENABLED`: set to `false` to disable background character
   initiation; enabled by default.
 - `PROACTIVE_SCHEDULER_INTERVAL_MS`: scheduler scan interval, default `30000`.

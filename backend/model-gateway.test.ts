@@ -34,9 +34,10 @@ const character = {
 const originalFetch = globalThis.fetch
 const originalApiKey = process.env.DEEPSEEK_API_KEY
 const originalApiUrl = process.env.DEEPSEEK_API_URL
+const originalModel = process.env.DEEPSEEK_MODEL
 const requestBodies: any[] = []
-const providerResponses = [
-  {
+let providerResponses: Array<{ status?: number; body: any }> = [
+  { body: {
     id: 'first-attempt',
     choices: [{
       finish_reason: 'length',
@@ -47,8 +48,8 @@ const providerResponses = [
       }
     }],
     usage: { prompt_tokens: 1013, completion_tokens: 340, total_tokens: 1353 }
-  },
-  {
+  } },
+  { body: {
     id: 'second-attempt',
     choices: [{
       finish_reason: 'stop',
@@ -58,7 +59,7 @@ const providerResponses = [
       }
     }],
     usage: { prompt_tokens: 1013, completion_tokens: 420, total_tokens: 1433 }
-  }
+  } }
 ]
 
 const run = async () => {
@@ -67,10 +68,10 @@ const run = async () => {
     process.env.DEEPSEEK_API_URL = 'https://provider.invalid/chat/completions'
     globalThis.fetch = (async (_input, init) => {
       requestBodies.push(JSON.parse(String(init?.body || '{}')))
-      const body = providerResponses.shift()
-      assert.ok(body, 'unexpected provider request')
-      return new Response(JSON.stringify(body), {
-        status: 200,
+      const response = providerResponses.shift()
+      assert.ok(response, 'unexpected provider request')
+      return new Response(JSON.stringify(response.body), {
+        status: response.status || 200,
         headers: { 'Content-Type': 'application/json' }
       })
     }) as typeof fetch
@@ -95,13 +96,57 @@ const run = async () => {
     assert.equal(result.content, "I'm sorry you're having a rough time. You don't need to apologize.")
     assert.equal(shouldRetryEmptyTruncatedResponse(result), false)
 
-    console.log('model gateway retry checks passed')
+    requestBodies.length = 0
+    process.env.DEEPSEEK_MODEL = 'supported-primary-model'
+    providerResponses = [
+      {
+        status: 400,
+        body: {
+          error: {
+            message: 'The model unsupported-light-model is not supported.',
+            code: 'invalid_request_error'
+          }
+        }
+      },
+      {
+        body: {
+          id: 'fallback-attempt',
+          choices: [{
+            finish_reason: 'stop',
+            message: { role: 'assistant', content: 'Fallback model response.' }
+          }]
+        }
+      }
+    ]
+    const lightweightPlan = {
+      ...plan,
+      model: {
+        ...plan.model,
+        model: 'unsupported-light-model',
+        tier: 'lightweight'
+      }
+    } as InferencePlan
+    const fallbackTrace = createInferenceTrace('model-gateway-fallback-test')
+    const fallbackResult = await generateModelResponse(lightweightPlan, character, fallbackTrace)
+    const fallbackEvents = fallbackTrace.snapshot().events
+
+    assert.equal(requestBodies.length, 2)
+    assert.equal(requestBodies[0].model, 'unsupported-light-model')
+    assert.equal(requestBodies[1].model, 'supported-primary-model')
+    assert.equal(fallbackResult.model, 'supported-primary-model')
+    assert.equal(fallbackResult.content, 'Fallback model response.')
+    assert.equal(fallbackEvents.some(event => event.stage === 'provider_model_fallback_scheduled'), true)
+    assert.equal(fallbackEvents.some(event => event.stage === 'provider_model_fallback_completed'), true)
+
+    console.log('model gateway retry and fallback checks passed')
   } finally {
     globalThis.fetch = originalFetch
     if (originalApiKey === undefined) delete process.env.DEEPSEEK_API_KEY
     else process.env.DEEPSEEK_API_KEY = originalApiKey
     if (originalApiUrl === undefined) delete process.env.DEEPSEEK_API_URL
     else process.env.DEEPSEEK_API_URL = originalApiUrl
+    if (originalModel === undefined) delete process.env.DEEPSEEK_MODEL
+    else process.env.DEEPSEEK_MODEL = originalModel
   }
 }
 

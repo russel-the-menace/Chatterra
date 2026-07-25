@@ -38,6 +38,16 @@ export class ModelGatewayError extends Error {
   }
 }
 
+class ModelProviderResponseError extends ModelGatewayError {
+  invalidModel: boolean
+
+  constructor(invalidModel: boolean) {
+    super('Upstream AI returned an error')
+    this.name = 'ModelProviderResponseError'
+    this.invalidModel = invalidModel
+  }
+}
+
 const EMPTY_TRUNCATION_RETRY_MIN_TOKENS = 1024
 const EMPTY_TRUNCATION_RETRY_MAX_TOKENS = 2048
 
@@ -100,6 +110,7 @@ export const getEmptyTruncationRetryTokens = (initialTokens: number) => {
 type ModelGatewayAttemptOptions = {
   attempt: number
   maxResponseTokens: number
+  model?: string
 }
 
 const generateModelResponseAttempt = async (
@@ -109,9 +120,10 @@ const generateModelResponseAttempt = async (
   options: ModelGatewayAttemptOptions
 ): Promise<ModelGatewayResult> => {
   const startedAt = Date.now()
+  const model = options.model || plan.model.model
   trace?.mark('provider_request_started', 'started', {
     provider: plan.model.provider,
-    model: plan.model.model,
+    model,
     messageCount: plan.messages.length,
     attempt: options.attempt,
     maxResponseTokens: options.maxResponseTokens
@@ -146,7 +158,7 @@ const generateModelResponseAttempt = async (
     return {
       content,
       provider: 'mock',
-      model: plan.model.model,
+      model,
       latencyMs: Date.now() - startedAt,
       diagnostics
     }
@@ -165,7 +177,7 @@ const generateModelResponseAttempt = async (
         'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: plan.model.model,
+        model,
         messages: plan.messages,
         max_tokens: options.maxResponseTokens,
         temperature: plan.parameters.temperature,
@@ -191,12 +203,20 @@ const generateModelResponseAttempt = async (
 
   if (!response.ok) {
     console.error('Model provider returned error', response.status, data)
+    const providerMessage = typeof data?.error?.message === 'string'
+      ? data.error.message
+      : typeof data?.message === 'string' ? data.message : ''
+    const invalidModel = response.status === 400
+      && /model/i.test(providerMessage)
+      && /(?:unsupported|not supported|unknown|does not exist|not found|but you passed)/i.test(providerMessage)
     trace?.mark('provider_response', 'failed', {
       attempt: options.attempt,
+      model,
       httpStatus: response.status,
-      responseKeys: data && typeof data === 'object' ? Object.keys(data).slice(0, 12) : []
+      responseKeys: data && typeof data === 'object' ? Object.keys(data).slice(0, 12) : [],
+      invalidModel
     })
-    throw new ModelGatewayError('Upstream AI returned an error')
+    throw new ModelProviderResponseError(invalidModel)
   }
 
   const content = extractText(data)
@@ -231,7 +251,7 @@ const generateModelResponseAttempt = async (
   return {
     content,
     provider: plan.model.provider,
-    model: plan.model.model,
+    model,
     latencyMs: Date.now() - startedAt,
     diagnostics
   }
@@ -247,29 +267,67 @@ export const generateModelResponse = async (
   }
 
   const startedAt = Date.now()
-  const initialResult = await generateModelResponseAttempt(plan, character, trace, {
-    attempt: 1,
-    maxResponseTokens: plan.parameters.maxResponseTokens
-  })
-  if (!shouldRetryEmptyTruncatedResponse(initialResult)) return initialResult
+  let model = plan.model.model
+  let attempt = 1
+  let initialResult: ModelGatewayResult
+  try {
+    initialResult = await generateModelResponseAttempt(plan, character, trace, {
+      attempt,
+      maxResponseTokens: plan.parameters.maxResponseTokens,
+      model
+    })
+  } catch (error) {
+    const primaryModel = process.env.DEEPSEEK_MODEL?.trim() || 'deepseek-v4-flash'
+    const canFallback = error instanceof ModelProviderResponseError
+      && error.invalidModel
+      && plan.model.tier === 'lightweight'
+      && primaryModel !== model
+    if (!canFallback) throw error
+
+    attempt += 1
+    trace?.mark('provider_model_fallback_scheduled', 'started', {
+      reason: 'invalid_lightweight_model',
+      rejectedModel: model,
+      fallbackModel: primaryModel,
+      attempt
+    })
+    model = primaryModel
+    initialResult = await generateModelResponseAttempt(plan, character, trace, {
+      attempt,
+      maxResponseTokens: plan.parameters.maxResponseTokens,
+      model
+    })
+    trace?.mark('provider_model_fallback_completed', 'completed', {
+      model,
+      attempt,
+      extractedTextLength: initialResult.diagnostics.extractedTextLength
+    })
+  }
+  if (!shouldRetryEmptyTruncatedResponse(initialResult)) {
+    return { ...initialResult, latencyMs: Date.now() - startedAt }
+  }
 
   const retryMaxResponseTokens = getEmptyTruncationRetryTokens(plan.parameters.maxResponseTokens)
-  if (retryMaxResponseTokens <= plan.parameters.maxResponseTokens) return initialResult
+  if (retryMaxResponseTokens <= plan.parameters.maxResponseTokens) {
+    return { ...initialResult, latencyMs: Date.now() - startedAt }
+  }
 
   trace?.mark('provider_retry_scheduled', 'started', {
     reason: 'empty_content_after_length',
-    attempt: 2,
+    attempt: attempt + 1,
     previousMaxResponseTokens: plan.parameters.maxResponseTokens,
     retryMaxResponseTokens,
     previousCompletionTokens: initialResult.diagnostics.completionTokens,
     previousReasoningContentLength: initialResult.diagnostics.reasoningContentLength
   })
+  attempt += 1
   const retryResult = await generateModelResponseAttempt(plan, character, trace, {
-    attempt: 2,
-    maxResponseTokens: retryMaxResponseTokens
+    attempt,
+    maxResponseTokens: retryMaxResponseTokens,
+    model
   })
   trace?.mark('provider_retry_completed', retryResult.content.trim() ? 'completed' : 'failed', {
-    attempt: 2,
+    attempt,
     maxResponseTokens: retryMaxResponseTokens,
     finishReason: retryResult.diagnostics.finishReason,
     extractedTextLength: retryResult.diagnostics.extractedTextLength,
