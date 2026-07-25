@@ -98,6 +98,10 @@ The build stage explicitly installs development dependencies so `tsc` remains
 available even when a deployment platform injects `NODE_ENV=production` as a
 build argument. The runtime stage still contains production dependencies only.
 
+For Coolify deployments, keep application secrets runtime-only and use a
+`backend/**` GitHub webhook watch path so mobile-only commits do not rebuild the
+backend image.
+
 The image intentionally does not import `/data/*.json` during startup. JSON is a
 legacy migration input and should be imported once as a controlled database setup
 operation. Automatic startup imports would make deployment behavior depend on
