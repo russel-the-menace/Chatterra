@@ -8,7 +8,7 @@ COPY package*.json ./
 RUN npm config set registry https://registry.npmmirror.com \
     && if [ -n "${NPM_PROXY:-}" ]; then npm config set proxy "$NPM_PROXY"; fi \
     && if [ -n "${NPM_HTTPS_PROXY:-}" ]; then npm config set https-proxy "$NPM_HTTPS_PROXY"; fi \
-    && npm ci
+    && npm ci --include=dev
 
 COPY tsconfig.json ./
 COPY *.ts ./
