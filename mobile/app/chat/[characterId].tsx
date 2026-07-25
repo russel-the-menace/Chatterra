@@ -30,10 +30,11 @@ import Reanimated, {
   cancelAnimation,
   Easing as ReanimatedEasing,
   scrollTo,
+  useAnimatedKeyboard,
   useAnimatedReaction,
   useAnimatedRef,
-  useAnimatedKeyboard,
   useAnimatedStyle,
+  useDerivedValue,
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated'
@@ -50,7 +51,9 @@ const createLocalId = () => `${Date.now()}-${Math.random().toString(36).slice(2)
 
 const LATEST_SCROLL_DURATION_MS = 280
 const MESSAGE_ROW_GAP = 14
-const LATEST_MESSAGE_COMPOSER_GAP = 18
+const LATEST_MESSAGE_COMPOSER_GAP = 15
+// The final row margin and list padding together form the visible composer gap.
+const MESSAGE_LIST_BOTTOM_PADDING = LATEST_MESSAGE_COMPOSER_GAP - MESSAGE_ROW_GAP
 
 const deliverySegments = (message: ServerMessage): string[] => {
   const stored = message.contentJson?.deliverySegments
@@ -346,23 +349,27 @@ export default function ChatScreen() {
   const latestScrollProgress = useSharedValue(1)
   const latestScrollActive = useSharedValue(false)
   const latestScrollPinned = useSharedValue(false)
+  const keyboardLift = useDerivedValue(
+    () => Math.max(0, keyboard.height.value - insets.bottom + 8),
+    [insets.bottom]
+  )
   const composerKeyboardAnimatedStyle = useAnimatedStyle(() => ({
     transform: [{
-      translateY: -Math.max(0, keyboard.height.value - insets.bottom + 8),
+      translateY: -keyboardLift.value,
     }],
-  }), [insets.bottom])
+  }))
   const messageListKeyboardAnimatedStyle = useAnimatedStyle(() => {
-    const keyboardLift = Math.max(0, keyboard.height.value - insets.bottom + 8)
+    // Keep short transcripts at the top; consume their empty space before lifting the list.
     const unusedListSpace = Math.max(
       0,
       scrollViewportHeight.value - scrollContentHeight.value
     )
     return {
       transform: [{
-        translateY: -Math.max(0, keyboardLift - unusedListSpace),
+        translateY: -Math.max(0, keyboardLift.value - unusedListSpace),
       }],
     }
-  }, [insets.bottom])
+  })
   const stagedDeliveryTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set())
 
   useAnimatedReaction(
@@ -440,6 +447,7 @@ export default function ChatScreen() {
   const scrollToExactLatest = useCallback(() => {
     const { contentHeight, viewportHeight } = scrollMetricsRef.current
     if (contentHeight <= 0 || viewportHeight <= 0) return false
+    // VirtualizedList.scrollToEnd approximates dynamic cell frames and can overscroll on mount.
     const offset = Math.max(0, contentHeight - viewportHeight)
     listRef.current?.scrollToOffset({ offset, animated: false })
     scrollMetricsRef.current.offsetY = offset
@@ -1196,7 +1204,7 @@ const styles = StyleSheet.create({
   messageListContent: {
     paddingHorizontal: 12,
     paddingTop: 18,
-    paddingBottom: LATEST_MESSAGE_COMPOSER_GAP - MESSAGE_ROW_GAP,
+    paddingBottom: MESSAGE_LIST_BOTTOM_PADDING,
   },
   messageRow: {
     width: '100%',

@@ -112,6 +112,28 @@ not bundled into Expo Go require a development build. Mobile dictation should
 therefore be added through either a backend streaming transcription service or
 an Expo development build with a native recognition module.
 
+## Chat Scroll Invariants
+
+The mobile chat screen has dynamic-height rows, keyboard-driven movement, and
+short transcripts that must remain top-aligned. Preserve these invariants when
+changing its layout:
+
+- `LATEST_MESSAGE_COMPOSER_GAP` is the single source of truth for the resting
+  gap. The final message row margin plus the list bottom padding must equal it.
+- The composer and message list derive movement from the same `keyboardLift`.
+  Short transcripts consume their unused space before the list moves, so a
+  single message remains at the top while long transcripts track the composer.
+- Do not use `VirtualizedList.scrollToEnd()` for initial positioning. It derives
+  the target from an approximate last-cell frame, which can temporarily
+  overscroll dynamic message rows. Use the measured
+  `contentHeight - viewportHeight` offset instead.
+- When the reader is more than half a viewport from the latest message, incoming
+  messages must preserve the reading position and expose the down-arrow control.
+
+Regression-check a one-message conversation, a long conversation on first
+entry, keyboard open/close in both, and an incoming message while reading
+history.
+
 ## Checks
 
 ```bash
