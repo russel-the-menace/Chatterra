@@ -14,6 +14,7 @@ import {
   Animated as RNAnimated,
   Easing,
   FlatList,
+  LayoutChangeEvent,
   Modal,
   NativeScrollEvent,
   NativeSyntheticEvent,
@@ -26,8 +27,15 @@ import {
   View,
 } from 'react-native'
 import Reanimated, {
+  cancelAnimation,
+  Easing as ReanimatedEasing,
+  scrollTo,
+  useAnimatedReaction,
+  useAnimatedRef,
   useAnimatedKeyboard,
   useAnimatedStyle,
+  useSharedValue,
+  withTiming,
 } from 'react-native-reanimated'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
@@ -39,6 +47,10 @@ import { palette } from '@/src/theme'
 import { ChatMessage, ChatResponse, ServerMessage } from '@/src/types'
 
 const createLocalId = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`
+
+const LATEST_SCROLL_DURATION_MS = 280
+const MESSAGE_ROW_GAP = 14
+const LATEST_MESSAGE_COMPOSER_GAP = 18
 
 const deliverySegments = (message: ServerMessage): string[] => {
   const stored = message.contentJson?.deliverySegments
@@ -305,42 +317,149 @@ export default function ChatScreen() {
   const [loadingHistory, setLoadingHistory] = useState(!initialCacheRef.current)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [showScrollToLatest, setShowScrollToLatest] = useState(false)
   const [messageActionMenu, setMessageActionMenu] = useState<{
     message: ChatMessage
     pageX: number
     pageY: number
   } | null>(null)
-  const listRef = useRef<FlatList<ChatMessage> | null>(null)
+  const listRef = useAnimatedRef<FlatList<ChatMessage>>()
+  const messagesRef = useRef(messages)
   const historyRequestRef = useRef(0)
   const sendingRef = useRef(false)
-  const atBottomRef = useRef(true)
+  const withinImmersiveRangeRef = useRef(true)
   const followLatestRef = useRef(true)
+  const unseenLatestRef = useRef(false)
+  const manualScrollRef = useRef(false)
   const initialScrollRef = useRef(true)
   const initialScrollScheduledRef = useRef(false)
   const initialScrollFrameRef = useRef<number | null>(null)
-  const pendingSendScrollRef = useRef<'auto' | 'animated' | null>(null)
+  const scrollMetricsRef = useRef({
+    contentHeight: 0,
+    offsetY: 0,
+    viewportHeight: 0,
+  })
   const keyboard = useAnimatedKeyboard()
-  const keyboardAreaAnimatedStyle = useAnimatedStyle(() => ({
+  const scrollContentHeight = useSharedValue(0)
+  const scrollViewportHeight = useSharedValue(0)
+  const latestScrollStartOffset = useSharedValue(0)
+  const latestScrollProgress = useSharedValue(1)
+  const latestScrollActive = useSharedValue(false)
+  const latestScrollPinned = useSharedValue(false)
+  const composerKeyboardAnimatedStyle = useAnimatedStyle(() => ({
     transform: [{
       translateY: -Math.max(0, keyboard.height.value - insets.bottom + 8),
     }],
   }), [insets.bottom])
+  const messageListKeyboardAnimatedStyle = useAnimatedStyle(() => {
+    const keyboardLift = Math.max(0, keyboard.height.value - insets.bottom + 8)
+    const unusedListSpace = Math.max(
+      0,
+      scrollViewportHeight.value - scrollContentHeight.value
+    )
+    return {
+      transform: [{
+        translateY: -Math.max(0, keyboardLift - unusedListSpace),
+      }],
+    }
+  }, [insets.bottom])
   const stagedDeliveryTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set())
+
+  useAnimatedReaction(
+    () => ({
+      active: latestScrollActive.value,
+      contentHeight: scrollContentHeight.value,
+      pinned: latestScrollPinned.value,
+      progress: latestScrollProgress.value,
+      startOffset: latestScrollStartOffset.value,
+      viewportHeight: scrollViewportHeight.value,
+    }),
+    state => {
+      if (!state.active || state.viewportHeight <= 0) return
+      const latestOffset = Math.max(0, state.contentHeight - state.viewportHeight)
+      const animatedOffset = state.startOffset
+        + (latestOffset - state.startOffset) * state.progress
+      const targetOffset = state.pinned
+        ? latestOffset
+        : Math.max(0, Math.min(latestOffset, animatedOffset))
+      scrollTo(listRef, 0, targetOffset, false)
+    }
+  )
+
+  const hideScrollToLatest = useCallback(() => {
+    if (!unseenLatestRef.current) return
+    unseenLatestRef.current = false
+    setShowScrollToLatest(false)
+  }, [])
+
+  const showLatestMessageButton = useCallback(() => {
+    if (unseenLatestRef.current) return
+    unseenLatestRef.current = true
+    setShowScrollToLatest(true)
+  }, [])
+
+  const startLatestScroll = useCallback((pinToLatest = false) => {
+    manualScrollRef.current = false
+    followLatestRef.current = true
+    hideScrollToLatest()
+    latestScrollStartOffset.value = Math.max(0, scrollMetricsRef.current.offsetY)
+    latestScrollPinned.value = pinToLatest
+    latestScrollActive.value = true
+    cancelAnimation(latestScrollProgress)
+    latestScrollProgress.value = 0
+    latestScrollProgress.value = withTiming(1, {
+      duration: LATEST_SCROLL_DURATION_MS,
+      easing: ReanimatedEasing.out(ReanimatedEasing.cubic),
+    })
+  }, [
+    hideScrollToLatest,
+    latestScrollActive,
+    latestScrollPinned,
+    latestScrollProgress,
+    latestScrollStartOffset,
+  ])
+
+  const prepareForIncomingMessage = useCallback(() => {
+    if (withinImmersiveRangeRef.current || followLatestRef.current) {
+      startLatestScroll(withinImmersiveRangeRef.current)
+      return
+    }
+    showLatestMessageButton()
+  }, [showLatestMessageButton, startLatestScroll])
+
+  const handleComposerFocus = useCallback(() => {
+    if (initialScrollFrameRef.current !== null) {
+      cancelAnimationFrame(initialScrollFrameRef.current)
+      initialScrollFrameRef.current = null
+    }
+    initialScrollRef.current = false
+    initialScrollScheduledRef.current = false
+    startLatestScroll(withinImmersiveRangeRef.current)
+  }, [startLatestScroll])
+
+  const scrollToExactLatest = useCallback(() => {
+    const { contentHeight, viewportHeight } = scrollMetricsRef.current
+    if (contentHeight <= 0 || viewportHeight <= 0) return false
+    const offset = Math.max(0, contentHeight - viewportHeight)
+    listRef.current?.scrollToOffset({ offset, animated: false })
+    scrollMetricsRef.current.offsetY = offset
+    return true
+  }, [listRef])
 
   const settleInitialScroll = useCallback(() => {
     if (!initialScrollRef.current || initialScrollScheduledRef.current) return
+    if (!scrollToExactLatest()) return
     initialScrollScheduledRef.current = true
-    listRef.current?.scrollToEnd({ animated: false })
     initialScrollFrameRef.current = requestAnimationFrame(() => {
-      listRef.current?.scrollToEnd({ animated: false })
+      scrollToExactLatest()
       initialScrollFrameRef.current = requestAnimationFrame(() => {
-        listRef.current?.scrollToEnd({ animated: false })
+        scrollToExactLatest()
         initialScrollRef.current = false
         initialScrollScheduledRef.current = false
         initialScrollFrameRef.current = null
       })
     })
-  }, [])
+  }, [scrollToExactLatest])
 
   const scheduleDeliveryTask = useCallback((task: () => void, delay: number) => {
     const timer = setTimeout(() => {
@@ -357,11 +476,7 @@ export default function ChatScreen() {
     const firstMessage = incomingMessages[0]
     if (!firstMessage) return
 
-    const followIncoming = () => {
-      if (!atBottomRef.current && !followLatestRef.current) return
-      followLatestRef.current = true
-      pendingSendScrollRef.current = 'animated'
-    }
+    const followIncoming = () => prepareForIncomingMessage()
 
     followIncoming()
     setMessages(current => current.flatMap(message => (
@@ -409,18 +524,26 @@ export default function ChatScreen() {
     }
 
     queueMessage(1)
-  }, [scheduleDeliveryTask])
+  }, [prepareForIncomingMessage, scheduleDeliveryTask])
 
   useEffect(() => () => {
     if (initialScrollFrameRef.current !== null) {
       cancelAnimationFrame(initialScrollFrameRef.current)
     }
+    latestScrollActive.value = false
+    cancelAnimation(latestScrollProgress)
     stagedDeliveryTimersRef.current.forEach(timer => clearTimeout(timer))
     stagedDeliveryTimersRef.current.clear()
-  }, [])
+  }, [latestScrollActive, latestScrollProgress])
+
+  useEffect(() => {
+    messagesRef.current = messages
+  }, [messages])
 
   useEffect(() => {
     if (!characterId) return
+    unseenLatestRef.current = false
+    setShowScrollToLatest(false)
     setActiveCharacter(characterId)
     return () => setActiveCharacter(null)
   }, [characterId, setActiveCharacter])
@@ -455,10 +578,15 @@ export default function ChatScreen() {
         cancelAnimationFrame(initialScrollFrameRef.current)
         initialScrollFrameRef.current = null
       }
-      initialScrollRef.current = !quiet
-      initialScrollScheduledRef.current = false
-      followLatestRef.current = true
-      atBottomRef.current = true
+      if (!quiet) {
+        latestScrollActive.value = false
+        cancelAnimation(latestScrollProgress)
+        initialScrollRef.current = true
+        initialScrollScheduledRef.current = false
+        followLatestRef.current = true
+        withinImmersiveRangeRef.current = true
+        hideScrollToLatest()
+      }
 
       if (!matching) {
         setConversationId(null)
@@ -478,6 +606,13 @@ export default function ChatScreen() {
         if (requestId !== historyRequestRef.current) return
         const cachedMessages = getConversationCache(character.id)?.messages || []
         const mappedMessages = mergeMessageUiState(cachedMessages, mapMessages(serverMessages))
+        if (quiet) {
+          const existingIds = new Set(messagesRef.current.map(message => message.id))
+          const hasNewAssistantMessage = mappedMessages.some(message => (
+            message.sender === 'assistant' && !existingIds.has(message.id)
+          ))
+          if (hasNewAssistantMessage) prepareForIncomingMessage()
+        }
         setConversationId(matching.id)
         setMessages(mappedMessages)
         setConversationCache(character.id, {
@@ -493,7 +628,16 @@ export default function ChatScreen() {
     } finally {
       if (requestId === historyRequestRef.current) setLoadingHistory(false)
     }
-  }, [character, getConversationCache, setConversationCache, userId])
+  }, [
+    character,
+    getConversationCache,
+    hideScrollToLatest,
+    latestScrollActive,
+    latestScrollProgress,
+    prepareForIncomingMessage,
+    setConversationCache,
+    userId,
+  ])
 
   useEffect(() => {
     if (!character || !userId) return
@@ -519,6 +663,15 @@ export default function ChatScreen() {
     try {
       const serverMessages = await api.listMessages(conversationId)
       const mapped = mapMessages(serverMessages)
+      const currentMessages = messagesRef.current
+      if (currentMessages.some(message => message.loading)
+        || stagedDeliveryTimersRef.current.size > 0) {
+        return
+      }
+      const knownIds = new Set(currentMessages.map(message => message.id))
+      if (mapped.some(message => message.sender === 'assistant' && !knownIds.has(message.id))) {
+        prepareForIncomingMessage()
+      }
       setMessages(current => {
         if (current.some(message => message.loading) || stagedDeliveryTimersRef.current.size > 0) {
           return current
@@ -535,16 +688,12 @@ export default function ChatScreen() {
           animationIndex += 1
           return animatedMessage
         })
-        if (animationIndex > 0 && (atBottomRef.current || followLatestRef.current)) {
-          followLatestRef.current = true
-          pendingSendScrollRef.current = 'animated'
-        }
         return next
       })
     } catch {
       // Keep the current local transcript while connectivity recovers.
     }
-  }, [conversationId])
+  }, [conversationId, prepareForIncomingMessage])
 
   useEffect(() => {
     if (!conversationId) return
@@ -588,6 +737,9 @@ export default function ChatScreen() {
       }
       initialScrollRef.current = true
       initialScrollScheduledRef.current = false
+      latestScrollActive.value = false
+      cancelAnimation(latestScrollProgress)
+      hideScrollToLatest()
       setError(null)
     } catch (clearError) {
       setError(clearError instanceof Error ? clearError.message : 'Could not clear the conversation.')
@@ -701,8 +853,7 @@ export default function ChatScreen() {
       loading: true,
     }
 
-    pendingSendScrollRef.current = atBottomRef.current ? 'auto' : 'animated'
-    followLatestRef.current = true
+    startLatestScroll(withinImmersiveRangeRef.current)
     setDraft(character.id, '')
     setMessages(current => [...current, userMessage, loadingMessage])
     setSending(true)
@@ -752,23 +903,37 @@ export default function ChatScreen() {
 
   const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
-    const distanceFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y
-    atBottomRef.current = distanceFromBottom <= 36
+    scrollMetricsRef.current = {
+      contentHeight: contentSize.height,
+      offsetY: contentOffset.y,
+      viewportHeight: layoutMeasurement.height,
+    }
+    const distanceFromBottom = Math.max(
+      0,
+      contentSize.height - layoutMeasurement.height - contentOffset.y
+    )
+    const withinImmersiveRange = distanceFromBottom <= layoutMeasurement.height / 2
+    withinImmersiveRangeRef.current = withinImmersiveRange
+    if (manualScrollRef.current) followLatestRef.current = withinImmersiveRange
+    if (withinImmersiveRange) hideScrollToLatest()
   }
 
-  const handleContentSizeChange = () => {
+  const handleListLayout = (event: LayoutChangeEvent) => {
+    const viewportHeight = event.nativeEvent.layout.height
+    scrollMetricsRef.current.viewportHeight = viewportHeight
+    scrollViewportHeight.value = viewportHeight
+    settleInitialScroll()
+  }
+
+  const handleContentSizeChange = (_width: number, height: number) => {
+    scrollMetricsRef.current.contentHeight = height
+    scrollContentHeight.value = height
     if (initialScrollRef.current) {
       settleInitialScroll()
       return
     }
-    if (pendingSendScrollRef.current) {
-      const mode = pendingSendScrollRef.current
-      pendingSendScrollRef.current = null
-      listRef.current?.scrollToEnd({ animated: mode === 'animated' })
-      return
-    }
-    if (followLatestRef.current) {
-      listRef.current?.scrollToEnd({ animated: false })
+    if (followLatestRef.current && !latestScrollActive.value) {
+      scrollToExactLatest()
     }
   }
 
@@ -808,77 +973,102 @@ export default function ChatScreen() {
         </Pressable>
       </View>
 
-      <Reanimated.View style={[styles.keyboardArea, keyboardAreaAnimatedStyle]}>
-        <FlatList
-          ref={listRef}
-          data={messages}
-          keyExtractor={item => item.id}
-          renderItem={({ item }) => (
-            <MessageRow
-              message={item}
-              characterName={character.name}
-              characterAvatar={character.avatar}
-              onEditCharacter={openEditor}
-              onLongPress={(message, pageX, pageY) => setMessageActionMenu({ message, pageX, pageY })}
+      <View style={styles.keyboardViewport}>
+        <View style={styles.keyboardArea}>
+          <Reanimated.View style={[styles.messageListArea, messageListKeyboardAnimatedStyle]}>
+            <Reanimated.FlatList
+              ref={listRef}
+              data={messages}
+              keyExtractor={item => item.id}
+              renderItem={({ item }) => (
+                <MessageRow
+                  message={item}
+                  characterName={character.name}
+                  characterAvatar={character.avatar}
+                  onEditCharacter={openEditor}
+                  onLongPress={(message, pageX, pageY) => setMessageActionMenu({ message, pageX, pageY })}
+                />
+              )}
+              style={styles.messageList}
+              contentContainerStyle={styles.messageListContent}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+              onLayout={handleListLayout}
+              onScroll={handleScroll}
+              onScrollBeginDrag={() => {
+                manualScrollRef.current = true
+                followLatestRef.current = false
+                latestScrollActive.value = false
+                cancelAnimation(latestScrollProgress)
+              }}
+              onMomentumScrollEnd={() => {
+                manualScrollRef.current = false
+                followLatestRef.current = withinImmersiveRangeRef.current
+              }}
+              onContentSizeChange={handleContentSizeChange}
+              scrollEventThrottle={16}
             />
-          )}
-          style={styles.messageList}
-          contentContainerStyle={styles.messageListContent}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
-          onLayout={settleInitialScroll}
-          onScroll={handleScroll}
-          onScrollBeginDrag={() => {
-            followLatestRef.current = false
-          }}
-          onContentSizeChange={handleContentSizeChange}
-          scrollEventThrottle={32}
-        />
+          </Reanimated.View>
 
-        {error && (
-          <Pressable onPress={() => void loadConversation(true)} style={styles.errorBanner}>
-            <Ionicons name="alert-circle-outline" size={18} color={palette.danger} />
-            <Text style={styles.errorBannerText} numberOfLines={2}>{error}</Text>
-            <Ionicons name="refresh" size={18} color={palette.danger} />
-          </Pressable>
-        )}
+          <Reanimated.View style={composerKeyboardAnimatedStyle}>
+            {error && (
+              <Pressable onPress={() => void loadConversation(true)} style={styles.errorBanner}>
+                <Ionicons name="alert-circle-outline" size={18} color={palette.danger} />
+                <Text style={styles.errorBannerText} numberOfLines={2}>{error}</Text>
+                <Ionicons name="refresh" size={18} color={palette.danger} />
+              </Pressable>
+            )}
 
-        <View style={[
-          styles.composer,
-          { paddingBottom: Math.max(8, insets.bottom) },
-        ]}>
-          <TextInput
-            value={draft}
-            onChangeText={text => setDraft(character.id, text)}
-            placeholder="Type your message..."
-            placeholderTextColor="#8A94A3"
-            multiline
-            maxLength={20_000}
-            style={styles.composerInput}
-            textAlignVertical="center"
-            onFocus={() => {
-              if (!atBottomRef.current && !followLatestRef.current) return
-              followLatestRef.current = true
-              requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }))
-            }}
-          />
-          <Pressable
-            onPress={() => void sendMessage()}
-            disabled={!draft.trim() || sending}
-            accessibilityRole="button"
-            accessibilityLabel="Send message"
-            style={({ pressed }) => [
-              styles.sendButton,
-              (!draft.trim() || sending) && styles.sendButtonDisabled,
-              pressed && draft.trim() && !sending && styles.sendButtonPressed,
-            ]}
-          >
-            {sending
-              ? <ActivityIndicator size="small" color="#FFFFFF" />
-              : <Ionicons name="arrow-up" size={22} color="#FFFFFF" />}
-          </Pressable>
+            <View style={styles.composerRegion}>
+              {showScrollToLatest && (
+                <Pressable
+                  onPress={() => startLatestScroll(false)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Scroll to latest message"
+                  style={({ pressed }) => [
+                    styles.scrollToLatestButton,
+                    pressed && styles.scrollToLatestButtonPressed,
+                  ]}
+                >
+                  <Ionicons name="arrow-down" size={21} color={palette.text} />
+                </Pressable>
+              )}
+
+              <View style={[
+                styles.composer,
+                { paddingBottom: Math.max(8, insets.bottom) },
+              ]}>
+                <TextInput
+                  value={draft}
+                  onChangeText={text => setDraft(character.id, text)}
+                  placeholder="Type your message..."
+                  placeholderTextColor="#8A94A3"
+                  multiline
+                  maxLength={20_000}
+                  style={styles.composerInput}
+                  textAlignVertical="center"
+                  onFocus={handleComposerFocus}
+                />
+                <Pressable
+                  onPress={() => void sendMessage()}
+                  disabled={!draft.trim() || sending}
+                  accessibilityRole="button"
+                  accessibilityLabel="Send message"
+                  style={({ pressed }) => [
+                    styles.sendButton,
+                    (!draft.trim() || sending) && styles.sendButtonDisabled,
+                    pressed && draft.trim() && !sending && styles.sendButtonPressed,
+                  ]}
+                >
+                  {sending
+                    ? <ActivityIndicator size="small" color="#FFFFFF" />
+                    : <Ionicons name="arrow-up" size={22} color="#FFFFFF" />}
+                </Pressable>
+              </View>
+            </View>
+          </Reanimated.View>
         </View>
-      </Reanimated.View>
+      </View>
 
       <Modal
         visible={Boolean(messageActionMenu)}
@@ -989,9 +1179,16 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     marginTop: 1,
   },
+  keyboardViewport: {
+    flex: 1,
+    overflow: 'hidden',
+    backgroundColor: palette.background,
+  },
   keyboardArea: {
     flex: 1,
-    backgroundColor: palette.background,
+  },
+  messageListArea: {
+    flex: 1,
   },
   messageList: {
     flex: 1,
@@ -999,11 +1196,11 @@ const styles = StyleSheet.create({
   messageListContent: {
     paddingHorizontal: 12,
     paddingTop: 18,
-    paddingBottom: 8,
+    paddingBottom: LATEST_MESSAGE_COMPOSER_GAP - MESSAGE_ROW_GAP,
   },
   messageRow: {
     width: '100%',
-    marginBottom: 14,
+    marginBottom: MESSAGE_ROW_GAP,
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: 8,
@@ -1120,6 +1317,33 @@ const styles = StyleSheet.create({
     color: '#B42318',
     fontSize: 12,
     lineHeight: 17,
+  },
+  composerRegion: {
+    position: 'relative',
+    zIndex: 2,
+  },
+  scrollToLatestButton: {
+    position: 'absolute',
+    right: 16,
+    top: -50,
+    zIndex: 3,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#D5DBE4',
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#101828',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.14,
+    shadowRadius: 5,
+    elevation: 4,
+  },
+  scrollToLatestButtonPressed: {
+    backgroundColor: '#F2F4F7',
+    transform: [{ scale: 0.96 }],
   },
   composer: {
     minHeight: 60,
