@@ -46,6 +46,7 @@ dotenv.config()
 
 const app = express()
 const REJECTED_OUTPUT_LOG_LIMIT = 4000
+const SYNC_PROTOCOL_VERSION = 1
 app.use(cors())
 app.use(express.json({ limit: '2mb' }))
 
@@ -131,7 +132,14 @@ const getStarterMessage = (character?: Character) => {
 
 app.get('/api/health', asyncRoute(async (_req, res) => {
   await query('SELECT 1')
-  return res.json({ status: 'ok', database: 'postgresql' })
+  return res.json({
+    status: 'ok',
+    database: 'postgresql',
+    synchronization: {
+      protocolVersion: SYNC_PROTOCOL_VERSION,
+      transport: 'snapshot-polling'
+    }
+  })
 }))
 
 app.get('/api/characters', asyncRoute(async (_req, res) => {
