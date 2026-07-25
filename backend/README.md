@@ -94,6 +94,10 @@ waits for PostgreSQL, applies pending migrations, and then starts
 variables in the platform's environment-variable panel. Do not copy `.env` into
 the image or commit it.
 
+The build stage explicitly installs development dependencies so `tsc` remains
+available even when a deployment platform injects `NODE_ENV=production` as a
+build argument. The runtime stage still contains production dependencies only.
+
 The image intentionally does not import `/data/*.json` during startup. JSON is a
 legacy migration input and should be imported once as a controlled database setup
 operation. Automatic startup imports would make deployment behavior depend on
