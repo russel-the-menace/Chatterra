@@ -281,6 +281,7 @@ export default function ChatScreen() {
     userId,
     characters,
     conversationVersions,
+    conversationIdsByCharacter,
     getDraft,
     setDraft,
     setActiveCharacter,
@@ -552,16 +553,18 @@ export default function ChatScreen() {
   }, [conversationId, syncMessages])
 
   const proactiveVersion = characterId ? conversationVersions[characterId] || 0 : 0
+  const syncedConversationId = characterId ? conversationIdsByCharacter[characterId] || null : null
   const previousProactiveVersionRef = useRef(proactiveVersion)
   useEffect(() => {
     if (previousProactiveVersionRef.current === proactiveVersion) return
+    if (sendingRef.current || stagedDeliveryTimersRef.current.size > 0) return
     previousProactiveVersionRef.current = proactiveVersion
-    if (conversationId) {
+    if (conversationId && syncedConversationId === conversationId) {
       void syncMessages()
     } else {
       void loadConversation(true)
     }
-  }, [conversationId, loadConversation, proactiveVersion, syncMessages])
+  }, [conversationId, loadConversation, proactiveVersion, sending, syncedConversationId, syncMessages])
 
   const openEditor = () => {
     if (!characterId) return

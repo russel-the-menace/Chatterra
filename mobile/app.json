@@ -25,7 +25,8 @@
         "monochromeImage": "./assets/images/chatterra-mark.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.chatterra.mobile"
     },
     "web": {
       "output": "static",

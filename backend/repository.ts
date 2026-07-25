@@ -4,10 +4,12 @@ import { query, withTransaction } from './database'
 import {
   Character,
   Conversation,
+  ConversationSyncRecord,
   ConversationSummary,
   Memory,
   Message,
-  MessageTranslation
+  MessageTranslation,
+  SyncSnapshot
 } from './types'
 
 const iso = (value: Date | string | null | undefined): string | undefined => {
@@ -338,6 +340,62 @@ export const listConversations = async (userId: string): Promise<Conversation[]>
   return result.rows.map(mapConversation)
 }
 
+export const getSyncSnapshot = async (userId: string): Promise<SyncSnapshot> => {
+  return withTransaction(async client => {
+    await ensureUser(client, userId)
+    const characterResult = await client.query('SELECT * FROM characters ORDER BY created_at, name')
+    const conversationResult = await client.query(
+      `SELECT
+         conversations.*,
+         latest_message.id AS latest_message_id,
+         latest_message.sender_role AS latest_message_sender_role,
+         latest_message.content AS latest_message_content,
+         latest_message.created_at AS latest_message_created_at
+       FROM conversations
+       LEFT JOIN LATERAL (
+         SELECT id, sender_role, content, created_at
+         FROM messages
+         WHERE conversation_id = conversations.id
+         ORDER BY created_at DESC, id DESC
+         LIMIT 1
+       ) latest_message ON TRUE
+       WHERE conversations.user_id = $1
+         AND conversations.status = 'active'
+       ORDER BY conversations.last_message_at DESC NULLS LAST, conversations.created_at DESC`,
+      [userId]
+    )
+    const pinResult = await client.query(
+      `SELECT character_id
+       FROM user_character_preferences
+       WHERE user_id = $1
+       ORDER BY pinned_at DESC, character_id`,
+      [userId]
+    )
+
+    const conversations: ConversationSyncRecord[] = conversationResult.rows.map(row => {
+      const conversation = mapConversation(row)
+      return {
+        ...conversation,
+        latestMessage: row.latest_message_id
+          ? {
+              id: String(row.latest_message_id),
+              senderRole: row.latest_message_sender_role,
+              content: String(row.latest_message_content || ''),
+              createdAt: iso(row.latest_message_created_at)!
+            }
+          : undefined
+      }
+    })
+
+    return {
+      serverTime: new Date().toISOString(),
+      characters: characterResult.rows.map(mapCharacter),
+      conversations,
+      pinnedCharacterIds: pinResult.rows.map(row => String(row.character_id))
+    }
+  })
+}
+
 export const getConversation = async (id: string): Promise<Conversation | undefined> => {
   const result = await query('SELECT * FROM conversations WHERE id = $1', [id])
   return result.rows[0] ? mapConversation(result.rows[0]) : undefined
@@ -508,6 +566,61 @@ export const createConversationWithStarter = async (
 ): Promise<Conversation> => {
   return withTransaction(async client => {
     await ensureUser(client, conversation.userId)
+    const conversationResult = await client.query(
+      `INSERT INTO conversations (
+         id, user_id, character_id, title, status, last_message_at, metadata, created_at, updated_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9)
+       RETURNING *`,
+      [
+        conversation.id,
+        conversation.userId,
+        conversation.characterId,
+        conversation.title ?? null,
+        conversation.status || 'active',
+        starterMessage.createdAt,
+        JSON.stringify(conversation.metadata || {}),
+        conversation.createdAt,
+        conversation.updatedAt
+      ]
+    )
+    await client.query(
+      `INSERT INTO messages (
+         id, conversation_id, sender_role, sender_id, content, content_json, token_count, created_at
+       ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)`,
+      [
+        starterMessage.id,
+        starterMessage.conversationId,
+        starterMessage.senderRole,
+        starterMessage.senderId ?? null,
+        starterMessage.content,
+        starterMessage.contentJson ? JSON.stringify(starterMessage.contentJson) : null,
+        starterMessage.tokenCount ?? null,
+        starterMessage.createdAt
+      ]
+    )
+    return mapConversation(conversationResult.rows[0])
+  })
+}
+
+export const getOrCreateConversationWithStarter = async (
+  conversation: Conversation,
+  starterMessage: Message
+): Promise<Conversation> => {
+  return withTransaction(async client => {
+    await ensureUser(client, conversation.userId)
+    await client.query(
+      'SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))',
+      [conversation.userId, conversation.characterId]
+    )
+    const existingResult = await client.query(
+      `SELECT * FROM conversations
+       WHERE user_id = $1 AND character_id = $2 AND status = 'active'
+       ORDER BY last_message_at DESC NULLS LAST, created_at DESC
+       LIMIT 1`,
+      [conversation.userId, conversation.characterId]
+    )
+    if (existingResult.rows[0]) return mapConversation(existingResult.rows[0])
+
     const conversationResult = await client.query(
       `INSERT INTO conversations (
          id, user_id, character_id, title, status, last_message_at, metadata, created_at, updated_at

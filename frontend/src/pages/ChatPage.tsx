@@ -5,6 +5,7 @@ import { ChatMessage } from '../components/MessageBubble'
 import seedCharacter, {characters as seedCharacters, Character} from '../data/character'
 import { VoiceTranscriptMetadata } from '../voice/types'
 import { starterMessageForCharacter } from '../languagePolicy'
+import { CONFIGURED_USER_ID, apiUrl, getSyncSnapshot } from '../api'
 
 type CharacterTextKey = 'name' | 'role' | 'company' | 'scenario' | 'goal' | 'language' | 'personality' | 'background' | 'systemPromptTemplate'
 type Point = { x: number; y: number }
@@ -150,6 +151,8 @@ export default function ChatPage(): JSX.Element{
   const avatarCropImageRef = useRef<HTMLImageElement | null>(null)
   const avatarDragRef = useRef<{ pointerId: number; pointerX: number; pointerY: number; x: number; y: number } | null>(null)
   const conversationCacheRef = useRef<Record<string, ConversationCacheEntry>>({})
+  const conversationMetadataRef = useRef<Record<string, string>>({})
+  const hasWorkspaceSnapshotRef = useRef(false)
   const historyRequestRef = useRef(0)
   const selectedCharacterIdRef = useRef(selectedCharacter.id)
 
@@ -186,7 +189,7 @@ export default function ChatPage(): JSX.Element{
     }
 
     try {
-      const cRes = await fetch(`http://localhost:3000/api/conversations?userId=${uid}`)
+      const cRes = await fetch(apiUrl(`/api/conversations?userId=${uid}`))
       if (!cRes.ok) throw new Error('no convs')
 
       const cData = await cRes.json()
@@ -197,7 +200,7 @@ export default function ChatPage(): JSX.Element{
       if (requestId !== historyRequestRef.current || selectedCharacterIdRef.current !== nextCharacter.id) return
 
       if (matchingConversation) {
-        const mRes = await fetch(`http://localhost:3000/api/conversations/${matchingConversation.id}/messages`)
+        const mRes = await fetch(apiUrl(`/api/conversations/${matchingConversation.id}/messages`))
         const mData = await mRes.json()
         if (requestId !== historyRequestRef.current || selectedCharacterIdRef.current !== nextCharacter.id) return
         const mapped = mergeMessageUiState(cached?.messages || [], mapServerMessages(mData.messages || []))
@@ -381,15 +384,15 @@ export default function ChatPage(): JSX.Element{
   }, [showCharacterEditor, isSavingCharacter, avatarCropSource])
 
   useEffect(() => {
-    let uid = localStorage.getItem('chatterra_userId')
+    let uid = CONFIGURED_USER_ID || localStorage.getItem('chatterra_userId')
     if (!uid) {
       uid = String(Date.now())
-      localStorage.setItem('chatterra_userId', uid)
     }
+    localStorage.setItem('chatterra_userId', uid)
     setUserIdentifier(uid)
     const loadContactPreferences = async () => {
       try {
-        const response = await fetch(`http://localhost:3000/api/users/${encodeURIComponent(uid)}/contact-preferences`)
+        const response = await fetch(apiUrl(`/api/users/${encodeURIComponent(uid)}/contact-preferences`))
         if (!response.ok) return
         const data = await response.json()
         if (Array.isArray(data.pinnedCharacterIds)) {
@@ -401,7 +404,7 @@ export default function ChatPage(): JSX.Element{
     }
     const loadCharacters = async () => {
       try {
-        const res = await fetch('http://localhost:3000/api/characters')
+        const res = await fetch(apiUrl('/api/characters'))
         if (res.ok) {
           const data = await res.json()
           if (Array.isArray(data.characters) && data.characters.length > 0) {
@@ -431,6 +434,144 @@ export default function ChatPage(): JSX.Element{
   }, [])
 
   useEffect(() => {
+    if (!userId) return
+    let stopped = false
+    let syncing = false
+
+    const syncWorkspace = async () => {
+      if (syncing || document.visibilityState === 'hidden') return
+      syncing = true
+      try {
+        const snapshot = await getSyncSnapshot(userId)
+        if (stopped) return
+
+        setCharacters(current => {
+          const unchanged = current.length === snapshot.characters.length
+            && current.every((character, index) => (
+              character.id === snapshot.characters[index]?.id
+              && character.updatedAt === snapshot.characters[index]?.updatedAt
+            ))
+          return unchanged ? current : snapshot.characters
+        })
+
+        const activeCharacter = snapshot.characters.find(character => (
+          character.id === selectedCharacterIdRef.current
+        )) || snapshot.characters[0]
+        if (activeCharacter) {
+          if (selectedCharacterIdRef.current !== activeCharacter.id) {
+            selectedCharacterIdRef.current = activeCharacter.id
+            localStorage.setItem('chatterra_characterId', activeCharacter.id)
+          }
+          setSelectedCharacter(current => (
+            current.id === activeCharacter.id && current.updatedAt === activeCharacter.updatedAt
+              ? current
+              : activeCharacter
+          ))
+        }
+
+        setPinnedCharacterIds(current => {
+          const next = new Set(snapshot.pinnedCharacterIds)
+          if (current.size === next.size && [...current].every(id => next.has(id))) return current
+          return next
+        })
+
+        const newestConversationByCharacter = new Map<string, typeof snapshot.conversations[number]>()
+        snapshot.conversations.forEach(conversation => {
+          if (!newestConversationByCharacter.has(conversation.characterId)) {
+            newestConversationByCharacter.set(conversation.characterId, conversation)
+          }
+        })
+
+        const nextMetadata: Record<string, string> = {}
+        const nextPreviews: Record<string, string> = {}
+        const changedCharacterIds = new Set<string>()
+        newestConversationByCharacter.forEach((conversation, characterId) => {
+          const version = [
+            conversation.id,
+            conversation.updatedAt,
+            conversation.latestMessage?.id || ''
+          ].join(':')
+          nextMetadata[characterId] = version
+          if (conversation.latestMessage?.content) {
+            nextPreviews[characterId] = conversation.latestMessage.content
+          }
+          if (conversationMetadataRef.current[characterId] !== version) {
+            changedCharacterIds.add(characterId)
+          }
+        })
+        Object.keys(conversationMetadataRef.current).forEach(characterId => {
+          if (!(characterId in nextMetadata)) changedCharacterIds.add(characterId)
+        })
+
+        if (hasWorkspaceSnapshotRef.current && changedCharacterIds.size > 0) {
+          setUnreadCharacterIds(current => {
+            const next = new Set(current)
+            changedCharacterIds.forEach(characterId => {
+              if (characterId !== selectedCharacterIdRef.current) next.add(characterId)
+            })
+            return next
+          })
+          changedCharacterIds.forEach(characterId => {
+            if (characterId === selectedCharacterIdRef.current) return
+            const cached = conversationCacheRef.current[characterId]
+            const nextConversationId = newestConversationByCharacter.get(characterId)?.id || null
+            if (cached && cached.conversationId !== nextConversationId) {
+              delete conversationCacheRef.current[characterId]
+            }
+          })
+        }
+
+        conversationMetadataRef.current = nextMetadata
+        setProactivePreviews(nextPreviews)
+        hasWorkspaceSnapshotRef.current = true
+
+        if (!activeCharacter) return
+        const activeConversation = newestConversationByCharacter.get(activeCharacter.id)
+        const activeCache = conversationCacheRef.current[activeCharacter.id]
+        if (activeConversation && activeCache?.conversationId !== activeConversation.id) {
+          conversationCacheRef.current[activeCharacter.id] = {
+            conversationId: activeConversation.id,
+            messages: activeCache?.messages || [],
+            behaviorStatus: activeCache?.behaviorStatus || 'Online'
+          }
+          setConversationId(activeConversation.id)
+          localStorage.setItem('chatterra_conversationId', activeConversation.id)
+        } else if (!activeConversation && activeCache?.conversationId) {
+          const starterMessages: ChatMessage[] = [{
+            id: `starter-${activeCharacter.id}-${Date.now()}`,
+            sender: 'ai',
+            text: starterMessageForCharacter(activeCharacter)
+          }]
+          conversationCacheRef.current[activeCharacter.id] = {
+            conversationId: null,
+            messages: starterMessages,
+            behaviorStatus: activeCache.behaviorStatus
+          }
+          setConversationId(null)
+          setMessages(starterMessages)
+          localStorage.removeItem('chatterra_conversationId')
+        }
+      } catch {
+        // Keep the last usable local snapshot until connectivity recovers.
+      } finally {
+        syncing = false
+      }
+    }
+
+    void syncWorkspace()
+    const interval = window.setInterval(() => void syncWorkspace(), 3_000)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') void syncWorkspace()
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      stopped = true
+      window.clearInterval(interval)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [userId])
+
+  useEffect(() => {
     if (selectedCharacterIdRef.current !== selectedCharacter.id) return
     conversationCacheRef.current[selectedCharacter.id] = {
       conversationId,
@@ -448,7 +589,7 @@ export default function ChatPage(): JSX.Element{
       if (polling || document.visibilityState === 'hidden') return
       polling = true
       try {
-        const response = await fetch('http://localhost:3000/api/proactive/poll', {
+        const response = await fetch(apiUrl('/api/proactive/poll'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ userId })
@@ -504,7 +645,7 @@ export default function ChatPage(): JSX.Element{
       if (syncing || document.visibilityState === 'hidden') return
       syncing = true
       try {
-        const response = await fetch(`http://localhost:3000/api/conversations/${conversationId}/messages`)
+        const response = await fetch(apiUrl(`/api/conversations/${conversationId}/messages`))
         if (!response.ok) return
         const data = await response.json()
         if (stopped || !Array.isArray(data.messages)) return
@@ -529,7 +670,8 @@ export default function ChatPage(): JSX.Element{
       }
     }
 
-    const interval = window.setInterval(() => void syncConversation(), 15_000)
+    void syncConversation()
+    const interval = window.setInterval(() => void syncConversation(), 3_000)
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') void syncConversation()
     }
@@ -630,7 +772,7 @@ export default function ChatPage(): JSX.Element{
 
     try {
       const response = await fetch(
-        `http://localhost:3000/api/users/${encodeURIComponent(uid)}/characters/${encodeURIComponent(characterId)}/pin`,
+        apiUrl(`/api/users/${encodeURIComponent(uid)}/characters/${encodeURIComponent(characterId)}/pin`),
         {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -671,7 +813,7 @@ export default function ChatPage(): JSX.Element{
       try {
         const response = message.sourceMessageId
           ? await fetch(
-              `http://localhost:3000/api/messages/${encodeURIComponent(message.sourceMessageId)}/translations`,
+              apiUrl(`/api/messages/${encodeURIComponent(message.sourceMessageId)}/translations`),
               {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -683,7 +825,7 @@ export default function ChatPage(): JSX.Element{
               }
             )
           : await fetch(
-              'http://localhost:3000/api/translations',
+              apiUrl('/api/translations'),
               {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -738,8 +880,8 @@ export default function ChatPage(): JSX.Element{
 
     const isNewCharacter = !editingCharacter.id
     const endpoint = isNewCharacter
-      ? 'http://localhost:3000/api/characters'
-      : `http://localhost:3000/api/characters/${editingCharacter.id}`
+      ? apiUrl('/api/characters')
+      : apiUrl(`/api/characters/${editingCharacter.id}`)
 
     setIsSavingCharacter(true)
     setCharacterEditorError('')
@@ -785,7 +927,7 @@ export default function ChatPage(): JSX.Element{
     if (!uid) return
     const targetCharacter = selectedCharacter
 
-    await fetch('http://localhost:3000/api/chat-history', {
+    await fetch(apiUrl('/api/chat-history'), {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId: uid, characterId: targetCharacter.id })
@@ -839,7 +981,7 @@ export default function ChatPage(): JSX.Element{
 
     void (async () => {
       try {
-        const res = await fetch('http://localhost:3000/api/chat', {
+        const res = await fetch(apiUrl('/api/chat'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

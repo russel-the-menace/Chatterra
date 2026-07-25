@@ -32,6 +32,7 @@ type ChatContextValue = {
   proactivePreviews: Record<string, string>
   unreadCharacterIds: Set<string>
   conversationVersions: Record<string, number>
+  conversationIdsByCharacter: Record<string, string | null>
   pinnedCharacterIds: Set<string>
   getDraft: (characterId: string) => string
   setDraft: (characterId: string, draft: string) => void
@@ -60,10 +61,14 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const [proactivePreviews, setProactivePreviews] = useState<Record<string, string>>({})
   const [unreadCharacterIds, setUnreadCharacterIds] = useState<Set<string>>(() => new Set())
   const [conversationVersions, setConversationVersions] = useState<Record<string, number>>({})
+  const [conversationIdsByCharacter, setConversationIdsByCharacter] = useState<Record<string, string | null>>({})
   const [pinnedCharacterIds, setPinnedCharacterIds] = useState<Set<string>>(() => new Set())
   const activeCharacterRef = useRef<string | null>(null)
   const conversationCacheRef = useRef<Map<string, ConversationCacheEntry>>(new Map())
   const pollingRef = useRef(false)
+  const workspaceSyncingRef = useRef(false)
+  const hasWorkspaceSnapshotRef = useRef(false)
+  const conversationMetadataRef = useRef<Map<string, string>>(new Map())
   const appStateRef = useRef<AppStateStatus>(AppState.currentState)
 
   const refreshCharacters = useCallback(async () => {
@@ -101,6 +106,97 @@ export function ChatProvider({ children }: PropsWithChildren) {
       cancelled = true
     }
   }, [refreshCharacters])
+
+  const syncWorkspace = useCallback(async () => {
+    if (!userId || workspaceSyncingRef.current || appStateRef.current !== 'active') return
+    workspaceSyncingRef.current = true
+    try {
+      const snapshot = await api.getSyncSnapshot(userId)
+      setCharacters(snapshot.characters)
+      setPinnedCharacterIds(new Set(snapshot.pinnedCharacterIds))
+      setConnectionError(null)
+
+      const newestConversationByCharacter = new Map<string, typeof snapshot.conversations[number]>()
+      snapshot.conversations.forEach(conversation => {
+        if (!newestConversationByCharacter.has(conversation.characterId)) {
+          newestConversationByCharacter.set(conversation.characterId, conversation)
+        }
+      })
+
+      const nextConversationIds: Record<string, string | null> = {}
+      const nextMetadata = new Map<string, string>()
+      const changedCharacterIds = new Set<string>()
+      const nextPreviews: Record<string, string> = {}
+
+      snapshot.characters.forEach(character => {
+        const conversation = newestConversationByCharacter.get(character.id)
+        nextConversationIds[character.id] = conversation?.id || null
+        if (conversation?.latestMessage?.content) {
+          nextPreviews[character.id] = conversation.latestMessage.content
+        }
+        if (!conversation) return
+        const version = [
+          conversation.id,
+          conversation.updatedAt,
+          conversation.latestMessage?.id || '',
+        ].join(':')
+        nextMetadata.set(character.id, version)
+        if (conversationMetadataRef.current.get(character.id) !== version) {
+          changedCharacterIds.add(character.id)
+        }
+      })
+
+      conversationMetadataRef.current.forEach((_version, characterId) => {
+        if (!nextMetadata.has(characterId)) changedCharacterIds.add(characterId)
+      })
+      conversationMetadataRef.current = nextMetadata
+      setConversationIdsByCharacter(nextConversationIds)
+      setProactivePreviews(nextPreviews)
+
+      if (hasWorkspaceSnapshotRef.current && changedCharacterIds.size > 0) {
+        changedCharacterIds.forEach(characterId => {
+          const cached = conversationCacheRef.current.get(characterId)
+          const nextConversationId = nextConversationIds[characterId] || null
+          if (cached && cached.conversationId !== nextConversationId) {
+            conversationCacheRef.current.delete(characterId)
+          }
+        })
+        setConversationVersions(current => {
+          const next = { ...current }
+          changedCharacterIds.forEach(characterId => {
+            next[characterId] = (next[characterId] || 0) + 1
+          })
+          return next
+        })
+        setUnreadCharacterIds(current => {
+          const next = new Set(current)
+          changedCharacterIds.forEach(characterId => {
+            if (characterId !== activeCharacterRef.current) next.add(characterId)
+          })
+          return next
+        })
+      }
+      hasWorkspaceSnapshotRef.current = true
+    } catch (error) {
+      if (characters.length === 0) setConnectionError(messageForError(error))
+    } finally {
+      workspaceSyncingRef.current = false
+    }
+  }, [characters.length, userId])
+
+  useEffect(() => {
+    if (!userId) return
+    void syncWorkspace()
+    const interval = setInterval(() => void syncWorkspace(), 3_000)
+    const subscription = AppState.addEventListener('change', nextState => {
+      appStateRef.current = nextState
+      if (nextState === 'active') void syncWorkspace()
+    })
+    return () => {
+      clearInterval(interval)
+      subscription.remove()
+    }
+  }, [syncWorkspace, userId])
 
   const pollProactive = useCallback(async () => {
     if (!userId || pollingRef.current || appStateRef.current !== 'active') return
@@ -250,6 +346,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     proactivePreviews,
     unreadCharacterIds,
     conversationVersions,
+    conversationIdsByCharacter,
     pinnedCharacterIds,
     getDraft,
     setDraft,
@@ -265,6 +362,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     characters,
     connectionError,
     conversationVersions,
+    conversationIdsByCharacter,
     clearConversationCache,
     getDraft,
     getConversationCache,

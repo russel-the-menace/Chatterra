@@ -36,8 +36,22 @@ The mobile client derives the backend LAN host automatically and supports an
 `EXPO_PUBLIC_API_URL` override. See [`mobile/README.md`](mobile/README.md) for
 the complete physical-device setup and Expo Go constraints.
 
-The frontend calls `http://localhost:3000`. Database design and migration details
-are documented in [`backend/DATABASE.md`](backend/DATABASE.md). The target behavioral
+Both clients can use the production API at `https://api.feiwan.online`. Copy the
+example environment files and set the same non-secret user ID in
+`frontend/.env.local` and `mobile/.env` to synchronize conversations, messages,
+characters, and pinned contacts:
+
+```bash
+VITE_USER_ID=YOUR_SHARED_USER_ID
+EXPO_PUBLIC_USER_ID=YOUR_SHARED_USER_ID
+```
+
+This shared-ID bridge is intended for the current single-user deployment. It is
+not authentication; a multi-user release needs account login and server-issued
+sessions before exposing another user's data.
+
+Database design and migration details are documented in
+[`backend/DATABASE.md`](backend/DATABASE.md). The target behavioral
 design, including the implemented Inference Orchestrator, is documented in
 [`AI_COMPANION_ARCHITECTURE.md`](AI_COMPANION_ARCHITECTURE.md).
 Voice dictation boundaries and the browser/realtime migration path are documented in

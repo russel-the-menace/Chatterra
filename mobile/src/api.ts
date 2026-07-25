@@ -8,6 +8,7 @@ import {
   PublicCharacterState,
   ServerMessage,
   MessageTranslationResponse,
+  SyncSnapshot,
 } from './types'
 
 const normalizeBaseUrl = (value: string) => value.trim().replace(/\/+$/, '')
@@ -73,6 +74,10 @@ export const api = {
   async listCharacters() {
     const result = await request<{ characters: Character[] }>('/api/characters')
     return result.characters
+  },
+
+  async getSyncSnapshot(userId: string) {
+    return request<SyncSnapshot>(`/api/sync?userId=${encodeURIComponent(userId)}`)
   },
 
   async createCharacter(character: Omit<Character, 'id'>) {

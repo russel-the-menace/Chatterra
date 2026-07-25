@@ -160,3 +160,12 @@ the clients; it is not offline unless that provider adapter itself runs locally.
 Contact pinning is user-specific and durable. The contact-preferences endpoint returns
 pinned character IDs, while the per-character pin endpoint updates that relationship.
 Clients optimistically reorder contacts and then reconcile with the API.
+
+Web and mobile foreground synchronization uses `GET /api/sync?userId=...` as a
+workspace snapshot. It returns characters, active conversation revisions, each
+conversation's latest message, and pinned character IDs. Clients use the snapshot
+to discover changes, then fetch the full transcript only for the open conversation.
+Chat creation is serialized per user and character with a PostgreSQL advisory lock,
+so simultaneous first messages from two clients reuse the same active conversation.
+The current shared user ID is a single-user deployment bridge, not an authorization
+mechanism.

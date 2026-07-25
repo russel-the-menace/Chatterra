@@ -25,6 +25,17 @@ export type Conversation = {
   updatedAt: string
 }
 
+export type SyncConversation = Conversation & {
+  latestMessage?: Pick<ServerMessage, 'id' | 'senderRole' | 'content' | 'createdAt'>
+}
+
+export type SyncSnapshot = {
+  serverTime: string
+  characters: Character[]
+  conversations: SyncConversation[]
+  pinnedCharacterIds: string[]
+}
+
 export type ServerMessage = {
   id: string
   conversationId: string

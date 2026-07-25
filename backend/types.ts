@@ -41,6 +41,17 @@ export interface Conversation {
   updatedAt: string
 }
 
+export interface ConversationSyncRecord extends Conversation {
+  latestMessage?: Pick<Message, 'id' | 'senderRole' | 'content' | 'createdAt'>
+}
+
+export interface SyncSnapshot {
+  serverTime: string
+  characters: Character[]
+  conversations: ConversationSyncRecord[]
+  pinnedCharacterIds: UUID[]
+}
+
 export interface Message {
   id: UUID
   conversationId: UUID

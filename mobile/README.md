@@ -10,7 +10,8 @@ Prerequisites:
 - Expo Go installed on the iPhone
 - Node.js 20.19+, 22.13+, or 24+ (Node 22 LTS is recommended)
 - The Mac and iPhone on the same Wi-Fi network
-- PostgreSQL and the Chatterra backend running on the Mac
+- Access to the deployed Chatterra backend, or PostgreSQL and the backend running
+  on the Mac for local development
 
 Start the backend from the repository root:
 
@@ -41,12 +42,14 @@ nvm install
 nvm use
 ```
 
-Scan the QR code with the iPhone Camera app and open it in Expo Go. The mobile
-client normally derives the Mac's LAN address from Metro and calls port `3000`.
+Scan the QR code with the iPhone Camera app and open it in Expo Go. The default
+example configuration uses the production API. For local backend development,
+override it with the Mac's LAN address and port `3000`.
 
 ## API Address
 
-If automatic LAN discovery does not reach the backend, create `mobile/.env`:
+Create `mobile/.env` from `.env.example`. To use a backend running on the Mac,
+override the production URL:
 
 ```bash
 EXPO_PUBLIC_API_URL=http://YOUR_MAC_LAN_IP:3000
@@ -67,19 +70,28 @@ separate HTTPS tunnel and set that URL in `EXPO_PUBLIC_API_URL`.
 
 ## Device Identity
 
-There is no authentication layer yet. By default, the mobile app creates a
-persistent device-specific user ID, so its conversations and relationship state
-are separate from the browser client.
+There is no authentication layer yet. Without an `EXPO_PUBLIC_USER_ID`, the mobile
+app creates a persistent device-specific user ID, so its conversations and
+relationship state are separate from the browser client.
 
-To use an existing local identity on both clients, copy the browser's
-`chatterra_userId` value and add this to `mobile/.env`:
+To synchronize with the browser, set exactly the same ID in both clients:
 
 ```bash
-EXPO_PUBLIC_USER_ID=YOUR_EXISTING_USER_ID
+# frontend/.env.local
+VITE_USER_ID=YOUR_SHARED_USER_ID
+
+# mobile/.env
+EXPO_PUBLIC_USER_ID=YOUR_SHARED_USER_ID
 ```
 
-This is a development bridge, not a substitute for account authentication and
-secure device linking.
+The clients poll a workspace snapshot while foregrounded. Character edits,
+contact pins, new conversations, user messages, assistant messages, and history
+clearing normally appear on the other active client within three seconds.
+PostgreSQL remains the source of truth, and concurrent first messages reuse one
+active conversation.
+
+This is a single-user development bridge, not a substitute for account
+authentication and secure device linking.
 
 ## Included
 

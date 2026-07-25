@@ -23,11 +23,12 @@ import { translateToEnglish, TranslationServiceError } from './translation-servi
 import {
   clearChatHistory,
   createCharacter,
-  createConversationWithStarter,
+  getOrCreateConversationWithStarter,
   getCharacter,
   getConversation,
   getMessageTranslation,
   getOwnedMessage,
+  getSyncSnapshot,
   getUserPreferences,
   listCharacters,
   listConversations,
@@ -136,6 +137,14 @@ app.get('/api/health', asyncRoute(async (_req, res) => {
 app.get('/api/characters', asyncRoute(async (_req, res) => {
   const characters = await listCharacters()
   return res.json({ characters })
+}))
+
+app.get('/api/sync', asyncRoute(async (req, res) => {
+  const userId = String(req.query.userId || '').trim()
+  if (!userId) return res.status(400).json({ error: 'userId required' })
+
+  const snapshot = await getSyncSnapshot(userId)
+  return res.json(snapshot)
 }))
 
 app.get('/api/users/:id/preferences', asyncRoute(async (req, res) => {
@@ -386,8 +395,8 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
       content: getStarterMessage(storedCharacter),
       createdAt: now
     }
-    conversation = await createConversationWithStarter(nextConversation, starterMessage)
-    trace.mark('conversation_created', 'completed', { conversationId: conversation.id })
+    conversation = await getOrCreateConversationWithStarter(nextConversation, starterMessage)
+    trace.mark('conversation_resolved', 'completed', { conversationId: conversation.id })
   }
 
   const userMessage: Message = {
