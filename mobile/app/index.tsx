@@ -53,7 +53,6 @@ function ContactRow({ character, pinned }: { character: Character; pinned: boole
           {proactivePreviews[character.id] || character.personality || character.role || 'Conversation partner'}
         </Text>
       </View>
-      {pinned && <Ionicons name="pin" size={14} color="#7B8492" accessibilityLabel="Pinned" />}
       <Ionicons name="chevron-forward" size={18} color="#98A2B3" />
     </Pressable>
   )

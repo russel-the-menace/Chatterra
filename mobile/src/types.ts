@@ -46,12 +46,29 @@ export type ServerMessage = {
   createdAt: string
 }
 
+export type MessageQuote = {
+  sourceMessageId?: string
+  segmentIndex: number
+  senderRole: 'user' | 'assistant'
+  senderName: string
+  text: string
+}
+
+export type ComposerQuoteDraft = MessageQuote & {
+  sourceRenderKey: string
+  pendingDeliveryMessageId?: string
+  pendingDeliveryText?: string
+  pendingDeliveryConversationId?: string
+}
+
 export type ChatMessage = {
   id: string
+  renderKey?: string
   sourceMessageId?: string
   segmentIndex?: number
   sender: 'user' | 'assistant'
   text: string
+  quote?: MessageQuote
   translation?: string
   translationVisible?: boolean
   translationLoading?: boolean

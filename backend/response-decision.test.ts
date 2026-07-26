@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { Appraisal, responseDecisionAppraisalForQuote } from './behavior'
 import { decideResponse } from './response-decision'
 import { BehaviorSnapshot } from './types'
 
@@ -78,6 +79,7 @@ const decide = (message: string, options: Record<string, any> = {}) => decideRes
   character,
   snapshot: options.snapshot || snapshot(),
   appraisal: options.appraisal || neutralAppraisal,
+  hasQuote: options.hasQuote,
   recentMessages: options.recentMessages || recentQuestion,
   now
 })
@@ -109,5 +111,47 @@ assert.equal(practiceTurn.action, 'reply_now')
 
 const punctuation = decide('？')
 assert.equal(punctuation.action, 'no_reply')
+
+const quotedAcknowledgement = decide('嗯', { hasQuote: true })
+assert.equal(quotedAcknowledgement.action, 'reply_now')
+assert.ok(quotedAcknowledgement.reasonCodes.includes('quoted_context_requires_response'))
+
+const quotedReaction = decide('👍', { hasQuote: true })
+assert.equal(quotedReaction.action, 'reply_now')
+assert.ok(quotedReaction.reasonCodes.includes('quoted_context_requires_response'))
+
+const baseAppraisal: Appraisal = {
+  positive: 0,
+  negative: 0,
+  apology: 0,
+  selfDisclosure: false,
+  question: false,
+  urgency: false,
+  distress: false,
+  bereavement: false,
+  directedConflict: false,
+  relationshipReasons: ['interaction_recorded'],
+  affectReasons: []
+}
+const quotedUserRisk = responseDecisionAppraisalForQuote(baseAppraisal, {
+  sourceMessageId: 'quoted-user-message',
+  segmentIndex: 0,
+  senderRole: 'user',
+  senderName: 'You',
+  text: 'My father died and I feel devastated.'
+})
+assert.equal(quotedUserRisk.bereavement, true)
+assert.equal(quotedUserRisk.distress, true)
+const quotedRiskDecision = decide('👍', { hasQuote: true, appraisal: quotedUserRisk })
+assert.ok(quotedRiskDecision.reasonCodes.includes('high_stakes_message_requires_response'))
+
+const quotedAssistantRisk = responseDecisionAppraisalForQuote(baseAppraisal, {
+  sourceMessageId: 'quoted-assistant-message',
+  segmentIndex: 0,
+  senderRole: 'assistant',
+  senderName: 'Maya',
+  text: 'My father died and I feel devastated.'
+})
+assert.equal(quotedAssistantRisk, baseAppraisal)
 
 console.log('response decision checks passed')

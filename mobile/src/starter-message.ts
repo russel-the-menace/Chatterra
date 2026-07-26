@@ -1,10 +1,17 @@
 import { Character } from './types'
 
-const isCantonese = (language?: string) => (
-  /cantonese|粤语|粵語|廣東話|广东话/iu.test(language || '')
-)
+const languageCode = (language?: string) => {
+  const normalized = language?.trim().toLowerCase() || 'english only'
+  if (/cantonese|粤语|粵語|廣東話|广东话/u.test(normalized)) return 'cantonese'
+  if (/mandarin|普通话|普通話|国语|國語/u.test(normalized)) return 'mandarin'
+  if (/korean|한국어|韩语|韓語|朝鮮語|조선말/u.test(normalized)) return 'korean'
+  if (/japanese|日本語|日语|日語/u.test(normalized)) return 'japanese'
+  if (/english|英语|英語/u.test(normalized)) return 'english'
+  return 'unknown'
+}
 
 export const starterMessageForCharacter = (character: Character) => {
+  const code = languageCode(character.language)
   if (character.id === 'seed-arjun-client') {
     return "Let us get straight to it. Which DJI model are you offering, what lawful route gets the complete units into India, and what is your landed unit price at the proposed volume? I will not accept 'we handle customs' as an answer."
   }
@@ -17,20 +24,22 @@ export const starterMessageForCharacter = (character: Character) => {
   if (character.id === 'c3') {
     return "Hey, it's Maya. I just finished sorting out my notes for the day. Come keep me company for a minute?"
   }
-  if (isCantonese(character.language)) {
-    return `你好，我係${character.name || '我'}。你而家想傾咩？`
-  }
-  if (character.id === 'c2') {
+  if (character.id === 'c2' && code === 'english') {
     return 'Hi. I will help you practice English and point out useful mistakes when it helps, while keeping the conversation natural. Tell me about your current project.'
   }
-  if (/mandarin|普通话|普通話|国语|國語/iu.test(character.language || '')) {
-    return `你好，我是${character.name || '我'}。你现在想聊什么？`
+
+  switch (code) {
+    case 'cantonese':
+      return `你好，我係${character.name || 'Interviewer'}。你而家想傾咩？`
+    case 'mandarin':
+      return `你好，我是${character.name || 'Interviewer'}。你现在想聊什么？`
+    case 'japanese':
+      return `こんにちは、${character.name || 'Interviewer'}です。今日は何を話したい？`
+    case 'korean':
+      return `안녕하세요, ${character.name || 'Interviewer'}입니다. 오늘은 무슨 이야기를 할까요?`
+    case 'english':
+      return `Hello, I'm ${character.name || 'Interviewer'}. What would you like to talk about?`
+    default:
+      return '👋'
   }
-  if (/japanese|日本語|日语|日語/iu.test(character.language || '')) {
-    return `こんにちは、${character.name || '私'}です。今日は何を話したい？`
-  }
-  if (/korean|한국어|韩语|韓語/iu.test(character.language || '')) {
-    return `안녕하세요, ${character.name || '저'}입니다. 오늘은 무슨 이야기를 할까요?`
-  }
-  return `Hello, I'm ${character.name || 'Interviewer'}. What would you like to talk about?`
 }

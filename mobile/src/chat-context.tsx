@@ -14,8 +14,12 @@ import {
 } from 'react'
 
 import { API_BASE_URL, api } from './api'
-import { getOrCreateUserId } from './storage'
-import { Character, ChatMessage } from './types'
+import {
+  getOrCreateUserId,
+  getStoredComposerQuoteDrafts,
+  saveStoredComposerQuoteDrafts,
+} from './storage'
+import { Character, ChatMessage, ComposerQuoteDraft } from './types'
 
 type ConversationCacheEntry = {
   conversationId: string | null
@@ -35,7 +39,17 @@ type ChatContextValue = {
   conversationIdsByCharacter: Record<string, string | null>
   pinnedCharacterIds: Set<string>
   getDraft: (characterId: string) => string
-  setDraft: (characterId: string, draft: string) => void
+  setDraft: (
+    characterId: string,
+    update: string | ((current: string) => string)
+  ) => void
+  getQuoteDraft: (characterId: string) => ComposerQuoteDraft | null
+  setQuoteDraft: (
+    characterId: string,
+    update: ComposerQuoteDraft | null | (
+      (current: ComposerQuoteDraft | null) => ComposerQuoteDraft | null
+    )
+  ) => void
   refreshCharacters: () => Promise<void>
   saveCharacter: (character: Character | Omit<Character, 'id'>) => Promise<Character>
   markCharacterRead: (characterId: string) => void
@@ -52,12 +66,26 @@ const messageForError = (error: unknown) => (
   error instanceof Error ? error.message : 'Could not load Chatterra.'
 )
 
+const persistQuoteDrafts = async (drafts: Record<string, ComposerQuoteDraft>) => {
+  let lastError: unknown
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await saveStoredComposerQuoteDrafts(drafts)
+      return
+    } catch (error) {
+      lastError = error
+    }
+  }
+  throw lastError
+}
+
 export function ChatProvider({ children }: PropsWithChildren) {
   const [ready, setReady] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
   const [characters, setCharacters] = useState<Character[]>([])
   const [connectionError, setConnectionError] = useState<string | null>(null)
   const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const [quoteDrafts, setQuoteDrafts] = useState<Record<string, ComposerQuoteDraft>>({})
   const [proactivePreviews, setProactivePreviews] = useState<Record<string, string>>({})
   const [unreadCharacterIds, setUnreadCharacterIds] = useState<Set<string>>(() => new Set())
   const [conversationVersions, setConversationVersions] = useState<Record<string, number>>({})
@@ -70,6 +98,38 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const hasWorkspaceSnapshotRef = useRef(false)
   const conversationMetadataRef = useRef<Map<string, string>>(new Map())
   const appStateRef = useRef<AppStateStatus>(AppState.currentState)
+  const quoteDraftsRef = useRef<Record<string, ComposerQuoteDraft>>({})
+  const quoteDraftWriteRef = useRef<Promise<void>>(Promise.resolve())
+  const quoteDraftDirtyRef = useRef<Record<string, ComposerQuoteDraft> | null>(null)
+
+  const flushQuoteDraftPersistence = useCallback(async () => {
+    const pending = quoteDraftDirtyRef.current
+    if (!pending) return
+    try {
+      await persistQuoteDrafts(pending)
+      if (quoteDraftDirtyRef.current === pending) quoteDraftDirtyRef.current = null
+    } catch (error) {
+      console.warn('Could not persist Quote draft; it will be retried.', error)
+    }
+  }, [])
+
+  const scheduleQuoteDraftPersistence = useCallback((
+    drafts?: Record<string, ComposerQuoteDraft>
+  ) => {
+    if (drafts) quoteDraftDirtyRef.current = drafts
+    quoteDraftWriteRef.current = quoteDraftWriteRef.current
+      .catch(() => undefined)
+      .then(flushQuoteDraftPersistence)
+  }, [flushQuoteDraftPersistence])
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', nextState => {
+      if (nextState === 'active' && quoteDraftDirtyRef.current) {
+        scheduleQuoteDraftPersistence()
+      }
+    })
+    return () => subscription.remove()
+  }, [scheduleQuoteDraftPersistence])
 
   const refreshCharacters = useCallback(async () => {
     try {
@@ -87,9 +147,14 @@ export function ChatProvider({ children }: PropsWithChildren) {
     let cancelled = false
     void (async () => {
       try {
-        const storedUserId = await getOrCreateUserId()
+        const [storedUserId, storedQuoteDrafts] = await Promise.all([
+          getOrCreateUserId(),
+          getStoredComposerQuoteDrafts().catch(() => ({})),
+        ])
         if (cancelled) return
         setUserId(storedUserId)
+        quoteDraftsRef.current = storedQuoteDrafts
+        setQuoteDrafts(storedQuoteDrafts)
         const [pinnedIds] = await Promise.all([
           api.listPinnedCharacterIds(storedUserId),
           refreshCharacters(),
@@ -257,8 +322,14 @@ export function ChatProvider({ children }: PropsWithChildren) {
 
   const getDraft = useCallback((characterId: string) => drafts[characterId] || '', [drafts])
 
-  const setDraft = useCallback((characterId: string, draft: string) => {
+  const setDraft = useCallback((
+    characterId: string,
+    update: string | ((current: string) => string)
+  ) => {
     setDrafts(current => {
+      const draft = typeof update === 'function'
+        ? update(current[characterId] || '')
+        : update
       if (draft) return { ...current, [characterId]: draft }
       if (!(characterId in current)) return current
       const next = { ...current }
@@ -266,6 +337,26 @@ export function ChatProvider({ children }: PropsWithChildren) {
       return next
     })
   }, [])
+
+  const getQuoteDraft = useCallback((characterId: string) => (
+    quoteDrafts[characterId] || null
+  ), [quoteDrafts])
+
+  const setQuoteDraft = useCallback((
+    characterId: string,
+    update: ComposerQuoteDraft | null | (
+      (current: ComposerQuoteDraft | null) => ComposerQuoteDraft | null
+    )
+  ) => {
+    const current = quoteDraftsRef.current[characterId] || null
+    const value = typeof update === 'function' ? update(current) : update
+    const next = { ...quoteDraftsRef.current }
+    if (value) next[characterId] = value
+    else delete next[characterId]
+    quoteDraftsRef.current = next
+    setQuoteDrafts(next)
+    scheduleQuoteDraftPersistence(next)
+  }, [scheduleQuoteDraftPersistence])
 
   const saveCharacter = useCallback(async (character: Character | Omit<Character, 'id'>) => {
     const saved = 'id' in character && character.id
@@ -350,6 +441,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
     pinnedCharacterIds,
     getDraft,
     setDraft,
+    getQuoteDraft,
+    setQuoteDraft,
     refreshCharacters,
     saveCharacter,
     markCharacterRead,
@@ -365,6 +458,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     conversationIdsByCharacter,
     clearConversationCache,
     getDraft,
+    getQuoteDraft,
     getConversationCache,
     markCharacterRead,
     proactivePreviews,
@@ -376,6 +470,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     setCharacterPinned,
     setConversationCache,
     setDraft,
+    setQuoteDraft,
     unreadCharacterIds,
     userId,
   ])

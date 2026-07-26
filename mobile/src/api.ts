@@ -4,6 +4,7 @@ import {
   Character,
   ChatResponse,
   Conversation,
+  MessageQuote,
   ProactiveDelivery,
   PublicCharacterState,
   ServerMessage,
@@ -30,15 +31,16 @@ export class ApiError extends Error {
   constructor(
     message: string,
     readonly status?: number,
+    readonly payload?: Record<string, unknown>,
   ) {
     super(message)
     this.name = 'ApiError'
   }
 }
 
-const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
+const request = async <T>(path: string, init?: RequestInit, timeoutMs = 20_000): Promise<T> => {
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 20_000)
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
 
   try {
     const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -52,7 +54,11 @@ const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
     })
     const payload = await response.json().catch(() => ({}))
     if (!response.ok) {
-      throw new ApiError(payload.error || `Request failed (${response.status})`, response.status)
+      throw new ApiError(
+        payload.error || `Request failed (${response.status})`,
+        response.status,
+        payload
+      )
     }
     return payload as T
   } catch (error) {
@@ -110,6 +116,18 @@ export const api = {
     return result.messages
   },
 
+  async getMessageDeliveryStatus(userId: string, messageId: string) {
+    return request<{
+      persisted: boolean
+      userMessageId?: string
+      conversationId?: string
+    }>(
+      `/api/messages/${encodeURIComponent(messageId)}/delivery-status?userId=${encodeURIComponent(userId)}`,
+      undefined,
+      3_000
+    )
+  },
+
   async listPinnedCharacterIds(userId: string) {
     const result = await request<{ pinnedCharacterIds: string[] }>(
       `/api/users/${encodeURIComponent(userId)}/contact-preferences`
@@ -152,9 +170,11 @@ export const api = {
 
   async sendMessage(input: {
     message: string
+    clientMessageId: string
     conversationId?: string
     userId: string
     character: Character
+    quote?: MessageQuote
   }) {
     return request<ChatResponse>('/api/chat', {
       method: 'POST',

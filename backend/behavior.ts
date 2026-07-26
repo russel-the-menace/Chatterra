@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { query, withTransaction } from './database'
 import type { InferencePlan } from './inference-orchestrator'
 import type { InferenceDiagnostics } from './inference-logger'
+import { storedMessageQuote } from './message-quote'
 import {
   deriveProactivePolicy,
   nextProactiveActionAt,
@@ -16,6 +17,7 @@ import {
   CharacterInstance,
   InteractionMode,
   Memory,
+  MessageQuote,
   ResponseDecision,
   RelationshipState,
   SimulationState
@@ -40,7 +42,7 @@ type EventInput = {
   correlationId?: string
 }
 
-type Appraisal = {
+export type Appraisal = {
   positive: number
   negative: number
   apology: number
@@ -511,6 +513,30 @@ const appraiseText = (text: string): Appraisal => {
   }
 }
 
+export const responseDecisionAppraisalForQuote = (
+  appraisal: Appraisal,
+  quote?: MessageQuote
+): Appraisal => {
+  if (!quote || quote.senderRole !== 'user') return appraisal
+  const quotedUserAppraisal = appraiseText(quote.text)
+  return {
+    ...appraisal,
+    urgency: appraisal.urgency || quotedUserAppraisal.urgency,
+    distress: appraisal.distress || quotedUserAppraisal.distress,
+    bereavement: appraisal.bereavement || quotedUserAppraisal.bereavement,
+    directedConflict: appraisal.directedConflict || quotedUserAppraisal.directedConflict,
+    affectReasons: Array.from(new Set([
+      ...appraisal.affectReasons,
+      ...(quotedUserAppraisal.urgency
+        || quotedUserAppraisal.distress
+        || quotedUserAppraisal.bereavement
+        || quotedUserAppraisal.directedConflict
+        ? ['quoted_user_context_requires_attention']
+        : [])
+    ]))
+  }
+}
+
 const applyAppraisal = async (
   client: PoolClient,
   instanceId: string,
@@ -843,6 +869,8 @@ export const prepareInteraction = async ({
     )
     await advanceState(client, instance, character, now)
     const appraisal = appraiseText(message)
+    const quote = storedMessageQuote(contentJson?.quote)
+    const decisionAppraisal = responseDecisionAppraisalForQuote(appraisal, quote)
     const event = await appendEvent(client, {
       instanceId: instance.id,
       userId,
@@ -899,7 +927,8 @@ export const prepareInteraction = async ({
       mode,
       character,
       snapshot,
-      appraisal,
+      appraisal: decisionAppraisal,
+      hasQuote: Boolean(quote),
       recentMessages: recentMessagesResult.rows.map(row => ({
         senderRole: row.sender_role,
         content: row.content,

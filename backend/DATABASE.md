@@ -147,6 +147,13 @@ validated bubble boundaries are stored as `content_json.deliverySegments`. This 
 retrieval, inference records, and generation records turn-oriented while allowing every
 client to render the same one-to-three-bubble cadence.
 
+User replies may store canonical quote metadata in `content_json.quote`, including the
+source message ID when one exists, the visible segment index, sender role and display
+name, and bounded source text. The chat endpoint validates durable sources against the
+requesting user and conversation before persisting them. The sole source-less request
+case is the exact server starter during new-conversation creation; persistence still uses
+the newly created starter message ID.
+
 ```sql
 SELECT created_at, provider, model, status, diagnostics
 FROM inference_records

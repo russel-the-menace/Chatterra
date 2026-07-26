@@ -150,6 +150,17 @@ metadata in `messages.content_json.voice` through the normal chat request. Raw a
 not uploaded; see the repository-level voice architecture document for the future
 realtime adapter boundary.
 
+Quoted replies use the same chat endpoint. Clients send a source message ID and visible
+segment index when available; the server verifies ownership and conversation membership,
+then stores canonical quote metadata in `messages.content_json.quote`. The quoted text is
+passed to inference inside an explicit untrusted-context boundary, while the current user
+message remains the only instruction-bearing turn. A local starter may omit its source ID
+only while creating a new conversation; its role, segment, and text must exactly match the
+server-generated starter, which is then stored as the quote's durable source.
+Mobile chat requests also provide a stable `clientMessageId`. If the response is lost,
+`GET /api/messages/:id/delivery-status?userId=...` reconciles that exact user message
+before the client restores or reuses a pending Quote draft.
+
 Message translation uses the local Chatterra HTTP API, not a provider API from either
 client. `POST /api/messages/:id/translations` verifies that the message belongs to the
 requesting user, translates one visible delivery segment into English through the

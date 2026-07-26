@@ -1,12 +1,21 @@
 import assert from 'node:assert/strict'
 import {
   diagnoseInferenceOutput,
+  estimateTokens,
+  fitCurrentMessageToTokenBudget,
   inferResponseStyle,
   InferencePlan,
-  MESSAGE_BREAK_TOKEN
+  MESSAGE_BREAK_TOKEN,
+  modelTarget
 } from './inference-orchestrator'
 import { resolveResponseLanguagePolicy } from './language-policy'
-import { BehaviorSnapshot, Character } from './types'
+import {
+  messageAndQuoteForRouting,
+  messageAndQuoteForResponseStyle,
+  messageContentForInference,
+  storedMessageQuote
+} from './message-quote'
+import { BehaviorSnapshot, Character, Message, MessageQuote } from './types'
 
 const now = '2026-07-24T12:00:00.000Z'
 const character: Character = {
@@ -74,6 +83,68 @@ const tired = inferResponseStyle(character, snapshot(0.15), 'hey, what are you d
 assert.ok(casual.targetWords < 55)
 assert.ok(detailed.targetWords > casual.targetWords)
 assert.ok(tired.targetWords < casual.targetWords)
+
+const distressedQuote: MessageQuote = {
+  sourceMessageId: 'quoted-user-message',
+  segmentIndex: 0,
+  senderRole: 'user',
+  senderName: 'You',
+  text: 'My father died and I feel devastated and overwhelmed.'
+}
+const quotedRoutingText = messageAndQuoteForRouting('👍', distressedQuote)
+const quotedStyle = inferResponseStyle(
+  character,
+  snapshot(),
+  quotedRoutingText,
+  'companion'
+)
+assert.equal(quotedStyle.turnPriority, 'emotional_support')
+assert.equal(modelTarget('companion', quotedRoutingText, snapshot()).tier, 'primary')
+
+const distressedAssistantQuote: MessageQuote = {
+  ...distressedQuote,
+  sourceMessageId: 'quoted-assistant-message',
+  senderRole: 'assistant',
+  senderName: 'Alex'
+}
+const assistantStyleText = messageAndQuoteForResponseStyle('👍', distressedAssistantQuote)
+const assistantQuotedStyle = inferResponseStyle(
+  character,
+  snapshot(),
+  assistantStyleText,
+  'companion'
+)
+assert.equal(assistantQuotedStyle.turnPriority, 'conversation')
+assert.equal(
+  modelTarget(
+    'companion',
+    messageAndQuoteForRouting('👍', distressedAssistantQuote),
+    snapshot()
+  ).tier,
+  'primary'
+)
+
+const oversizedQuoteText = '引'.repeat(20_000)
+const oversizedCurrentMessage: Message = {
+  id: 'oversized-current-message',
+  conversationId: 'conversation',
+  senderRole: 'user',
+  senderId: 'user',
+  content: '现'.repeat(20_000),
+  contentJson: {
+    quote: {
+      ...distressedQuote,
+      text: oversizedQuoteText
+    }
+  },
+  createdAt: now
+}
+const fittedCurrentMessage = fitCurrentMessageToTokenBudget(oversizedCurrentMessage, 1_000)
+const fittedQuote = storedMessageQuote(fittedCurrentMessage.contentJson?.quote)
+assert.ok(fittedQuote)
+assert.ok(fittedCurrentMessage.content.length < oversizedCurrentMessage.content.length)
+assert.ok(fittedQuote.text.length < oversizedQuoteText.length)
+assert.ok(estimateTokens(messageContentForInference(fittedCurrentMessage)) <= 1_000)
 
 const maya: Character = {
   ...character,

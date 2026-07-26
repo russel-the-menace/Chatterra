@@ -13,6 +13,7 @@ import {
   InteractionMode,
   Memory,
   Message,
+  MessageQuote,
   ResponseDecision
 } from './types'
 import {
@@ -22,6 +23,12 @@ import {
   ResponseLanguagePolicy
 } from './language-policy'
 import { DIALOGUE_ONLY_INSTRUCTION, normalizeAssistantSpeech } from './response-format'
+import {
+  messageAndQuoteForRouting,
+  messageAndQuoteForResponseStyle,
+  messageContentForInference,
+  storedMessageQuote
+} from './message-quote'
 
 export type InferenceRoute = 'direct' | 'model' | 'none'
 export type ModelTier = 'lightweight' | 'primary'
@@ -114,6 +121,7 @@ type OrchestrationInput = {
   snapshot: BehaviorSnapshot
   memoryEnabled: boolean
   decision: ResponseDecision
+  quote?: MessageQuote
 }
 
 export type ProactiveOrchestrationInput = {
@@ -152,6 +160,89 @@ export const estimateTokens = (text: string) => {
   const cjkCount = (text.match(/[\u3400-\u9fff\uf900-\ufaff]/g) || []).length
   const otherCount = Math.max(0, text.length - cjkCount)
   return Math.max(1, Math.ceil(cjkCount * 1.15 + otherCount / 4))
+}
+
+const TRUNCATION_SUFFIX = '\n[truncated]'
+
+const longestFittingPrefix = (
+  text: string,
+  fits: (candidate: string) => boolean
+) => {
+  if (fits(text)) return text
+  const characters = Array.from(text)
+  let lower = 0
+  let upper = Math.max(0, characters.length - 1)
+  let best = ''
+  while (lower <= upper) {
+    const midpoint = Math.floor((lower + upper) / 2)
+    const candidate = `${characters.slice(0, midpoint).join('')}${TRUNCATION_SUFFIX}`
+    if (fits(candidate)) {
+      best = candidate
+      lower = midpoint + 1
+    } else {
+      upper = midpoint - 1
+    }
+  }
+  return best
+}
+
+export const fitCurrentMessageToTokenBudget = (
+  message: Message,
+  maximumTokens: number
+): Message => {
+  const tokenLimit = Math.max(1, Math.floor(maximumTokens))
+  if (estimateTokens(messageContentForInference(message)) <= tokenLimit) return message
+
+  const quote = storedMessageQuote(message.contentJson?.quote)
+  const withoutQuote = (content: string): Message => {
+    const contentJson = { ...(message.contentJson || {}) }
+    delete contentJson.quote
+    return {
+      ...message,
+      content,
+      contentJson: Object.keys(contentJson).length > 0 ? contentJson : undefined
+    }
+  }
+  if (!quote) {
+    const content = longestFittingPrefix(message.content, candidate => (
+      estimateTokens(messageContentForInference(withoutQuote(candidate))) <= tokenLimit
+    ))
+    return withoutQuote(content)
+  }
+
+  const withQuote = (content: string, quoteText: string): Message => ({
+    ...message,
+    content,
+    contentJson: {
+      ...(message.contentJson || {}),
+      quote: { ...quote, text: quoteText }
+    }
+  })
+  const quoteReserve = Math.max(32, Math.floor(tokenLimit * 0.35))
+  const reservedQuoteText = longestFittingPrefix(
+    quote.text,
+    candidate => estimateTokens(candidate) <= quoteReserve
+  )
+  if (!reservedQuoteText) {
+    const content = longestFittingPrefix(message.content, candidate => (
+      estimateTokens(messageContentForInference(withoutQuote(candidate))) <= tokenLimit
+    ))
+    return withoutQuote(content)
+  }
+  if (estimateTokens(messageContentForInference(withQuote('', reservedQuoteText))) > tokenLimit) {
+    const content = longestFittingPrefix(message.content, candidate => (
+      estimateTokens(messageContentForInference(withoutQuote(candidate))) <= tokenLimit
+    ))
+    return withoutQuote(content)
+  }
+
+  const fittedContent = longestFittingPrefix(message.content, candidate => (
+    estimateTokens(messageContentForInference(withQuote(candidate, reservedQuoteText))) <= tokenLimit
+  ))
+  const fittedQuoteText = longestFittingPrefix(quote.text, candidate => (
+    estimateTokens(messageContentForInference(withQuote(fittedContent, candidate))) <= tokenLimit
+  ))
+  return withQuote(fittedContent, fittedQuoteText || reservedQuoteText)
 }
 
 const lexicalTerms = (text: string) => {
@@ -488,7 +579,7 @@ const rankMessages = (messages: Message[], topicTerms: string[]): SelectedMessag
       message,
       score,
       reasons: reasons.length ? reasons : ['recency'],
-      estimatedTokens: estimateTokens(message.content) + 8,
+      estimatedTokens: estimateTokens(messageContentForInference(message)) + 8,
       continuity
     }
   }).sort((left, right) => right.score - left.score)
@@ -692,7 +783,7 @@ const assembleSystemPrompt = ({
   ].join('\n')
 }
 
-const modelTarget = (
+export const modelTarget = (
   mode: InteractionMode,
   message: string,
   snapshot: BehaviorSnapshot
@@ -740,7 +831,9 @@ const manifestBase = (
 
 export const buildInferencePlan = async (input: OrchestrationInput): Promise<InferencePlan> => {
   const responseLanguage = resolveResponseLanguagePolicy(input.character.language)
-  let style = inferResponseStyle(input.character, input.snapshot, input.message, input.mode)
+  const modelRoutingText = messageAndQuoteForRouting(input.message, input.quote)
+  const styleRoutingText = messageAndQuoteForResponseStyle(input.message, input.quote)
+  let style = inferResponseStyle(input.character, input.snapshot, styleRoutingText, input.mode)
   const maxResponseTokens = Math.round(clamp(style.targetWords * 2 + 128, 256, 800))
   const tokenBudget = MODEL_CONTEXT_LIMIT - CONTEXT_SAFETY_MARGIN - maxResponseTokens
   const parameters = {
@@ -766,7 +859,7 @@ export const buildInferencePlan = async (input: OrchestrationInput): Promise<Inf
     }
   }
 
-  if (isReactionOnly(input.message)) {
+  if (!input.quote && isReactionOnly(input.message)) {
     return {
       id: uuidv4(),
       policyVersion: POLICY_VERSION,
@@ -803,6 +896,7 @@ export const buildInferencePlan = async (input: OrchestrationInput): Promise<Inf
   style = refineMessageCadenceFromHistory(style, messageCandidates)
   const topicTerms = lexicalTerms([
     input.message,
+    input.quote?.text || '',
     ...messageCandidates.slice(-6).map(message => message.content)
   ].join(' ')).slice(0, 24)
   let selectedMemories = selectUnderBudget(rankMemories(memoryCandidates, topicTerms, new Date()), Math.min(1300, tokenBudget * 0.22), 0.12)
@@ -866,6 +960,33 @@ export const buildInferencePlan = async (input: OrchestrationInput): Promise<Inf
         selectedMessages = selectedMessages.filter(item => item.id !== removableContinuity.id)
         continue
       }
+      const currentIndex = selectedMessages.findIndex(item => item.id === input.currentMessageId)
+      if (currentIndex >= 0) {
+        const otherMessageTokens = selectedMessages.reduce((sum, item, index) => (
+          index === currentIndex ? sum : sum + item.estimatedTokens
+        ), 0)
+        const availableCurrentTokens = tokenBudget
+          - estimateTokens(systemPrompt)
+          - otherMessageTokens
+          - 8
+        if (availableCurrentTokens > 0) {
+          const current = selectedMessages[currentIndex]
+          const fittedMessage = fitCurrentMessageToTokenBudget(
+            current.message,
+            availableCurrentTokens
+          )
+          selectedMessages[currentIndex] = {
+            ...current,
+            message: fittedMessage,
+            estimatedTokens: estimateTokens(messageContentForInference(fittedMessage)) + 8,
+            reasons: Array.from(new Set([
+              ...current.reasons,
+              'current_turn_truncated_to_budget'
+            ]))
+          }
+          if (totalTokens() <= tokenBudget) continue
+        }
+      }
       break
     }
     systemPrompt = assembleSystemPrompt({
@@ -882,15 +1003,19 @@ export const buildInferencePlan = async (input: OrchestrationInput): Promise<Inf
     })
   }
 
+  if (totalTokens() > tokenBudget) {
+    throw new Error('inference base context exceeds the model token budget')
+  }
+
   await touchMemories(selectedMemories.map(item => item.id))
   const messages: InferenceMessage[] = [
     { role: 'system', content: systemPrompt },
     ...selectedMessages.map(item => ({
       role: item.message.senderRole === 'assistant' ? 'assistant' as const : 'user' as const,
-      content: item.message.content
+      content: messageContentForInference(item.message)
     }))
   ]
-  const model = modelTarget(input.mode, input.message, input.snapshot)
+  const model = modelTarget(input.mode, modelRoutingText, input.snapshot)
   const contextManifest: InferenceContextManifest = {
     ...manifestBase(input.snapshot, tokenBudget, input.memoryEnabled, responseLanguage),
     estimatedTokens: totalTokens(),

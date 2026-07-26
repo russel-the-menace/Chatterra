@@ -97,8 +97,9 @@ authentication and secure device linking.
 
 - Database-backed character list and search
 - Conversation history and natural `no_reply` handling
-- Fixed composer with keyboard avoidance
-- Per-character in-memory drafts
+- Anchored message actions, quoted replies, and native range selection for copying
+- Fixed composer with keyboard avoidance and focus-preserving message actions
+- Per-character text drafts and device-persisted Quote drafts
 - Foreground proactive-message polling and unread indicators
 - Character creation and editing
 - Tap-to-select avatar with native 1:1 crop and 512px compression

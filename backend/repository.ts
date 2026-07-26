@@ -605,7 +605,11 @@ export const createConversationWithStarter = async (
 export const getOrCreateConversationWithStarter = async (
   conversation: Conversation,
   starterMessage: Message
-): Promise<Conversation> => {
+): Promise<{
+  conversation: Conversation
+  starterMessage?: Message
+  created: boolean
+}> => {
   return withTransaction(async client => {
     await ensureUser(client, conversation.userId)
     await client.query(
@@ -619,7 +623,12 @@ export const getOrCreateConversationWithStarter = async (
        LIMIT 1`,
       [conversation.userId, conversation.characterId]
     )
-    if (existingResult.rows[0]) return mapConversation(existingResult.rows[0])
+    if (existingResult.rows[0]) {
+      return {
+        conversation: mapConversation(existingResult.rows[0]),
+        created: false
+      }
+    }
 
     const conversationResult = await client.query(
       `INSERT INTO conversations (
@@ -653,7 +662,11 @@ export const getOrCreateConversationWithStarter = async (
         starterMessage.createdAt
       ]
     )
-    return mapConversation(conversationResult.rows[0])
+    return {
+      conversation: mapConversation(conversationResult.rows[0]),
+      starterMessage,
+      created: true
+    }
   })
 }
 

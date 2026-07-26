@@ -63,6 +63,14 @@ export interface Message {
   createdAt: string
 }
 
+export interface MessageQuote {
+  sourceMessageId?: UUID
+  segmentIndex: number
+  senderRole: 'user' | 'assistant'
+  senderName: string
+  text: string
+}
+
 export interface MessageTranslation {
   id: UUID
   messageId: UUID

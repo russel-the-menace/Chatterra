@@ -16,6 +16,13 @@ import {
   diagnoseInferenceOutput
 } from './inference-orchestrator'
 import { generateModelResponse, ModelGatewayError } from './model-gateway'
+import {
+  assertSourceLessStarterQuote,
+  canonicalizeMessageQuote,
+  messageQuoteInputFromPayload,
+  MessageQuoteInput,
+  MessageQuoteValidationError
+} from './message-quote'
 import { resolveResponseLanguagePolicy, starterMessageForPolicy } from './language-policy'
 import { createInferenceTrace } from './inference-logger'
 import { processDueProactiveActions } from './proactive-service'
@@ -40,7 +47,13 @@ import {
   upsertMessageTranslation,
   updateCharacter
 } from './repository'
-import { Character, Conversation, Message, VoiceTranscriptMetadata } from './types'
+import {
+  Character,
+  Conversation,
+  Message,
+  MessageQuote,
+  VoiceTranscriptMetadata
+} from './types'
 
 dotenv.config()
 
@@ -217,6 +230,23 @@ app.get('/api/conversations/:id/messages', asyncRoute(async (req, res) => {
   return res.json({ messages })
 }))
 
+app.get('/api/messages/:id/delivery-status', asyncRoute(async (req, res) => {
+  const userId = String(req.query.userId || '')
+  if (!userId) return res.status(400).json({ error: 'userId required' })
+  const message = await getOwnedMessage(userId, req.params.id)
+  const persisted = Boolean(
+    message
+    && message.senderRole === 'user'
+    && message.senderId === userId
+  )
+  return res.json({
+    persisted,
+    ...(persisted && message
+      ? { userMessageId: message.id, conversationId: message.conversationId }
+      : {})
+  })
+}))
+
 app.post('/api/translations', asyncRoute(async (req, res) => {
   const text = typeof req.body?.text === 'string' ? req.body.text.trim() : ''
   const targetLanguage = typeof req.body?.targetLanguage === 'string'
@@ -353,7 +383,25 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
 
   const normalizedUserId = String(userId)
   const normalizedMessage = String(message)
+  const clientMessageId = typeof req.body?.clientMessageId === 'string'
+    ? req.body.clientMessageId.trim()
+    : ''
+  if (
+    clientMessageId
+    && !/^[A-Za-z0-9][A-Za-z0-9._:-]{7,199}$/.test(clientMessageId)
+  ) {
+    return res.status(400).json({ error: 'clientMessageId is invalid' })
+  }
   const voiceMetadata = voiceMetadataFromPayload(req.body?.voice)
+  let quoteInput: MessageQuoteInput | undefined
+  try {
+    quoteInput = messageQuoteInputFromPayload(req.body?.quote)
+  } catch (error) {
+    if (error instanceof MessageQuoteValidationError) {
+      return res.status(400).json({ error: error.message })
+    }
+    throw error
+  }
   const requestId = newId()
   const trace = createInferenceTrace(requestId)
   trace.mark('request_received', 'started', {
@@ -361,11 +409,39 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
     characterId: String(character.id),
     conversationId: conversationId ? String(conversationId) : null,
     messageLength: normalizedMessage.length,
-    hasVoiceMetadata: Boolean(voiceMetadata)
+    hasVoiceMetadata: Boolean(voiceMetadata),
+    hasQuote: Boolean(quoteInput)
   })
 
   const storedCharacter = await getCharacter(String(character.id))
   if (!storedCharacter) return res.status(400).json({ error: 'character not found' })
+  if (clientMessageId) {
+    const existingClientMessage = await getOwnedMessage(normalizedUserId, clientMessageId)
+    if (existingClientMessage) {
+      const existingConversation = await getConversation(existingClientMessage.conversationId)
+      const matchesOriginalRequest = existingClientMessage.senderRole === 'user'
+        && existingClientMessage.senderId === normalizedUserId
+        && existingClientMessage.content === normalizedMessage
+        && existingConversation?.characterId === storedCharacter.id
+      if (!matchesOriginalRequest) {
+        return res.status(409).json({ error: 'clientMessageId is already in use' })
+      }
+      trace.mark('request_completed', 'completed', {
+        decision: 'already_persisted',
+        userMessageId: existingClientMessage.id
+      })
+      return res.json({
+        reply: null,
+        userMessageId: existingClientMessage.id,
+        conversationId: existingClientMessage.conversationId,
+        behavior: {
+          decision: 'already_persisted',
+          responseStatus: 'already_persisted'
+        },
+        traceId: trace.traceId
+      })
+    }
+  }
   const mode = resolveCharacterMode(storedCharacter)
   trace.mark('character_loaded', 'completed', {
     characterId: storedCharacter.id,
@@ -382,6 +458,23 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
   }
   if (conversation && conversation.characterId !== storedCharacter.id) {
     return res.status(400).json({ error: 'conversation character mismatch' })
+  }
+
+  let quoteSourceMessage: Message | undefined
+  if (quoteInput?.sourceMessageId) {
+    quoteSourceMessage = await getOwnedMessage(normalizedUserId, quoteInput.sourceMessageId)
+    const requestedConversationId = conversationId ? String(conversationId) : undefined
+    if (
+      !quoteSourceMessage
+      || !requestedConversationId
+      || quoteSourceMessage.conversationId !== requestedConversationId
+    ) {
+      return res.status(400).json({ error: 'quoted message was not found in this conversation' })
+    }
+  }
+
+  if (quoteInput && !quoteInput.sourceMessageId && conversation) {
+    return res.status(400).json({ error: 'source-less quote is only valid for a new conversation starter' })
   }
 
   if (!conversation) {
@@ -403,16 +496,63 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
       content: getStarterMessage(storedCharacter),
       createdAt: now
     }
-    conversation = await getOrCreateConversationWithStarter(nextConversation, starterMessage)
+    if (quoteInput && !quoteInput.sourceMessageId) {
+      try {
+        assertSourceLessStarterQuote(quoteInput, starterMessage)
+      } catch (error) {
+        if (error instanceof MessageQuoteValidationError) {
+          return res.status(400).json({ error: error.message })
+        }
+        throw error
+      }
+    }
+    const resolution = await getOrCreateConversationWithStarter(nextConversation, starterMessage)
+    conversation = resolution.conversation
+    if (quoteInput && !quoteInput.sourceMessageId) {
+      if (!resolution.created || !resolution.starterMessage) {
+        return res.status(400).json({ error: 'source-less quote is only valid for a new conversation starter' })
+      }
+      quoteSourceMessage = resolution.starterMessage
+    }
     trace.mark('conversation_resolved', 'completed', { conversationId: conversation.id })
   }
 
+  let quote: MessageQuote | undefined
+  if (quoteInput) {
+    if (!quoteSourceMessage) {
+      return res.status(400).json({ error: 'quoted message source could not be resolved' })
+    }
+    try {
+      quote = canonicalizeMessageQuote({
+        input: quoteInput,
+        sourceMessage: quoteSourceMessage,
+        labels: {
+          assistant: storedCharacter.name,
+          user: 'You'
+        }
+      })
+    } catch (error) {
+      if (error instanceof MessageQuoteValidationError) {
+        return res.status(400).json({ error: error.message })
+      }
+      throw error
+    }
+  }
+
+  const userContentJson = voiceMetadata || quote
+    ? {
+        ...(voiceMetadata ? { voice: voiceMetadata } : {}),
+        ...(quote ? { quote } : {})
+      }
+    : undefined
+
   const userMessage: Message = {
-    id: newId(),
+    id: clientMessageId || newId(),
     conversationId: conversation.id,
     senderRole: 'user',
     senderId: normalizedUserId,
     content: normalizedMessage,
+    contentJson: userContentJson,
     createdAt: new Date().toISOString()
   }
 
@@ -422,10 +562,14 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
     conversationId: conversation.id,
     messageId: userMessage.id,
     message: normalizedMessage,
-    contentJson: voiceMetadata ? { voice: voiceMetadata } : undefined,
+    contentJson: userContentJson,
     mode,
     now: new Date(userMessage.createdAt)
   })
+  res.locals.persistedUserMessage = {
+    userMessageId: userMessage.id,
+    conversationId: conversation.id
+  }
   trace.mark('interaction_prepared', 'completed', {
     mode: preparation.mode,
     memoryEnabled: preparation.memoryEnabled,
@@ -443,7 +587,8 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
     mode,
     snapshot: preparation.snapshot,
     memoryEnabled: preparation.memoryEnabled,
-    decision: preparation.decision
+    decision: preparation.decision,
+    quote
   })
   trace.mark('inference_plan_built', 'completed', {
     inferenceId: inference.id,
@@ -546,7 +691,12 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
       console.error('Could not record failed inference', auditError)
     }
     if (error instanceof ModelGatewayError) {
-      return res.status(error.statusCode).json({ error: error.message })
+      return res.status(error.statusCode).json({
+        error: error.message,
+        messagePersisted: true,
+        userMessageId: userMessage.id,
+        conversationId: conversation.id
+      })
     }
     throw error
   }
@@ -668,6 +818,16 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
 
 app.use((error: any, _req: Request, res: Response, _next: NextFunction) => {
   console.error('Request failed', error)
+  const persistedUserMessage = res.locals.persistedUserMessage
+  const persistenceDetails = persistedUserMessage
+    && typeof persistedUserMessage.userMessageId === 'string'
+    && typeof persistedUserMessage.conversationId === 'string'
+    ? {
+        messagePersisted: true,
+        userMessageId: persistedUserMessage.userMessageId,
+        conversationId: persistedUserMessage.conversationId
+      }
+    : {}
   if (
     error?.type === 'entity.parse.failed'
     || (error instanceof SyntaxError && Number((error as any).status) === 400)
@@ -675,12 +835,12 @@ app.use((error: any, _req: Request, res: Response, _next: NextFunction) => {
     return res.status(400).json({ error: 'request body contains invalid JSON' })
   }
   if (error instanceof TranslationServiceError) {
-    return res.status(error.statusCode).json({ error: error.message })
+    return res.status(error.statusCode).json({ error: error.message, ...persistenceDetails })
   }
   if (error?.code === '23505') {
-    return res.status(409).json({ error: 'record already exists' })
+    return res.status(409).json({ error: 'record already exists', ...persistenceDetails })
   }
-  return res.status(500).json({ error: 'database operation failed' })
+  return res.status(500).json({ error: 'database operation failed', ...persistenceDetails })
 })
 
 const port = process.env.PORT ? Number(process.env.PORT) : 3000

@@ -26,6 +26,7 @@ export type ResponseDecisionInput = {
   character: Character
   snapshot: BehaviorSnapshot
   appraisal: AppraisalLike
+  hasQuote?: boolean
   recentMessages?: RecentMessage[]
   now?: Date
 }
@@ -131,6 +132,7 @@ export const decideResponse = (input: ResponseDecisionInput): ResponseDecision =
   const contentRich = meaningfulCharacterCount(message) >= 6
   const previousAssistantQuestion = recentAssistantQuestion(input.recentMessages)
   const conversationalMomentum = recentAssistantWithin(input.recentMessages, now)
+  const hasQuote = input.hasQuote === true
   const highStakes = input.appraisal.urgency || input.appraisal.distress ||
     input.appraisal.bereavement || input.appraisal.directedConflict
   const activity = input.snapshot.simulation.currentActivity
@@ -152,6 +154,7 @@ export const decideResponse = (input: ResponseDecisionInput): ResponseDecision =
   if (contentRich) demandScore += 0.14
   if (previousAssistantQuestion && !minimalAcknowledgement) demandScore += 0.32
   if (conversationalMomentum) demandScore += 0.12
+  if (hasQuote) demandScore += 0.5
   if (reactionOnly) demandScore += 0.04
   if (activity === 'available' || activity === 'personal_time') demandScore += 0.08
   demandScore += (talkativeness - 0.5) * 0.18
@@ -179,6 +182,8 @@ export const decideResponse = (input: ResponseDecisionInput): ResponseDecision =
     reasons.push('direct_question')
   } else if (explicitRequest) {
     reasons.push('explicit_request')
+  } else if (hasQuote) {
+    reasons.push('quoted_context_requires_response')
   } else if (passiveSignal && demandScore < threshold) {
     action = 'no_reply'
     reasons.push('low_response_demand')
@@ -223,6 +228,7 @@ export const decideResponse = (input: ResponseDecisionInput): ResponseDecision =
       lowDemand,
       previousAssistantQuestion,
       conversationalMomentum,
+      hasQuote,
       practiceGuarantee: input.mode === 'practice'
     }
   }
