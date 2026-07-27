@@ -65,7 +65,6 @@ const MESSAGE_SELECTION_HIT_PADDING = 28
 const MESSAGE_ACTION_FADE_OUT_MS = 65
 const MESSAGE_ACTION_FADE_IN_MS = 90
 const MESSAGE_ACTION_REAPPEAR_DELAY_MS = 120
-const MESSAGE_SELECTION_IDLE_DELAY_MS = 360
 const MESSAGE_SELECTION_INITIALIZE_MS = 180
 // The final row margin and list padding together form the visible composer gap.
 const MESSAGE_LIST_BOTTOM_PADDING = LATEST_MESSAGE_COMPOSER_GAP - MESSAGE_ROW_GAP
@@ -952,8 +951,7 @@ export default function ChatScreen() {
     }
     messageActionSessionRef.current = next
     fadeOutMessageActionMenu(current.generation)
-    scheduleMessageActionMenuReturn(current.generation, MESSAGE_SELECTION_IDLE_DELAY_MS)
-  }, [closeMessageActionMenu, fadeOutMessageActionMenu, scheduleMessageActionMenuReturn])
+  }, [closeMessageActionMenu, fadeOutMessageActionMenu])
 
   const handleMessageSelectionTouchEnd = useCallback((
     messageKey: string,
