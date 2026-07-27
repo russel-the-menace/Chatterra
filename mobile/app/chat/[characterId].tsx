@@ -808,6 +808,11 @@ export default function ChatScreen() {
   const messageActionReappearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const messageSelectionBlurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const messageActionPressRef = useRef(false)
+  const nativeSelectionGestureRef = useRef<{
+    generation: number
+    messageKey: string
+    selection: MessageSelectionRange
+  } | null>(null)
   const composerFocusedRef = useRef(false)
   const quoteDraftRevisionRef = useRef(0)
   const sendingRef = useRef(false)
@@ -867,6 +872,7 @@ export default function ChatScreen() {
     }
     if (restoreComposerFocus) composerInputRef.current?.focus()
     messageActionPressRef.current = false
+    nativeSelectionGestureRef.current = null
     messageActionSessionRef.current = null
     setMessageActionSession(null)
     setMessageActionMenuInteractive(true)
@@ -937,6 +943,13 @@ export default function ChatScreen() {
       && current.selection.end === message.text.length
       && start === end
     if (isInitialFocusCollapse) return
+    const nativeGesture = nativeSelectionGestureRef.current
+    if (nativeGesture
+      && nativeGesture.messageKey === messageKey
+      && nativeGesture.generation === generation) {
+      nativeGesture.selection = { start, end }
+      return
+    }
     const currentStart = Math.min(current.selection.start, current.selection.end)
     const currentEnd = Math.max(current.selection.start, current.selection.end)
     const tappedOutsideSelectedText = start === end
@@ -952,6 +965,11 @@ export default function ChatScreen() {
       selectionAdjusting: true,
     }
     messageActionSessionRef.current = next
+    nativeSelectionGestureRef.current = {
+      generation,
+      messageKey,
+      selection: { start, end },
+    }
     fadeOutMessageActionMenu(current.generation)
   }, [closeMessageActionMenu, fadeOutMessageActionMenu])
 
@@ -963,8 +981,16 @@ export default function ChatScreen() {
     if (!session
       || session.messageKey !== messageKey
       || session.generation !== generation) return
-    // UIKit may deliver a touch-end while a selection handle is changing direction.
-    // A later selection event cancels this timer, leaving the native loupe uninterrupted.
+    const nativeGesture = nativeSelectionGestureRef.current
+    const selection = nativeGesture
+      && nativeGesture.messageKey === messageKey
+      && nativeGesture.generation === generation
+      ? nativeGesture.selection
+      : session.selection
+    nativeSelectionGestureRef.current = null
+    const next = { ...session, selection, selectionAdjusting: false }
+    messageActionSessionRef.current = next
+    setMessageActionSession(next)
     scheduleMessageActionMenuReturn(session.generation, MESSAGE_ACTION_REAPPEAR_DELAY_MS)
   }, [scheduleMessageActionMenuReturn])
 
