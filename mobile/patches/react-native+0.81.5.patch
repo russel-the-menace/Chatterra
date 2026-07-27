@@ -1,8 +1,25 @@
 diff --git a/node_modules/react-native/Libraries/Text/TextInput/Multiline/RCTUITextView.mm b/node_modules/react-native/Libraries/Text/TextInput/Multiline/RCTUITextView.mm
-index 6e9c384..4e8c48b 100644
+index 6e9c384..3c00f6d 100644
 --- a/node_modules/react-native/Libraries/Text/TextInput/Multiline/RCTUITextView.mm
 +++ b/node_modules/react-native/Libraries/Text/TextInput/Multiline/RCTUITextView.mm
-@@ -295,6 +295,21 @@ static UIColor *defaultPlaceholderColor(void)
+@@ -33,7 +33,15 @@ static UIColor *defaultPlaceholderColor(void)
+   // Default placeholder color from UITextField.
+   return [UIColor placeholderTextColor];
+ }
+-
++static UIMenu *RCTSuppressedEditMenu(void)
++{
++  // iOS 16 treats a genuinely empty menu as a request for its default suggestions.
++  // A hidden child keeps the menu hierarchy nonempty without rendering an action.
++  UIAction *hiddenAction = [UIAction actionWithHandler:^(__unused UIAction *action) {
++  }];
++  hiddenAction.attributes = UIMenuElementAttributesHidden;
++  return [UIMenu menuWithChildren:@[ hiddenAction ]];
++}
+ - (instancetype)initWithFrame:(CGRect)frame
+ {
+   if (self = [super initWithFrame:frame]) {
+@@ -295,6 +303,21 @@ static UIColor *defaultPlaceholderColor(void)
  
  #pragma mark - Context Menu
  
@@ -12,9 +29,9 @@ index 6e9c384..4e8c48b 100644
 +{
 +  if (_contextMenuHidden) {
 +#if DEBUG
-+    NSLog(@"ChatterraTextMenu: UITextInput edit-menu intercepted");
++    NSLog(@"ChatterraTextMenu: suppressing iOS edit menu");
 +#endif
-+    return [UIMenu menuWithChildren:@[]];
++    return RCTSuppressedEditMenu();
 +  }
 +
 +  return [super editMenuForTextRange:textRange suggestedActions:suggestedActions];
@@ -24,7 +41,7 @@ index 6e9c384..4e8c48b 100644
  - (BOOL)canPerformAction:(SEL)action withSender:(id)sender
  {
    if (_contextMenuHidden) {
-@@ -304,6 +319,15 @@ static UIColor *defaultPlaceholderColor(void)
+@@ -304,6 +327,15 @@ static UIColor *defaultPlaceholderColor(void)
    return [super canPerformAction:action withSender:sender];
  }
  
@@ -40,7 +57,7 @@ index 6e9c384..4e8c48b 100644
  - (void)buildMenuWithBuilder:(id<UIMenuBuilder>)builder
  {
  #if defined(__IPHONE_OS_VERSION_MAX_ALLOWED) && __IPHONE_OS_VERSION_MAX_ALLOWED >= 170000
-@@ -315,6 +339,15 @@ static UIColor *defaultPlaceholderColor(void)
+@@ -315,6 +347,15 @@ static UIColor *defaultPlaceholderColor(void)
  #endif
  
    [super buildMenuWithBuilder:builder];
