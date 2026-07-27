@@ -64,6 +64,8 @@ const MESSAGE_ACTION_EDGE_GAP = 8
 const MESSAGE_SELECTION_HIT_PADDING = 28
 const MESSAGE_ACTION_FADE_OUT_MS = 65
 const MESSAGE_ACTION_FADE_IN_MS = 90
+const MESSAGE_ACTION_REAPPEAR_DELAY_MS = 120
+const MESSAGE_SELECTION_IDLE_DELAY_MS = 360
 const MESSAGE_SELECTION_INITIALIZE_MS = 180
 // The final row margin and list padding together form the visible composer gap.
 const MESSAGE_LIST_BOTTOM_PADDING = LATEST_MESSAGE_COMPOSER_GAP - MESSAGE_ROW_GAP
@@ -109,7 +111,6 @@ type MessageActionSession = {
   selection: MessageSelectionRange
   selectionAdjusting: boolean
   selectionControlled: boolean
-  selectionNativeActive: boolean
   usableBottom: number
 }
 
@@ -403,7 +404,6 @@ function MessageBubbleContent({
   selection,
   selectionAdjusting,
   selectionControlled,
-  selectionNativeActive,
   preserveKeyboard,
   onSelectionBlur,
   onSelectionChange,
@@ -416,7 +416,6 @@ function MessageBubbleContent({
   selection?: MessageSelectionRange
   selectionAdjusting: boolean
   selectionControlled: boolean
-  selectionNativeActive: boolean
   preserveKeyboard: boolean
   onSelectionBlur: () => void
   onSelectionChange: (selection: MessageSelectionRange) => void
@@ -539,7 +538,7 @@ function MessageBubbleContent({
           {message.text}
         </RNAnimated.Text>
       )}
-      {!isLoading && selecting && selectionNativeActive && (
+      {!isLoading && selecting && (
         <Text
           accessibilityElementsHidden
           importantForAccessibility="no-hide-descendants"
@@ -553,24 +552,7 @@ function MessageBubbleContent({
           {message.text}
         </Text>
       )}
-      {!isLoading && selecting && !selectionNativeActive && selection && (
-        <Text
-          accessibilityElementsHidden
-          importantForAccessibility="no-hide-descendants"
-          onTextLayout={handleSelectionTextLayout}
-          style={[styles.messageText, isUser && styles.userMessageText]}
-        >
-          {message.text.slice(0, Math.min(selection.start, selection.end))}
-          <Text style={isUser ? styles.userMessageTextSelected : styles.messageTextSelected}>
-            {message.text.slice(
-              Math.min(selection.start, selection.end),
-              Math.max(selection.start, selection.end)
-            )}
-          </Text>
-          {message.text.slice(Math.max(selection.start, selection.end))}
-        </Text>
-      )}
-      {selecting && selectionNativeActive && (
+      {selecting && (
         <TextInput
           autoFocus
           multiline
@@ -627,7 +609,6 @@ function MessageRow({
   selection,
   selectionAdjusting,
   selectionControlled,
-  selectionNativeActive,
   preserveKeyboard,
   onSelectionBlur,
   onSelectionChange,
@@ -643,7 +624,6 @@ function MessageRow({
   selection?: MessageSelectionRange
   selectionAdjusting: boolean
   selectionControlled: boolean
-  selectionNativeActive: boolean
   preserveKeyboard: boolean
   onSelectionBlur: () => void
   onSelectionChange: (selection: MessageSelectionRange) => void
@@ -725,7 +705,6 @@ function MessageRow({
                 selection={selection}
                 selectionAdjusting={selectionAdjusting}
                 selectionControlled={selectionControlled}
-                selectionNativeActive={selectionNativeActive}
                 preserveKeyboard={preserveKeyboard}
                 onSelectionBlur={onSelectionBlur}
                 onSelectionChange={onSelectionChange}
@@ -945,8 +924,7 @@ export default function ChatScreen() {
     const current = messageActionSessionRef.current
     if (!current
       || current.messageKey !== messageKey
-      || current.generation !== generation
-      || !current.selectionNativeActive) return
+      || current.generation !== generation) return
     const message = messagesRef.current.find(item => (
       (item.renderKey || item.id) === messageKey
     ))
@@ -974,7 +952,8 @@ export default function ChatScreen() {
     }
     messageActionSessionRef.current = next
     fadeOutMessageActionMenu(current.generation)
-  }, [closeMessageActionMenu, fadeOutMessageActionMenu])
+    scheduleMessageActionMenuReturn(current.generation, MESSAGE_SELECTION_IDLE_DELAY_MS)
+  }, [closeMessageActionMenu, fadeOutMessageActionMenu, scheduleMessageActionMenuReturn])
 
   const handleMessageSelectionTouchEnd = useCallback((
     messageKey: string,
@@ -984,15 +963,9 @@ export default function ChatScreen() {
     if (!session
       || session.messageKey !== messageKey
       || session.generation !== generation) return
-    // Remove the native text responder before UIKit can present its post-selection menu.
-    const next = {
-      ...session,
-      selectionAdjusting: false,
-      selectionNativeActive: false,
-    }
-    messageActionSessionRef.current = next
-    setMessageActionSession(next)
-    scheduleMessageActionMenuReturn(session.generation, 0)
+    // UIKit may deliver a touch-end while a selection handle is changing direction.
+    // A later selection event cancels this timer, leaving the native loupe uninterrupted.
+    scheduleMessageActionMenuReturn(session.generation, MESSAGE_ACTION_REAPPEAR_DELAY_MS)
   }, [scheduleMessageActionMenuReturn])
 
   const handleMessageSelectionBlur = useCallback((messageKey: string, generation: number) => {
@@ -1005,7 +978,6 @@ export default function ChatScreen() {
       if (!session
         || session.messageKey !== messageKey
         || session.generation !== generation) return
-      if (!session.selectionNativeActive) return
       if (messageActionPressRef.current) {
         messageSelectionBlurTimerRef.current = setTimeout(closeAfterActionSettles, 50)
         return
@@ -1602,7 +1574,6 @@ export default function ChatScreen() {
         selection: { start: 0, end: message.text.length },
         selectionAdjusting: false,
         selectionControlled: true,
-        selectionNativeActive: true,
         usableBottom,
       }
       messageActionSessionRef.current = session
@@ -2009,7 +1980,6 @@ export default function ChatScreen() {
                     selection={selectionSession?.selection}
                     selectionAdjusting={Boolean(selectionSession?.selectionAdjusting)}
                     selectionControlled={Boolean(selectionSession?.selectionControlled)}
-                    selectionNativeActive={Boolean(selectionSession?.selectionNativeActive)}
                     preserveKeyboard={Boolean(selectionSession?.preserveComposerFocus)}
                     onSelectionBlur={() => {
                       if (selectionSession) {
@@ -2423,12 +2393,6 @@ const styles = StyleSheet.create({
   },
   userMessageText: {
     color: '#FFFFFF',
-  },
-  messageTextSelected: {
-    backgroundColor: 'rgba(22, 163, 74, 0.22)',
-  },
-  userMessageTextSelected: {
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
   },
   messageSelectionInput: {
     ...StyleSheet.absoluteFillObject,
