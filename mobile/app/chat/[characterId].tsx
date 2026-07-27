@@ -62,6 +62,7 @@ const MESSAGE_ACTION_ARROW_SIZE = 8
 const MESSAGE_ACTION_GAP = 4
 const MESSAGE_ACTION_EDGE_GAP = 8
 const MESSAGE_SELECTION_HIT_PADDING = 28
+const MESSAGE_SELECTION_HANDLE_HIT_PADDING = 22
 const MESSAGE_ACTION_FADE_OUT_MS = 65
 const MESSAGE_ACTION_FADE_IN_MS = 90
 const MESSAGE_ACTION_REAPPEAR_DELAY_MS = 120
@@ -134,7 +135,7 @@ const getSelectionDismissTargets = (
     const lineSelectionEnd = clamp(selectionEnd, line.start, line.end)
 
     if (lineSelectionStart > line.start) {
-      const right = toX(lineSelectionStart) - 12
+      const right = toX(lineSelectionStart) - MESSAGE_SELECTION_HANDLE_HIT_PADDING
       if (right > line.left) {
         targets.push({
           height: line.height,
@@ -146,7 +147,7 @@ const getSelectionDismissTargets = (
     }
 
     if (lineSelectionEnd < line.end) {
-      const left = toX(lineSelectionEnd) + 12
+      const left = toX(lineSelectionEnd) + MESSAGE_SELECTION_HANDLE_HIT_PADDING
       const right = line.left + line.width
       if (right > left) {
         targets.push({
