@@ -87,6 +87,7 @@ export type InferenceContextManifest = {
 
 export type InferencePlan = {
   id: string
+  characterId: string
   policyVersion: string
   trigger?: 'user_message' | 'proactive'
   sourceText?: string
@@ -145,6 +146,8 @@ const CONTEXT_SAFETY_MARGIN = 512
 const MESSAGE_CANDIDATE_LIMIT = 120
 const MEMORY_CANDIDATE_LIMIT = 100
 export const MESSAGE_BREAK_TOKEN = '<<<MESSAGE_BREAK>>>'
+const MAYA_ONE_LINE_SENTENCE_CHARACTERS = 36
+const MAYA_TEXTING_EMOJI = /\p{Extended_Pictographic}/u
 
 const stopWords = new Set([
   'a', 'an', 'and', 'are', 'as', 'at', 'be', 'been', 'but', 'by', 'do', 'for',
@@ -346,6 +349,16 @@ const inferMessageCadence = (
   profile: ResponseStyle['profile'],
   targetWords: number
 ): MessageCadence => {
+  if (character.id === 'c3') {
+    const preferredCount: 1 | 2 | 3 = targetWords >= 34 ? 2 : 1
+    return {
+      pattern: preferredCount > 1 ? 'bursty' : 'flexible',
+      preferredCount,
+      maxCount: 3,
+      reasonCodes: ['maya_sentence_bubble_delivery']
+    }
+  }
+
   const burstAffinity = personalityBurstAffinity(character)
   let preferredCount: 1 | 2 | 3 = 1
   let maxCount: 1 | 2 | 3 = 1
@@ -691,9 +704,9 @@ const mayaTextingInstruction = (character: Character) => {
   if (character.id !== 'c3') return ''
   return [
     'Maya texting priority: for ordinary social turns, write like an actual 18-year-old New Yorker sending iMessages to her boyfriend, not polished dialogue or an assistant summary.',
-    'Match the user\'s level of informality when it is natural. Prefer a concrete detail plus a reaction over a complete status report; fragments, lowercase, contractions, and one or two short bubbles are normal.',
-    'Use current everyday U.S. texting language when it genuinely fits the moment: rn, idk, tbh, ngl, lmao, kinda, wanna, asap, or words such as toxic. Do not force slang, explain it, or turn every line into a meme.',
-    'In light, affectionate, amused, awkward, or overwhelmed moments, an emoji can carry tone naturally. Leave it out when it adds nothing, and keep serious conversations direct and sincere.',
+    'For every ordinary social turn, include at least one current U.S. texting marker that genuinely fits: rn, idk, tbh, ngl, lmao, lowkey, kinda, wanna, asap, toxic, or a similarly natural contemporary phrase. In affectionate, amused, awkward, or overwhelmed turns, use both a texting marker and one emoji by default. Vary them; never explain them or turn every line into a meme.',
+    'Most ordinary replies should have exactly one emoji as a tone marker. It belongs in the words she would actually type, not as generic decoration. Keep serious medical, grief, conflict, or vulnerable conversations direct and sincere without forced slang or emoji.',
+    `When an ordinary reply uses multiple sentences, keep a sentence that would fill a bubble by itself in its own bubble. Put ${MESSAGE_BREAK_TOKEN} on its own line before the next sentence. Use no more than three bubbles, and never put a second sentence after a long first sentence in the same bubble.`,
     'For example, an ordinary answer to "what r u doing rn" could be as short as "trying to survive bio rn 😭" or "why are you asking 👀", depending on her situation. Never reuse these examples mechanically.',
     'Avoid stiff updates such as "I am sitting here trying to..." or a formal conclusion followed by a question. Send the thought she would actually type.'
   ].join(' ')
@@ -861,6 +874,7 @@ export const buildInferencePlan = async (input: OrchestrationInput): Promise<Inf
   if (input.decision.action === 'no_reply') {
     return {
       id: uuidv4(),
+      characterId: input.character.id,
       policyVersion: POLICY_VERSION,
       trigger: 'user_message',
       sourceText: input.message,
@@ -878,6 +892,7 @@ export const buildInferencePlan = async (input: OrchestrationInput): Promise<Inf
   if (!input.quote && isReactionOnly(input.message)) {
     return {
       id: uuidv4(),
+      characterId: input.character.id,
       policyVersion: POLICY_VERSION,
       trigger: 'user_message',
       sourceText: input.message,
@@ -1050,6 +1065,7 @@ export const buildInferencePlan = async (input: OrchestrationInput): Promise<Inf
 
   return {
     id: uuidv4(),
+    characterId: input.character.id,
     policyVersion: POLICY_VERSION,
     trigger: 'user_message',
     sourceText: input.message,
@@ -1100,12 +1116,14 @@ export const buildProactiveInferencePlan = async (
     78
   ))
   const maxResponseTokens = Math.round(clamp(targetWords * 2 + 96, 192, 384))
+  const mayaProactive = input.character.id === 'c3'
   const proactiveInstruction = [
     'Proactive initiation turn: the character chose to start a new conversational turn after some quiet time.',
     `Choose one topic yourself. Available domains: ${input.topicDomains.join(', ')}.`,
     'Use current activity, recent conversation, relevant memories, and personality to choose what feels natural now.',
-    'Write one short, ordinary chat bubble, usually one to three sentences. It may share a thought, ask one genuine question, or continue a meaningful thread.',
-    `Do not split this proactive turn and do not output ${MESSAGE_BREAK_TOKEN}.`,
+    mayaProactive
+      ? `Write one to three short, ordinary iMessage bubbles. Use ${MESSAGE_BREAK_TOKEN} on its own line between bubbles; a long sentence stays in its own bubble.`
+      : `Write one short, ordinary chat bubble, usually one to three sentences. It may share a thought, ask one genuine question, or continue a meaningful thread. Do not split this proactive turn and do not output ${MESSAGE_BREAK_TOKEN}.`,
     'Do not mention timers, scheduling, inactivity detection, or that the user ignored you. Do not guilt, pressure, test, threaten, or demand reassurance or exclusivity.',
     'Do not repeat the last unanswered question verbatim. Do not invent consequential events, diagnoses, emergencies, or durable facts.',
     `Current response-length tendency: about ${targetWords} words maximum; shorter is welcome.`
@@ -1130,12 +1148,19 @@ export const buildProactiveInferencePlan = async (
     responseStyle: {
       ...plan.responseStyle,
       targetWords,
-      messageCadence: {
-        pattern: 'single',
-        preferredCount: 1,
-        maxCount: 1,
-        reasonCodes: [...plan.responseStyle.messageCadence.reasonCodes, 'proactive_single_bubble']
-      },
+      messageCadence: mayaProactive
+        ? {
+            pattern: 'flexible',
+            preferredCount: 1,
+            maxCount: 3,
+            reasonCodes: [...plan.responseStyle.messageCadence.reasonCodes, 'maya_proactive_sentence_bubbles']
+          }
+        : {
+            pattern: 'single',
+            preferredCount: 1,
+            maxCount: 1,
+            reasonCodes: [...plan.responseStyle.messageCadence.reasonCodes, 'proactive_single_bubble']
+          },
       turnPriority: 'conversation',
       correctionPolicy: 'none',
       lengthReasonCodes: [...plan.responseStyle.lengthReasonCodes, 'proactive_turn_restraint']
@@ -1171,6 +1196,66 @@ export type InferenceOutputDiagnostics = {
   reply: string | null
 }
 
+const sentenceSegments = (text: string) => (
+  text.match(/[^.!?]+(?:[.!?]+(?=\s|$)|$)/gu)
+    ?.map(segment => segment.trim())
+    .filter(Boolean)
+  || [text.trim()].filter(Boolean)
+)
+
+const splitMayaSentenceBubbles = (segment: string) => {
+  const sentences = sentenceSegments(segment)
+  if (sentences.length <= 1) return sentences
+
+  const bubbles: string[] = []
+  let current = sentences[0]
+  for (const sentence of sentences.slice(1)) {
+    if (
+      Array.from(current).length > MAYA_ONE_LINE_SENTENCE_CHARACTERS
+      || Array.from(sentence).length > MAYA_ONE_LINE_SENTENCE_CHARACTERS
+    ) {
+      bubbles.push(current)
+      current = sentence
+    } else {
+      current = `${current} ${sentence}`
+    }
+  }
+  bubbles.push(current)
+  return bubbles
+}
+
+const boundedDeliverySegments = (segments: string[], maxCount: number) => {
+  if (segments.length <= maxCount) return segments
+  if (maxCount === 1) return [segments.join(' ')]
+  return [
+    ...segments.slice(0, maxCount - 1),
+    segments.slice(maxCount - 1).join(' ')
+  ]
+}
+
+const mayaFallbackEmoji = (text: string) => {
+  const normalized = text.toLowerCase()
+  if (/(?:miss|love|cute|kiss|baby|date)/u.test(normalized)) return String.fromCodePoint(0x1FAF6)
+  if (/(?:study|studying|class|lab|exam|tired|surviv)/u.test(normalized)) return String.fromCodePoint(0x1F62D)
+  if (/(?:lol|lmao|funny|wild|crazy)/u.test(normalized)) return String.fromCodePoint(0x1F480)
+  return String.fromCodePoint(0x1F970)
+}
+
+const addMayaEmojiFallback = (plan: InferencePlan, segments: string[]) => {
+  if (
+    plan.characterId !== 'c3'
+    || plan.responseStyle.turnPriority !== 'conversation'
+    || segments.length === 0
+    || segments.some(segment => MAYA_TEXTING_EMOJI.test(segment))
+  ) {
+    return segments
+  }
+  const lastIndex = segments.length - 1
+  return segments.map((segment, index) => (
+    index === lastIndex ? `${segment} ${mayaFallbackEmoji(segment)}` : segment
+  ))
+}
+
 const parseDeliverySegments = (plan: InferencePlan, output: string) => {
   const maxCount = plan.responseStyle.messageCadence?.maxCount || 1
   const separator = /\s*<{3}\s*MESSAGE_BREAK\s*>{3}\s*/giu
@@ -1179,13 +1264,13 @@ const parseDeliverySegments = (plan: InferencePlan, output: string) => {
     .map(segment => normalizeAssistantSpeech(segment))
     .filter(Boolean)
 
-  if (cleaned.length <= maxCount) return cleaned
-  if (maxCount === 1) return [cleaned.join(' ')]
-
-  return [
-    ...cleaned.slice(0, maxCount - 1),
-    cleaned.slice(maxCount - 1).join(' ')
-  ]
+  const sentenceAware = plan.characterId === 'c3'
+    ? cleaned.flatMap(splitMayaSentenceBubbles)
+    : cleaned
+  return addMayaEmojiFallback(
+    plan,
+    boundedDeliverySegments(sentenceAware, maxCount)
+  )
 }
 
 export const diagnoseInferenceOutput = (

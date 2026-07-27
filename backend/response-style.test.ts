@@ -153,12 +153,12 @@ const maya: Character = {
   personality: 'Affectionate, playful, expressive, clingy, and casual. Her texting voice uses short messages.'
 }
 const mayaStyle = inferResponseStyle(maya, snapshot(), 'how was class today?', 'companion')
-assert.equal(mayaStyle.messageCadence.maxCount, 2)
-assert.equal(mayaStyle.messageCadence.pattern, 'flexible')
+assert.equal(mayaStyle.messageCadence.maxCount, 3)
 assert.equal(modelTarget('companion', 'what r u doing rn', snapshot(), maya).tier, 'primary')
 
 const responseLanguage = resolveResponseLanguagePolicy('English only')
 const plan = {
+  characterId: 'c3',
   route: 'model',
   sourceText: 'what happened?',
   responseLanguage,
@@ -187,8 +187,34 @@ assert.deepEqual(segmented.deliverySegments, [
 ])
 assert.equal(segmented.reply, 'That lab was chaos 😭\nMy partner dropped an entire tray.\nEveryone just froze.')
 
+const longSentenceDelivery = diagnoseInferenceOutput(
+  plan,
+  'This first sentence is definitely long enough to fill a phone bubble all by itself 😭. The next sentence should arrive as a separate message.'
+)
+assert.deepEqual(longSentenceDelivery.deliverySegments, [
+  'This first sentence is definitely long enough to fill a phone bubble all by itself 😭.',
+  'The next sentence should arrive as a separate message.'
+])
+
+const secondLongSentenceDelivery = diagnoseInferenceOutput(
+  plan,
+  'Short opener. This second sentence is definitely long enough to deserve its own phone bubble 😭. The third sentence is separate too.'
+)
+assert.deepEqual(secondLongSentenceDelivery.deliverySegments, [
+  'Short opener.',
+  'This second sentence is definitely long enough to deserve its own phone bubble 😭.',
+  'The third sentence is separate too.'
+])
+
+const mayaEmojiFallback = diagnoseInferenceOutput(
+  plan,
+  'i am barely surviving bio rn'
+)
+assert.match(mayaEmojiFallback.deliverySegments[0], /\p{Extended_Pictographic}/u)
+
 const twoBubblePlan = {
   ...plan,
+  characterId: 'balanced-character',
   responseStyle: {
     ...plan.responseStyle,
     messageCadence: { ...plan.responseStyle.messageCadence, maxCount: 2 }
