@@ -39,7 +39,7 @@ import {
   getUserPreferences,
   listCharacters,
   listConversations,
-  listMessages,
+  listMessagePage,
   listPinnedCharacterIds,
   newId,
   setCharacterPinned,
@@ -226,8 +226,27 @@ app.get('/api/conversations', asyncRoute(async (req, res) => {
 }))
 
 app.get('/api/conversations/:id/messages', asyncRoute(async (req, res) => {
-  const messages = await listMessages(req.params.id)
-  return res.json({ messages })
+  const requestedLimit = req.query.limit === undefined ? 50 : Number(req.query.limit)
+  if (!Number.isSafeInteger(requestedLimit) || requestedLimit < 1) {
+    return res.status(400).json({ error: 'limit must be a positive integer' })
+  }
+
+  const beforeCreatedAt = typeof req.query.beforeCreatedAt === 'string'
+    ? req.query.beforeCreatedAt
+    : undefined
+  const beforeId = typeof req.query.beforeId === 'string' ? req.query.beforeId : undefined
+  if (Boolean(beforeCreatedAt) !== Boolean(beforeId)) {
+    return res.status(400).json({ error: 'beforeCreatedAt and beforeId must be provided together' })
+  }
+  if (beforeCreatedAt && Number.isNaN(Date.parse(beforeCreatedAt))) {
+    return res.status(400).json({ error: 'beforeCreatedAt must be an ISO date' })
+  }
+
+  const page = await listMessagePage(req.params.id, {
+    limit: Math.min(requestedLimit, 100),
+    before: beforeCreatedAt && beforeId ? { createdAt: beforeCreatedAt, id: beforeId } : undefined
+  })
+  return res.json(page)
 }))
 
 app.get('/api/messages/:id/delivery-status', asyncRoute(async (req, res) => {

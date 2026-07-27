@@ -48,7 +48,13 @@ import { api, ApiError } from '@/src/api'
 import { useChat } from '@/src/chat-context'
 import { starterMessageForCharacter } from '@/src/starter-message'
 import { palette } from '@/src/theme'
-import { ChatMessage, ChatResponse, MessageQuote, ServerMessage } from '@/src/types'
+import {
+  ChatMessage,
+  ChatResponse,
+  MessageHistoryCursor,
+  MessageQuote,
+  ServerMessage,
+} from '@/src/types'
 
 const createLocalId = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`
 
@@ -67,6 +73,9 @@ const MESSAGE_ACTION_FADE_OUT_MS = 65
 const MESSAGE_ACTION_FADE_IN_MS = 90
 const MESSAGE_ACTION_REAPPEAR_DELAY_MS = 120
 const MESSAGE_SELECTION_INITIALIZE_MS = 180
+const HISTORY_PAGE_SIZE = 50
+const OLDER_HISTORY_TRIGGER_OFFSET = 80
+const LOCAL_HISTORY_REFRESH_MS = 2 * 60_000
 // The final row margin and list padding together form the visible composer gap.
 const MESSAGE_LIST_BOTTOM_PADDING = LATEST_MESSAGE_COMPOSER_GAP - MESSAGE_ROW_GAP
 const MESSAGE_BUBBLE_LAYOUT = LinearTransition
@@ -317,6 +326,22 @@ const mergeMessageUiState = (current: ChatMessage[], incoming: ChatMessage[]) =>
       translationError: existing.translationError,
     }
   })
+}
+
+const mergeMessagePage = (
+  current: ChatMessage[],
+  incoming: ChatMessage[],
+  position: 'prepend' | 'append'
+) => {
+  const currentById = new Map(current.map(message => [message.id, message]))
+  const hydratedIncoming = mergeMessageUiState(current, incoming)
+  const incomingById = new Map(hydratedIncoming.map(message => [message.id, message]))
+  const preservedCurrent = current.map(message => incomingById.get(message.id) || message)
+  const unseenIncoming = hydratedIncoming.filter(message => !currentById.has(message.id))
+
+  return position === 'prepend'
+    ? [...unseenIncoming, ...preservedCurrent]
+    : [...preservedCurrent, ...unseenIncoming]
 }
 
 const responseMessages = (response: ChatResponse): ChatMessage[] => {
@@ -776,6 +801,7 @@ export default function ChatScreen() {
     pinnedCharacterIds,
     setCharacterPinned,
     getConversationCache,
+    hydrateConversationCache,
     setConversationCache,
     clearConversationCache,
   } = useChat()
@@ -790,6 +816,12 @@ export default function ChatScreen() {
   const [conversationId, setConversationId] = useState<string | null>(
     initialCacheRef.current?.conversationId || null
   )
+  const [hasMoreHistory, setHasMoreHistory] = useState(
+    () => initialCacheRef.current?.hasMoreHistory || false
+  )
+  const [oldestMessageCursor, setOldestMessageCursor] = useState<MessageHistoryCursor | undefined>(
+    () => initialCacheRef.current?.oldestMessageCursor
+  )
   const [activity, setActivity] = useState('Online')
   const [loadingHistory, setLoadingHistory] = useState(!initialCacheRef.current)
   const [sending, setSending] = useState(false)
@@ -803,6 +835,8 @@ export default function ChatScreen() {
   const messagesRef = useRef(messages)
   const messageActionSessionRef = useRef<MessageActionSession | null>(null)
   const historyRequestRef = useRef(0)
+  const historyHydrationRequestRef = useRef(0)
+  const historyPageRequestRef = useRef(0)
   const messageSyncRequestRef = useRef(0)
   const messageActionRequestRef = useRef(0)
   const messageActionMenuOpacity = useRef(new RNAnimated.Value(1)).current
@@ -824,6 +858,11 @@ export default function ChatScreen() {
   const initialScrollRef = useRef(true)
   const initialScrollScheduledRef = useRef(false)
   const initialScrollFrameRef = useRef<number | null>(null)
+  const loadingOlderHistoryRef = useRef(false)
+  const prependHistoryAnchorRef = useRef<{
+    contentHeight: number
+    offsetY: number
+  } | null>(null)
   const scrollMetricsRef = useRef({
     contentHeight: 0,
     offsetY: 0,
@@ -1111,6 +1150,15 @@ export default function ChatScreen() {
     return true
   }, [listRef])
 
+  const resetInitialScroll = useCallback(() => {
+    if (initialScrollFrameRef.current !== null) {
+      cancelAnimationFrame(initialScrollFrameRef.current)
+      initialScrollFrameRef.current = null
+    }
+    initialScrollRef.current = true
+    initialScrollScheduledRef.current = false
+  }, [])
+
   const settleInitialScroll = useCallback(() => {
     if (!initialScrollRef.current || initialScrollScheduledRef.current) return
     if (!scrollToExactLatest()) return
@@ -1282,15 +1330,10 @@ export default function ChatScreen() {
 
       if (requestId !== historyRequestRef.current) return
       if (quiet && hasPendingLocalDelivery()) return
-      if (initialScrollFrameRef.current !== null) {
-        cancelAnimationFrame(initialScrollFrameRef.current)
-        initialScrollFrameRef.current = null
-      }
       if (!quiet) {
         latestScrollActive.value = false
         cancelAnimation(latestScrollProgress)
-        initialScrollRef.current = true
-        initialScrollScheduledRef.current = false
+        resetInitialScroll()
         followLatestRef.current = true
         withinImmersiveRangeRef.current = true
         hideScrollToLatest()
@@ -1298,6 +1341,8 @@ export default function ChatScreen() {
 
       if (!matching) {
         setConversationId(null)
+        setHasMoreHistory(false)
+        setOldestMessageCursor(undefined)
         const starterMessages: ChatMessage[] = [{
           id: `starter-${character.id}`,
           sender: 'assistant',
@@ -1307,14 +1352,22 @@ export default function ChatScreen() {
         setConversationCache(character.id, {
           conversationId: null,
           messages: starterMessages,
+          hasMoreHistory: false,
           cachedAt: Date.now(),
         })
       } else {
-        const serverMessages = await api.listMessages(matching.id)
+        const messagePage = await api.listMessagePage(matching.id, { limit: HISTORY_PAGE_SIZE })
         if (requestId !== historyRequestRef.current) return
         if (quiet && hasPendingLocalDelivery()) return
-        const cachedMessages = getConversationCache(character.id)?.messages || []
-        const mappedMessages = mergeMessageUiState(cachedMessages, mapMessages(serverMessages))
+        const cachedHistory = getConversationCache(character.id)
+        const cachedMessages = cachedHistory?.messages || []
+        const mappedMessages = mergeMessagePage(
+          cachedMessages,
+          mapMessages(messagePage.messages),
+          'append'
+        )
+        const nextHasMoreHistory = cachedHistory?.hasMoreHistory ?? messagePage.hasMore
+        const nextOldestMessageCursor = cachedHistory?.oldestMessageCursor ?? messagePage.nextCursor
         if (quiet) {
           const existingIds = new Set(messagesRef.current.map(message => message.id))
           const hasNewAssistantMessage = mappedMessages.some(message => (
@@ -1323,10 +1376,14 @@ export default function ChatScreen() {
           if (hasNewAssistantMessage) prepareForIncomingMessage()
         }
         setConversationId(matching.id)
+        setHasMoreHistory(nextHasMoreHistory)
+        setOldestMessageCursor(nextOldestMessageCursor)
         setMessages(mappedMessages)
         setConversationCache(character.id, {
           conversationId: matching.id,
           messages: mappedMessages,
+          hasMoreHistory: nextHasMoreHistory,
+          oldestMessageCursor: nextOldestMessageCursor,
           cachedAt: Date.now(),
         })
       }
@@ -1344,24 +1401,70 @@ export default function ChatScreen() {
     latestScrollActive,
     latestScrollProgress,
     prepareForIncomingMessage,
+    resetInitialScroll,
     setConversationCache,
     userId,
   ])
 
   useEffect(() => {
     if (!character || !userId) return
-    void loadConversation(Boolean(getConversationCache(character.id)))
-    void refreshState()
-  }, [character, getConversationCache, loadConversation, refreshState, userId])
+    let cancelled = false
+    const requestId = historyHydrationRequestRef.current + 1
+    historyHydrationRequestRef.current = requestId
+
+    void (async () => {
+      resetInitialScroll()
+      const cachedHistory = getConversationCache(character.id)
+        || await hydrateConversationCache(character.id)
+      if (cancelled || requestId !== historyHydrationRequestRef.current) return
+
+      if (!cachedHistory) {
+        void loadConversation(false)
+      } else {
+        messagesRef.current = cachedHistory.messages
+        setMessages(cachedHistory.messages)
+        setConversationId(cachedHistory.conversationId)
+        setHasMoreHistory(Boolean(cachedHistory.hasMoreHistory))
+        setOldestMessageCursor(cachedHistory.oldestMessageCursor)
+        setLoadingHistory(false)
+        if (Date.now() - cachedHistory.cachedAt > LOCAL_HISTORY_REFRESH_MS) {
+          void loadConversation(true)
+        }
+      }
+      void refreshState()
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    character,
+    getConversationCache,
+    hydrateConversationCache,
+    loadConversation,
+    refreshState,
+    resetInitialScroll,
+    userId,
+  ])
 
   useEffect(() => {
     if (!characterId || loadingHistory || messages.some(message => message.loading)) return
     setConversationCache(characterId, {
       conversationId,
       messages,
+      hasMoreHistory,
+      oldestMessageCursor,
       cachedAt: Date.now(),
     })
-  }, [characterId, conversationId, loadingHistory, messages, setConversationCache])
+  }, [
+    characterId,
+    conversationId,
+    hasMoreHistory,
+    loadingHistory,
+    messages,
+    oldestMessageCursor,
+    setConversationCache,
+  ])
 
   useEffect(() => {
     if (!loadingHistory && messages.length > 0) settleInitialScroll()
@@ -1373,11 +1476,11 @@ export default function ChatScreen() {
     messageSyncRequestRef.current = syncRequestId
     const requestVersion = historyRequestRef.current
     try {
-      const serverMessages = await api.listMessages(conversationId)
+      const messagePage = await api.listMessagePage(conversationId, { limit: HISTORY_PAGE_SIZE })
       if (syncRequestId !== messageSyncRequestRef.current
         || requestVersion !== historyRequestRef.current
         || sendingRef.current) return
-      const mapped = mapMessages(serverMessages)
+      const mapped = mapMessages(messagePage.messages)
       const currentMessages = messagesRef.current
       if (currentMessages.some(message => message.loading)
         || stagedDeliveryTimersRef.current.size > 0) {
@@ -1397,7 +1500,7 @@ export default function ChatScreen() {
         }
         const existingIds = new Set(current.map(message => message.id))
         let animationIndex = 0
-        const next = mergeMessageUiState(current, mapped).map(message => {
+        const next = mergeMessagePage(current, mapped, 'append').map(message => {
           if (message.sender !== 'assistant' || existingIds.has(message.id)) return message
           const animatedMessage = {
             ...message,
@@ -1419,6 +1522,45 @@ export default function ChatScreen() {
     const interval = setInterval(() => void syncMessages(), 15_000)
     return () => clearInterval(interval)
   }, [conversationId, syncMessages])
+
+  const loadOlderHistory = useCallback(async () => {
+    if (!conversationId
+      || !hasMoreHistory
+      || !oldestMessageCursor
+      || loadingOlderHistoryRef.current) return
+
+    loadingOlderHistoryRef.current = true
+    const pageRequestId = historyPageRequestRef.current + 1
+    historyPageRequestRef.current = pageRequestId
+    const historyRequestId = historyRequestRef.current
+    const anchor = { ...scrollMetricsRef.current }
+
+    try {
+      const messagePage = await api.listMessagePage(conversationId, {
+        limit: HISTORY_PAGE_SIZE,
+        before: oldestMessageCursor,
+      })
+      if (pageRequestId !== historyPageRequestRef.current
+        || historyRequestId !== historyRequestRef.current) return
+
+      const olderMessages = mapMessages(messagePage.messages)
+      if (olderMessages.length > 0) {
+        prependHistoryAnchorRef.current = {
+          contentHeight: anchor.contentHeight,
+          offsetY: anchor.offsetY,
+        }
+        setMessages(current => mergeMessagePage(current, olderMessages, 'prepend'))
+      }
+      setHasMoreHistory(messagePage.hasMore)
+      setOldestMessageCursor(messagePage.nextCursor)
+    } catch {
+      // Keep the current page and let the next top-edge gesture retry the request.
+    } finally {
+      if (pageRequestId === historyPageRequestRef.current) {
+        loadingOlderHistoryRef.current = false
+      }
+    }
+  }, [conversationId, hasMoreHistory, oldestMessageCursor])
 
   const proactiveVersion = characterId ? conversationVersions[characterId] || 0 : 0
   const syncedConversationId = characterId ? conversationIdsByCharacter[characterId] || null : null
@@ -1443,19 +1585,21 @@ export default function ChatScreen() {
     if (!userId || !character) return
     try {
       await api.clearHistory(userId, character.id)
+      historyRequestRef.current += 1
+      historyPageRequestRef.current += 1
+      messageSyncRequestRef.current += 1
+      loadingOlderHistoryRef.current = false
+      prependHistoryAnchorRef.current = null
       clearConversationCache(character.id)
       setConversationId(null)
+      setHasMoreHistory(false)
+      setOldestMessageCursor(undefined)
       setMessages([{
         id: `starter-${character.id}-${Date.now()}`,
         sender: 'assistant',
         text: starterMessageForCharacter(character),
       }])
-      if (initialScrollFrameRef.current !== null) {
-        cancelAnimationFrame(initialScrollFrameRef.current)
-        initialScrollFrameRef.current = null
-      }
-      initialScrollRef.current = true
-      initialScrollScheduledRef.current = false
+      resetInitialScroll()
       latestScrollActive.value = false
       cancelAnimation(latestScrollProgress)
       hideScrollToLatest()
@@ -1880,6 +2024,9 @@ export default function ChatScreen() {
     withinImmersiveRangeRef.current = withinImmersiveRange
     if (manualScrollRef.current) followLatestRef.current = withinImmersiveRange
     if (withinImmersiveRange) hideScrollToLatest()
+    if (manualScrollRef.current && contentOffset.y <= OLDER_HISTORY_TRIGGER_OFFSET) {
+      void loadOlderHistory()
+    }
   }
 
   const handleListLayout = (event: LayoutChangeEvent) => {
@@ -1893,6 +2040,14 @@ export default function ChatScreen() {
   const handleContentSizeChange = (_width: number, height: number) => {
     scrollMetricsRef.current.contentHeight = height
     scrollContentHeight.value = height
+    const prependAnchor = prependHistoryAnchorRef.current
+    if (prependAnchor && height > prependAnchor.contentHeight) {
+      const offset = Math.max(0, prependAnchor.offsetY + height - prependAnchor.contentHeight)
+      listRef.current?.scrollToOffset({ offset, animated: false })
+      scrollMetricsRef.current.offsetY = offset
+      prependHistoryAnchorRef.current = null
+      return
+    }
     if (initialScrollRef.current) {
       settleInitialScroll()
       return

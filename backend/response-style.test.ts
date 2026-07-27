@@ -155,6 +155,7 @@ const maya: Character = {
 const mayaStyle = inferResponseStyle(maya, snapshot(), 'how was class today?', 'companion')
 assert.equal(mayaStyle.messageCadence.maxCount, 2)
 assert.equal(mayaStyle.messageCadence.pattern, 'flexible')
+assert.equal(modelTarget('companion', 'what r u doing rn', snapshot(), maya).tier, 'primary')
 
 const responseLanguage = resolveResponseLanguagePolicy('English only')
 const plan = {

@@ -17,15 +17,21 @@ import { API_BASE_URL, api } from './api'
 import {
   getOrCreateUserId,
   getStoredComposerQuoteDrafts,
+  getStoredConversationCache,
+  removeStoredConversationCache,
   saveStoredComposerQuoteDrafts,
+  saveStoredConversationCache,
 } from './storage'
-import { Character, ChatMessage, ComposerQuoteDraft } from './types'
+import {
+  Character,
+  ChatMessage,
+  ComposerQuoteDraft,
+  ConversationHistoryCache,
+} from './types'
 
-type ConversationCacheEntry = {
-  conversationId: string | null
-  messages: ChatMessage[]
-  cachedAt: number
-}
+type ConversationCacheEntry = ConversationHistoryCache
+
+const MAX_PERSISTED_CONVERSATION_MESSAGES = 1_000
 
 type ChatContextValue = {
   apiBaseUrl: string
@@ -56,6 +62,7 @@ type ChatContextValue = {
   setActiveCharacter: (characterId: string | null) => void
   setCharacterPinned: (characterId: string, pinned: boolean) => Promise<void>
   getConversationCache: (characterId: string) => ConversationCacheEntry | undefined
+  hydrateConversationCache: (characterId: string) => Promise<ConversationCacheEntry | undefined>
   setConversationCache: (characterId: string, entry: ConversationCacheEntry) => void
   clearConversationCache: (characterId: string) => void
 }
@@ -79,6 +86,30 @@ const persistQuoteDrafts = async (drafts: Record<string, ComposerQuoteDraft>) =>
   throw lastError
 }
 
+const cursorForMessage = (message: ChatMessage) => (
+  message.createdAt
+    ? {
+        createdAt: message.createdAt,
+        id: message.sourceMessageId || message.id,
+      }
+    : undefined
+)
+
+const persistentConversationEntry = (entry: ConversationCacheEntry): ConversationCacheEntry => {
+  const messages = entry.messages.slice(-MAX_PERSISTED_CONVERSATION_MESSAGES)
+  const trimmed = messages.length < entry.messages.length
+  const oldestMessageCursor = trimmed
+    ? cursorForMessage(messages[0]) || entry.oldestMessageCursor
+    : entry.oldestMessageCursor
+
+  return {
+    ...entry,
+    messages,
+    hasMoreHistory: entry.hasMoreHistory || trimmed,
+    oldestMessageCursor,
+  }
+}
+
 export function ChatProvider({ children }: PropsWithChildren) {
   const [ready, setReady] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
@@ -93,6 +124,9 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const [pinnedCharacterIds, setPinnedCharacterIds] = useState<Set<string>>(() => new Set())
   const activeCharacterRef = useRef<string | null>(null)
   const conversationCacheRef = useRef<Map<string, ConversationCacheEntry>>(new Map())
+  const conversationCacheDirtyRef = useRef<Map<string, ConversationCacheEntry>>(new Map())
+  const conversationCacheTimerRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  const conversationCacheWriteRef = useRef<Map<string, Promise<void>>>(new Map())
   const pollingRef = useRef(false)
   const workspaceSyncingRef = useRef(false)
   const hasWorkspaceSnapshotRef = useRef(false)
@@ -407,9 +441,74 @@ export function ChatProvider({ children }: PropsWithChildren) {
     }
   }, [pinnedCharacterIds, userId])
 
+  const flushConversationCache = useCallback(async (characterId: string) => {
+    const timer = conversationCacheTimerRef.current.get(characterId)
+    if (timer) {
+      clearTimeout(timer)
+      conversationCacheTimerRef.current.delete(characterId)
+    }
+    const cache = conversationCacheDirtyRef.current.get(characterId)
+    if (!cache || !userId) return
+    conversationCacheDirtyRef.current.delete(characterId)
+
+    const previousWrite = conversationCacheWriteRef.current.get(characterId)
+    const write = (previousWrite || Promise.resolve())
+      .catch(() => undefined)
+      .then(() => saveStoredConversationCache(
+        API_BASE_URL,
+        userId,
+        characterId,
+        persistentConversationEntry(cache)
+      ))
+      .catch(error => {
+        console.warn('Could not persist conversation cache.', error)
+      })
+    conversationCacheWriteRef.current.set(characterId, write)
+    await write
+    if (conversationCacheWriteRef.current.get(characterId) === write) {
+      conversationCacheWriteRef.current.delete(characterId)
+    }
+  }, [userId])
+
+  const scheduleConversationCachePersistence = useCallback((
+    characterId: string,
+    cache: ConversationCacheEntry
+  ) => {
+    if (!userId) return
+    conversationCacheDirtyRef.current.set(characterId, cache)
+    if (conversationCacheTimerRef.current.has(characterId)) return
+    const timer = setTimeout(() => {
+      void flushConversationCache(characterId)
+    }, 250)
+    conversationCacheTimerRef.current.set(characterId, timer)
+  }, [flushConversationCache, userId])
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', nextState => {
+      if (nextState === 'active') return
+      conversationCacheDirtyRef.current.forEach((_cache, characterId) => {
+        void flushConversationCache(characterId)
+      })
+    })
+    return () => subscription.remove()
+  }, [flushConversationCache])
+
   const getConversationCache = useCallback((characterId: string) => (
     conversationCacheRef.current.get(characterId)
   ), [])
+
+  const hydrateConversationCache = useCallback(async (characterId: string) => {
+    const inMemory = conversationCacheRef.current.get(characterId)
+    if (inMemory || !userId) return inMemory
+    try {
+      const stored = await getStoredConversationCache(API_BASE_URL, userId, characterId)
+      if (stored) conversationCacheRef.current.set(characterId, stored)
+      return stored
+    } catch (error) {
+      console.warn('Could not read conversation cache.', error)
+      return undefined
+    }
+  }, [userId])
 
   const setConversationCache = useCallback((characterId: string, entry: ConversationCacheEntry) => {
     const stableMessages = entry.messages
@@ -421,12 +520,29 @@ export function ChatProvider({ children }: PropsWithChildren) {
         translationError: _translationError,
         ...message
       }) => message)
-    conversationCacheRef.current.set(characterId, { ...entry, messages: stableMessages })
-  }, [])
+    const stableEntry = { ...entry, messages: stableMessages }
+    conversationCacheRef.current.set(characterId, stableEntry)
+    scheduleConversationCachePersistence(characterId, stableEntry)
+  }, [scheduleConversationCachePersistence])
 
   const clearConversationCache = useCallback((characterId: string) => {
     conversationCacheRef.current.delete(characterId)
-  }, [])
+    conversationCacheDirtyRef.current.delete(characterId)
+    const timer = conversationCacheTimerRef.current.get(characterId)
+    if (timer) {
+      clearTimeout(timer)
+      conversationCacheTimerRef.current.delete(characterId)
+    }
+    if (!userId) return
+    const previousWrite = conversationCacheWriteRef.current.get(characterId)
+    const remove = (previousWrite || Promise.resolve())
+      .catch(() => undefined)
+      .then(() => removeStoredConversationCache(API_BASE_URL, userId, characterId))
+      .catch(error => {
+        console.warn('Could not remove conversation cache.', error)
+      })
+    conversationCacheWriteRef.current.set(characterId, remove)
+  }, [userId])
 
   const value = useMemo<ChatContextValue>(() => ({
     apiBaseUrl: API_BASE_URL,
@@ -449,6 +565,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     setActiveCharacter,
     setCharacterPinned,
     getConversationCache,
+    hydrateConversationCache,
     setConversationCache,
     clearConversationCache,
   }), [
@@ -460,6 +577,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     getDraft,
     getQuoteDraft,
     getConversationCache,
+    hydrateConversationCache,
     markCharacterRead,
     proactivePreviews,
     pinnedCharacterIds,

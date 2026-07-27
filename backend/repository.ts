@@ -401,7 +401,22 @@ export const getConversation = async (id: string): Promise<Conversation | undefi
   return result.rows[0] ? mapConversation(result.rows[0]) : undefined
 }
 
-export const listMessages = async (conversationId: string): Promise<Message[]> => {
+export type MessageHistoryCursor = {
+  createdAt: string
+  id: string
+}
+
+export type MessagePage = {
+  messages: Message[]
+  hasMore: boolean
+  nextCursor?: MessageHistoryCursor
+}
+
+export const listMessagePage = async (
+  conversationId: string,
+  options: { limit: number; before?: MessageHistoryCursor }
+): Promise<MessagePage> => {
+  const limit = Math.max(1, Math.floor(options.limit))
   const result = await query(
     `SELECT
        messages.*,
@@ -413,10 +428,33 @@ export const listMessages = async (conversationId: string): Promise<Message[]> =
        ), '{}'::jsonb) AS english_translations
      FROM messages
      WHERE conversation_id = $1
-     ORDER BY created_at, id`,
-    [conversationId]
+       AND (
+         $2::timestamptz IS NULL
+         OR (messages.created_at, messages.id) < ($2::timestamptz, $3::text)
+       )
+     ORDER BY messages.created_at DESC, messages.id DESC
+     LIMIT $4`,
+    [
+      conversationId,
+      options.before?.createdAt ?? null,
+      options.before?.id ?? null,
+      limit + 1
+    ]
   )
-  return result.rows.map(mapMessage)
+  const hasMore = result.rows.length > limit
+  const messages = result.rows
+    .slice(0, limit)
+    .reverse()
+    .map(mapMessage)
+  const oldestMessage = messages[0]
+
+  return {
+    messages,
+    hasMore,
+    nextCursor: hasMore && oldestMessage
+      ? { createdAt: oldestMessage.createdAt, id: oldestMessage.id }
+      : undefined
+  }
 }
 
 export const getOwnedMessage = async (

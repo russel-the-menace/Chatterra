@@ -687,6 +687,18 @@ const messageDeliveryInstruction = (style: ResponseStyle) => {
   ].join(' ')
 }
 
+const mayaTextingInstruction = (character: Character) => {
+  if (character.id !== 'c3') return ''
+  return [
+    'Maya texting priority: for ordinary social turns, write like an actual 18-year-old New Yorker sending iMessages to her boyfriend, not polished dialogue or an assistant summary.',
+    'Match the user\'s level of informality when it is natural. Prefer a concrete detail plus a reaction over a complete status report; fragments, lowercase, contractions, and one or two short bubbles are normal.',
+    'Use current everyday U.S. texting language when it genuinely fits the moment: rn, idk, tbh, ngl, lmao, kinda, wanna, asap, or words such as toxic. Do not force slang, explain it, or turn every line into a meme.',
+    'In light, affectionate, amused, awkward, or overwhelmed moments, an emoji can carry tone naturally. Leave it out when it adds nothing, and keep serious conversations direct and sincere.',
+    'For example, an ordinary answer to "what r u doing rn" could be as short as "trying to survive bio rn 😭" or "why are you asking 👀", depending on her situation. Never reuse these examples mechanically.',
+    'Avoid stiff updates such as "I am sitting here trying to..." or a formal conclusion followed by a question. Send the thought she would actually type.'
+  ].join(' ')
+}
+
 const assembleSystemPrompt = ({
   character,
   mode,
@@ -775,6 +787,7 @@ const assembleSystemPrompt = ({
     '',
     'Authored character identity:',
     personaPrompt(character),
+    mayaTextingInstruction(character),
     `Language enforcement: ${responseLanguage.instruction}`,
     `Format enforcement: ${DIALOGUE_ONLY_INSTRUCTION}`,
     '',
@@ -786,11 +799,14 @@ const assembleSystemPrompt = ({
 export const modelTarget = (
   mode: InteractionMode,
   message: string,
-  snapshot: BehaviorSnapshot
+  snapshot: BehaviorSnapshot,
+  character?: Character
 ): NonNullable<InferencePlan['model']> => {
   const complexity = clamp(lexicalTerms(message).length / 45, 0, 1)
   const emotionallyImportant = distressSignal(message) > 0 || conflictSignal(message) > 0 || snapshot.relationship.unresolvedTension > 0.3
-  const tier: ModelTier = mode === 'companion' && complexity < 0.3 && !emotionallyImportant
+  const tier: ModelTier = character?.id === 'c3'
+    ? 'primary'
+    : mode === 'companion' && complexity < 0.3 && !emotionallyImportant
     ? 'lightweight'
     : 'primary'
   const mock = process.env.DEEPSEEK_API_MODE === 'mock'
@@ -1015,7 +1031,7 @@ export const buildInferencePlan = async (input: OrchestrationInput): Promise<Inf
       content: messageContentForInference(item.message)
     }))
   ]
-  const model = modelTarget(input.mode, modelRoutingText, input.snapshot)
+  const model = modelTarget(input.mode, modelRoutingText, input.snapshot, input.character)
   const contextManifest: InferenceContextManifest = {
     ...manifestBase(input.snapshot, tokenBudget, input.memoryEnabled, responseLanguage),
     estimatedTokens: totalTokens(),

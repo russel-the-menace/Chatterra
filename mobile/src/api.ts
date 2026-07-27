@@ -5,9 +5,10 @@ import {
   ChatResponse,
   Conversation,
   MessageQuote,
+  MessageHistoryCursor,
+  MessagePage,
   ProactiveDelivery,
   PublicCharacterState,
-  ServerMessage,
   MessageTranslationResponse,
   SyncSnapshot,
 } from './types'
@@ -109,11 +110,18 @@ export const api = {
     return result.conversations
   },
 
-  async listMessages(conversationId: string) {
-    const result = await request<{ messages: ServerMessage[] }>(
-      `/api/conversations/${encodeURIComponent(conversationId)}/messages`
+  async listMessagePage(
+    conversationId: string,
+    options: { limit?: number; before?: MessageHistoryCursor } = {}
+  ) {
+    const parameters = new URLSearchParams({ limit: String(options.limit ?? 50) })
+    if (options.before) {
+      parameters.set('beforeCreatedAt', options.before.createdAt)
+      parameters.set('beforeId', options.before.id)
+    }
+    return request<MessagePage>(
+      `/api/conversations/${encodeURIComponent(conversationId)}/messages?${parameters.toString()}`
     )
-    return result.messages
   },
 
   async getMessageDeliveryStatus(userId: string, messageId: string) {

@@ -46,6 +46,17 @@ export type ServerMessage = {
   createdAt: string
 }
 
+export type MessageHistoryCursor = {
+  createdAt: string
+  id: string
+}
+
+export type MessagePage = {
+  messages: ServerMessage[]
+  hasMore: boolean
+  nextCursor?: MessageHistoryCursor
+}
+
 export type MessageQuote = {
   sourceMessageId?: string
   segmentIndex: number
@@ -79,6 +90,14 @@ export type ChatMessage = {
   animateEntry?: boolean
   animationDelayMs?: number
   createdAt?: string
+}
+
+export type ConversationHistoryCache = {
+  conversationId: string | null
+  messages: ChatMessage[]
+  hasMoreHistory?: boolean
+  oldestMessageCursor?: MessageHistoryCursor
+  cachedAt: number
 }
 
 export type PublicCharacterState = {
