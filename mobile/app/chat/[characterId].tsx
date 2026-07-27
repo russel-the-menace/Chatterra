@@ -555,7 +555,9 @@ function MessageBubbleContent({
         <TextInput
           autoFocus
           multiline
-          editable
+          // Read-only UITextView keeps UIKit in its text-selection interaction path.
+          // The default `selectable` value remains true, so handles and the loupe still work.
+          editable={Platform.OS !== 'ios'}
           showSoftInputOnFocus={preserveKeyboard}
           selectTextOnFocus
           scrollEnabled={false}
