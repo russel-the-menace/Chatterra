@@ -187,7 +187,7 @@ export const api = {
     return request<ChatResponse>('/api/chat', {
       method: 'POST',
       body: JSON.stringify(input),
-    })
+    }, 60_000)
   },
 
   async clearHistory(userId: string, characterId: string) {

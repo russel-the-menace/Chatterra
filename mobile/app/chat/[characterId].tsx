@@ -60,6 +60,7 @@ const createLocalId = () => `${Date.now()}-${Math.random().toString(36).slice(2)
 
 const LATEST_SCROLL_DURATION_MS = 280
 const MESSAGE_REVEAL_DURATION_MS = 220
+const OUTGOING_DELIVERY_INDICATOR_DELAY_MS = 550
 const MESSAGE_ROW_GAP = 14
 const LATEST_MESSAGE_COMPOSER_GAP = 15
 const MESSAGE_ACTION_MENU_MAX_WIDTH = 240
@@ -422,6 +423,54 @@ function TypingIndicator() {
   )
 }
 
+function MessageDeliveryIndicator({
+  state,
+  onRetry,
+}: {
+  state?: ChatMessage['deliveryState']
+  onRetry: () => void
+}) {
+  const [showSending, setShowSending] = useState(false)
+
+  useEffect(() => {
+    if (state !== 'sending') {
+      setShowSending(false)
+      return
+    }
+    const timer = setTimeout(() => setShowSending(true), OUTGOING_DELIVERY_INDICATOR_DELAY_MS)
+    return () => clearTimeout(timer)
+  }, [state])
+
+  if (state === 'failed') {
+    return (
+      <Pressable
+        onPress={onRetry}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel="Retry sending message"
+        style={({ pressed }) => [
+          styles.messageDeliveryIndicator,
+          styles.messageDeliveryFailed,
+          pressed && styles.messageDeliveryFailedPressed,
+        ]}
+      >
+        <Ionicons name="alert" size={14} color="#FFFFFF" />
+      </Pressable>
+    )
+  }
+
+  if (!showSending) return null
+
+  return (
+    <View
+      accessibilityLabel="Sending message"
+      style={styles.messageDeliveryIndicator}
+    >
+      <ActivityIndicator size="small" color="#98A2B3" />
+    </View>
+  )
+}
+
 function MessageBubbleContent({
   message,
   isUser,
@@ -641,6 +690,7 @@ function MessageRow({
   onSelectionChange,
   onSelectionOutsideTap,
   onSelectionTouchEnd,
+  onRetryMessage,
 }: {
   message: ChatMessage
   characterName: string
@@ -656,6 +706,7 @@ function MessageRow({
   onSelectionChange: (selection: MessageSelectionRange) => void
   onSelectionOutsideTap: () => void
   onSelectionTouchEnd: () => void
+  onRetryMessage: (message: ChatMessage) => void
 }) {
   const isUser = message.sender === 'user'
   const isContinuation = !isUser && (message.groupIndex || 0) > 0
@@ -708,6 +759,12 @@ function MessageRow({
             <Pressable onPress={onEditCharacter} hitSlop={5}>
               <Text style={styles.messageAuthor}>{characterName}</Text>
             </Pressable>
+          )}
+          {isUser && (
+            <MessageDeliveryIndicator
+              state={message.deliveryState}
+              onRetry={() => onRetryMessage(message)}
+            />
           )}
           <View
             ref={bubbleRef}
@@ -835,6 +892,7 @@ export default function ChatScreen() {
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showScrollToLatest, setShowScrollToLatest] = useState(false)
+  const [unseenLatestCount, setUnseenLatestCount] = useState(0)
   const [messageActionSession, setMessageActionSession] = useState<MessageActionSession | null>(null)
   const [messageActionMenuInteractive, setMessageActionMenuInteractive] = useState(true)
   const listRef = useAnimatedRef<FlatList<ChatMessage>>()
@@ -1092,15 +1150,15 @@ export default function ChatScreen() {
   )
 
   const hideScrollToLatest = useCallback(() => {
-    if (!unseenLatestRef.current) return
     unseenLatestRef.current = false
     setShowScrollToLatest(false)
+    setUnseenLatestCount(0)
   }, [])
 
-  const showLatestMessageButton = useCallback(() => {
-    if (unseenLatestRef.current) return
+  const showLatestMessageButton = useCallback((count = 1) => {
     unseenLatestRef.current = true
     setShowScrollToLatest(true)
+    setUnseenLatestCount(current => current + count)
   }, [])
 
   const startLatestScroll = useCallback((pinToLatest = false) => {
@@ -1124,13 +1182,13 @@ export default function ChatScreen() {
     latestScrollStartOffset,
   ])
 
-  const prepareForIncomingMessage = useCallback(() => {
+  const prepareForIncomingMessage = useCallback((count = 1) => {
     closeMessageActionMenu()
     if (withinImmersiveRangeRef.current || followLatestRef.current) {
       startLatestScroll(withinImmersiveRangeRef.current)
       return
     }
-    showLatestMessageButton()
+    showLatestMessageButton(count)
   }, [closeMessageActionMenu, showLatestMessageButton, startLatestScroll])
 
   const handleComposerFocus = useCallback(() => {
@@ -1300,6 +1358,7 @@ export default function ChatScreen() {
     quoteDraftRevisionRef.current += 1
     unseenLatestRef.current = false
     setShowScrollToLatest(false)
+    setUnseenLatestCount(0)
     closeMessageActionMenu()
     setActiveCharacter(characterId)
     return () => setActiveCharacter(null)
@@ -1378,10 +1437,12 @@ export default function ChatScreen() {
         const nextOldestMessageCursor = cachedHistory?.oldestMessageCursor ?? messagePage.nextCursor
         if (quiet) {
           const existingIds = new Set(messagesRef.current.map(message => message.id))
-          const hasNewAssistantMessage = mappedMessages.some(message => (
+          const newAssistantMessageCount = mappedMessages.filter(message => (
             message.sender === 'assistant' && !existingIds.has(message.id)
-          ))
-          if (hasNewAssistantMessage) prepareForIncomingMessage()
+          )).length
+          if (newAssistantMessageCount > 0) {
+            prepareForIncomingMessage(newAssistantMessageCount)
+          }
         }
         setConversationId(matching.id)
         setHasMoreHistory(nextHasMoreHistory)
@@ -1501,8 +1562,11 @@ export default function ChatScreen() {
         return
       }
       const knownIds = new Set(currentMessages.map(message => message.id))
-      if (mapped.some(message => message.sender === 'assistant' && !knownIds.has(message.id))) {
-        prepareForIncomingMessage()
+      const newAssistantMessageCount = mapped.filter(message => (
+        message.sender === 'assistant' && !knownIds.has(message.id)
+      )).length
+      if (newAssistantMessageCount > 0) {
+        prepareForIncomingMessage(newAssistantMessageCount)
       }
       setMessages(current => {
         if (syncRequestId !== messageSyncRequestRef.current
@@ -1811,20 +1875,20 @@ export default function ChatScreen() {
     requestAnimationFrame(() => startLatestScroll(withinImmersiveRangeRef.current))
   }
 
-  const sendMessage = async () => {
-    const composerText = draft.trim()
+  const sendMessage = async (messageToRetry?: ChatMessage) => {
+    const composerText = messageToRetry ? messageToRetry.text.trim() : draft.trim()
     if (!composerText || !character || !userId || sendingRef.current) return
 
     sendingRef.current = true
     setSending(true)
     setError(null)
-    let quoteDraftForSend = quotedMessage
+    let quoteDraftForSend = messageToRetry ? null : quotedMessage
     let textForSend = composerText
-    let userMessageId = createLocalId()
+    let userMessageId = messageToRetry?.sourceMessageId || messageToRetry?.id || createLocalId()
     let conversationIdForSend = conversationId || undefined
     let retryingPendingDelivery = false
     const pendingDeliveryMessageId = quoteDraftForSend?.pendingDeliveryMessageId
-    if (pendingDeliveryMessageId && quoteDraftForSend) {
+    if (!messageToRetry && pendingDeliveryMessageId && quoteDraftForSend) {
       const pendingQuoteDraft = quoteDraftForSend
       try {
         const status = await api.getMessageDeliveryStatus(userId, pendingDeliveryMessageId)
@@ -1892,7 +1956,7 @@ export default function ChatScreen() {
 
     historyRequestRef.current += 1
     const text = textForSend
-    const quote: MessageQuote | undefined = quoteDraftForSend
+    const quote: MessageQuote | undefined = messageToRetry?.quote || (quoteDraftForSend
       ? {
           sourceMessageId: quoteDraftForSend.sourceMessageId,
           segmentIndex: quoteDraftForSend.segmentIndex,
@@ -1900,14 +1964,23 @@ export default function ChatScreen() {
           senderName: quoteDraftForSend.senderName,
           text: quoteDraftForSend.text,
         }
-      : undefined
-    const userMessage: ChatMessage = {
-      id: userMessageId,
-      renderKey: userMessageId,
-      sender: 'user',
-      text,
-      quote,
-    }
+      : undefined)
+    const userMessage: ChatMessage = messageToRetry
+      ? {
+          ...messageToRetry,
+          id: userMessageId,
+          renderKey: messageToRetry.renderKey || userMessageId,
+          deliveryState: 'sending',
+          quote,
+        }
+      : {
+          id: userMessageId,
+          renderKey: userMessageId,
+          sender: 'user',
+          text,
+          quote,
+          deliveryState: 'sending',
+        }
     const loadingId = createLocalId()
     const loadingMessage: ChatMessage = {
       id: loadingId,
@@ -1917,22 +1990,31 @@ export default function ChatScreen() {
     }
 
     startLatestScroll(withinImmersiveRangeRef.current)
-    setDraft(character.id, current => (
-      !retryingPendingDelivery || current.trim() === text ? '' : current
-    ))
-    const quoteClearRevision = quoteDraftForSend
+    const quoteClearRevision = !messageToRetry && quoteDraftForSend
       ? quoteDraftRevisionRef.current + 1
       : undefined
-    if (quoteClearRevision !== undefined) {
-      quoteDraftRevisionRef.current = quoteClearRevision
+    if (!messageToRetry) {
+      setDraft(character.id, current => (
+        !retryingPendingDelivery || current.trim() === text ? '' : current
+      ))
+      if (quoteClearRevision !== undefined) {
+        quoteDraftRevisionRef.current = quoteClearRevision
+      }
+      setQuoteDraft(character.id, null)
     }
-    setQuoteDraft(character.id, null)
     closeMessageActionMenu()
-    setMessages(current => [
-      ...current,
-      ...(current.some(message => message.id === userMessage.id) ? [] : [userMessage]),
-      loadingMessage,
-    ])
+    setMessages(current => {
+      const hasExistingUserMessage = current.some(message => message.id === userMessage.id)
+      return [
+        ...current.map(message => (
+          message.id === userMessage.id
+            ? { ...message, ...userMessage, deliveryState: 'sending' as const }
+            : message
+        )),
+        ...(hasExistingUserMessage ? [] : [userMessage]),
+        loadingMessage,
+      ]
+    })
     let userMessageConfirmed = false
 
     const confirmUserMessage = (sourceMessageId: string) => {
@@ -1949,6 +2031,7 @@ export default function ChatScreen() {
               id: sourceMessageId,
               sourceMessageId,
               segmentIndex: 0,
+              deliveryState: undefined,
             }
           : message
       )))
@@ -1971,6 +2054,9 @@ export default function ChatScreen() {
 
       if (response.reply === null || response.behavior?.decision === 'no_reply') {
         setMessages(current => current.filter(message => message.id !== loadingId))
+        if (response.behavior?.decision === 'already_persisted') {
+          void syncMessages()
+        }
       } else if (typeof response.reply === 'string') {
         const incomingMessages = responseMessages(response)
         if (incomingMessages.length === 0) throw new Error('The server returned no usable response.')
@@ -2005,20 +2091,14 @@ export default function ChatScreen() {
       if (reconciledUserMessageId) {
         confirmUserMessage(reconciledUserMessageId)
         if (reconciledConversationId) setConversationId(reconciledConversationId)
+        void syncMessages()
       } else if (!userMessageConfirmed) {
-        setDraft(character.id, current => current || text)
-        if (quoteDraftForSend
-          && quoteDraftRevisionRef.current === quoteClearRevision) {
-          quoteDraftRevisionRef.current += 1
-          setQuoteDraft(character.id, current => current || {
-            ...quoteDraftForSend,
-            pendingDeliveryMessageId: userMessageId,
-            pendingDeliveryText: text,
-            pendingDeliveryConversationId: conversationIdForSend,
-          })
-        }
+        setMessages(current => current.map(message => (
+          message.id === userMessage.id
+            ? { ...message, deliveryState: 'failed' }
+            : message
+        )))
       }
-      setError(sendError instanceof Error ? sendError.message : 'The message could not be completed.')
     } finally {
       sendingRef.current = false
       setSending(false)
@@ -2204,6 +2284,7 @@ export default function ChatScreen() {
                         )
                       }
                     }}
+                    onRetryMessage={message => void sendMessage(message)}
                   />
                 )
               }}
@@ -2221,6 +2302,10 @@ export default function ChatScreen() {
                 followLatestRef.current = false
                 latestScrollActive.value = false
                 cancelAnimation(latestScrollProgress)
+              }}
+              onScrollEndDrag={() => {
+                manualScrollRef.current = false
+                followLatestRef.current = withinImmersiveRangeRef.current
               }}
               onTouchEnd={() => {
                 if (!messageActionSessionRef.current && composerFocusedRef.current) {
@@ -2261,7 +2346,10 @@ export default function ChatScreen() {
                     pressed && styles.scrollToLatestButtonPressed,
                   ]}
                 >
-                  <Ionicons name="arrow-down" size={21} color={palette.text} />
+                  <Ionicons name="arrow-down" size={18} color={palette.text} />
+                  <Text style={styles.scrollToLatestLabel}>
+                    {unseenLatestCount > 1 ? `${unseenLatestCount} new messages` : 'New message'}
+                  </Text>
                 </Pressable>
               )}
 
@@ -2552,6 +2640,7 @@ const styles = StyleSheet.create({
   messageContent: {
     maxWidth: '76%',
     alignItems: 'flex-start',
+    position: 'relative',
   },
   messageContentUser: {
     alignItems: 'flex-end',
@@ -2573,6 +2662,25 @@ const styles = StyleSheet.create({
   bubbleAnchorSelecting: {
     zIndex: 4,
     overflow: 'visible',
+  },
+  messageDeliveryIndicator: {
+    position: 'absolute',
+    top: '50%',
+    right: '100%',
+    width: 22,
+    height: 22,
+    marginRight: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    transform: [{ translateY: -11 }],
+  },
+  messageDeliveryFailed: {
+    borderRadius: 11,
+    backgroundColor: palette.danger,
+  },
+  messageDeliveryFailedPressed: {
+    opacity: 0.68,
+    transform: [{ translateY: -11 }, { scale: 0.94 }],
   },
   bubble: {
     minHeight: 38,
@@ -2727,13 +2835,16 @@ const styles = StyleSheet.create({
   scrollToLatestButton: {
     position: 'absolute',
     right: 16,
-    top: -50,
+    top: -46,
     zIndex: 3,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    minWidth: 40,
+    height: 36,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 5,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: '#D5DBE4',
     backgroundColor: '#FFFFFF',
@@ -2746,6 +2857,12 @@ const styles = StyleSheet.create({
   scrollToLatestButtonPressed: {
     backgroundColor: '#F2F4F7',
     transform: [{ scale: 0.96 }],
+  },
+  scrollToLatestLabel: {
+    color: palette.text,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '600',
   },
   composer: {
     minHeight: 60,

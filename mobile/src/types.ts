@@ -79,6 +79,7 @@ export type ChatMessage = {
   segmentIndex?: number
   sender: 'user' | 'assistant'
   text: string
+  deliveryState?: 'sending' | 'failed'
   quote?: MessageQuote
   translation?: string
   translationVisible?: boolean
