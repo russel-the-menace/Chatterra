@@ -15,6 +15,7 @@ import {
   BackHandler,
   Easing,
   FlatList,
+  Keyboard,
   LayoutChangeEvent,
   NativeScrollEvent,
   NativeSyntheticEvent,
@@ -22,6 +23,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  TextLayoutEvent,
   TextInput,
   useWindowDimensions,
   View,
@@ -54,11 +56,17 @@ const LATEST_SCROLL_DURATION_MS = 280
 const MESSAGE_REVEAL_DURATION_MS = 220
 const MESSAGE_ROW_GAP = 14
 const LATEST_MESSAGE_COMPOSER_GAP = 15
-const MESSAGE_ACTION_MENU_MAX_WIDTH = 292
+const MESSAGE_ACTION_MENU_MAX_WIDTH = 240
 const MESSAGE_ACTION_MENU_HEIGHT = 66
 const MESSAGE_ACTION_ARROW_SIZE = 8
 const MESSAGE_ACTION_GAP = 4
 const MESSAGE_ACTION_EDGE_GAP = 8
+const MESSAGE_SELECTION_HIT_PADDING = 28
+const MESSAGE_ACTION_FADE_OUT_MS = 65
+const MESSAGE_ACTION_FADE_IN_MS = 90
+const MESSAGE_ACTION_REAPPEAR_DELAY_MS = 120
+const MESSAGE_SELECTION_IDLE_DELAY_MS = 360
+const MESSAGE_SELECTION_INITIALIZE_MS = 180
 // The final row margin and list padding together form the visible composer gap.
 const MESSAGE_LIST_BOTTOM_PADDING = LATEST_MESSAGE_COMPOSER_GAP - MESSAGE_ROW_GAP
 const MESSAGE_BUBBLE_LAYOUT = LinearTransition
@@ -73,9 +81,87 @@ type MessageAnchor = {
   height: number
 }
 
+type MessageSelectionRange = {
+  start: number
+  end: number
+}
+
+type MessageTextLine = {
+  end: number
+  height: number
+  left: number
+  start: number
+  top: number
+  width: number
+}
+
+type MessageSelectionDismissTarget = {
+  height: number
+  left: number
+  top: number
+  width: number
+}
+
+type MessageActionSession = {
+  anchor: MessageAnchor
+  generation: number
+  messageKey: string
+  openedAt: number
+  preserveComposerFocus: boolean
+  selection: MessageSelectionRange
+  selectionAdjusting: boolean
+  selectionControlled: boolean
+  usableBottom: number
+}
+
 const clamp = (value: number, minimum: number, maximum: number) => (
   Math.max(minimum, Math.min(maximum, value))
 )
+
+const getSelectionDismissTargets = (
+  lines: MessageTextLine[],
+  selection: MessageSelectionRange | undefined
+): MessageSelectionDismissTarget[] => {
+  if (!selection) return []
+  const selectionStart = Math.min(selection.start, selection.end)
+  const selectionEnd = Math.max(selection.start, selection.end)
+  if (selectionStart === selectionEnd) return []
+
+  return lines.flatMap(line => {
+    const textLength = Math.max(1, line.end - line.start)
+    const toX = (offset: number) => line.left + line.width * ((offset - line.start) / textLength)
+    const targets: MessageSelectionDismissTarget[] = []
+    const lineSelectionStart = clamp(selectionStart, line.start, line.end)
+    const lineSelectionEnd = clamp(selectionEnd, line.start, line.end)
+
+    if (lineSelectionStart > line.start) {
+      const right = toX(lineSelectionStart) - 12
+      if (right > line.left) {
+        targets.push({
+          height: line.height,
+          left: line.left,
+          top: line.top,
+          width: right - line.left,
+        })
+      }
+    }
+
+    if (lineSelectionEnd < line.end) {
+      const left = toX(lineSelectionEnd) + 12
+      const right = line.left + line.width
+      if (right > left) {
+        targets.push({
+          height: line.height,
+          left,
+          top: line.top,
+          width: right - left,
+        })
+      }
+    }
+
+    return targets
+  })
+}
 
 const parseMessageQuote = (value: unknown): MessageQuote | undefined => {
   if (!value || typeof value !== 'object') return undefined
@@ -315,27 +401,80 @@ function MessageBubbleContent({
   message,
   isUser,
   selecting,
-  onSelectionEnd,
+  selection,
+  selectionAdjusting,
+  selectionControlled,
+  preserveKeyboard,
+  onSelectionBlur,
+  onSelectionChange,
+  onSelectionOutsideTap,
+  onSelectionTouchEnd,
 }: {
   message: ChatMessage
   isUser: boolean
   selecting: boolean
-  onSelectionEnd: () => void
+  selection?: MessageSelectionRange
+  selectionAdjusting: boolean
+  selectionControlled: boolean
+  preserveKeyboard: boolean
+  onSelectionBlur: () => void
+  onSelectionChange: (selection: MessageSelectionRange) => void
+  onSelectionOutsideTap: () => void
+  onSelectionTouchEnd: () => void
 }) {
   const isLoading = Boolean(message.loading)
   const revealProgress = useRef(new RNAnimated.Value(isLoading ? 0 : 1)).current
   const wasLoadingRef = useRef(isLoading)
   const [showTypingIndicator, setShowTypingIndicator] = useState(isLoading)
-  const [selectionRange, setSelectionRange] = useState({
-    start: 0,
-    end: message.text.length,
-  })
+  const [selectionLines, setSelectionLines] = useState<MessageTextLine[]>([])
 
-  useEffect(() => {
-    if (!selecting) return
-    setSelectionRange({ start: 0, end: message.text.length })
-  }, [message.text, selecting])
+  const handleSelectionTextLayout = useCallback((event: TextLayoutEvent) => {
+    let cursor = 0
+    const nextLines = event.nativeEvent.lines.map(line => {
+      const lineStart = message.text.indexOf(line.text, cursor)
+      const start = lineStart >= 0 ? lineStart : cursor
+      const end = start + line.text.length
+      cursor = end
+      while (message.text[cursor] === '\n') cursor += 1
+      return {
+        end,
+        height: line.height,
+        left: line.x,
+        start,
+        top: line.y,
+        width: line.width,
+      }
+    })
+    setSelectionLines(current => (
+      current.length === nextLines.length
+      && current.every((line, index) => (
+        line.end === nextLines[index].end
+        && line.height === nextLines[index].height
+        && line.left === nextLines[index].left
+        && line.start === nextLines[index].start
+        && line.top === nextLines[index].top
+        && line.width === nextLines[index].width
+      ))
+        ? current
+        : nextLines
+    ))
+  }, [message.text])
 
+  const selectionDismissTargets = useMemo(
+    () => getSelectionDismissTargets(selectionLines, selection),
+    [selection, selectionLines]
+  )
+  const dismissSelectionFromUnselectedText = useCallback((x: number, y: number) => {
+    const target = selectionDismissTargets.find(candidate => (
+      x >= candidate.left
+      && x <= candidate.left + candidate.width
+      && y >= candidate.top
+      && y <= candidate.top + candidate.height
+    ))
+    if (!target) return false
+    onSelectionOutsideTap()
+    return true
+  }, [onSelectionOutsideTap, selectionDismissTargets])
   useEffect(() => {
     if (isLoading) {
       revealProgress.stopAnimation()
@@ -367,8 +506,17 @@ function MessageBubbleContent({
   }, [isLoading, revealProgress])
 
   return (
-    <View style={styles.bubbleContent}>
-      {!isLoading && (
+    <View
+      style={styles.bubbleContent}
+      onStartShouldSetResponderCapture={event => (
+        selecting
+        && dismissSelectionFromUnselectedText(
+          event.nativeEvent.locationX,
+          event.nativeEvent.locationY
+        )
+      )}
+    >
+      {!isLoading && !selecting && (
         <RNAnimated.Text
           style={[
             styles.messageText,
@@ -376,7 +524,7 @@ function MessageBubbleContent({
             {
               opacity: revealProgress.interpolate({
                 inputRange: [0, 0.18, 1],
-                outputRange: selecting ? [0, 0, 0] : [0, 0.2, 1],
+                outputRange: [0, 0.2, 1],
               }),
               transform: [{
                 translateY: revealProgress.interpolate({
@@ -390,24 +538,37 @@ function MessageBubbleContent({
           {message.text}
         </RNAnimated.Text>
       )}
+      {!isLoading && selecting && (
+        <Text
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          onTextLayout={handleSelectionTextLayout}
+          style={[
+            styles.messageText,
+            isUser && styles.userMessageText,
+            styles.messageSelectionMeasurement,
+          ]}
+        >
+          {message.text}
+        </Text>
+      )}
       {selecting && (
         <TextInput
           autoFocus
           multiline
-          editable={Platform.OS === 'android'}
-          showSoftInputOnFocus={false}
+          editable
+          showSoftInputOnFocus={preserveKeyboard}
           selectTextOnFocus
           scrollEnabled={false}
-          contextMenuHidden={false}
+          contextMenuHidden={Platform.OS === 'ios'}
           selectionColor={isUser ? '#14532D' : palette.accent}
-          selection={selectionRange}
+          // UIKit owns the range while a handle is held, which keeps its native loupe alive.
+          selection={selectionControlled && !selectionAdjusting ? selection : undefined}
           value={message.text}
-          onSelectionChange={event => setSelectionRange(event.nativeEvent.selection)}
-          onChangeText={() => setSelectionRange(current => ({
-            start: Math.min(current.start, message.text.length),
-            end: Math.min(current.end, message.text.length),
-          }))}
-          onBlur={onSelectionEnd}
+          onSelectionChange={event => onSelectionChange(event.nativeEvent.selection)}
+          onChangeText={() => undefined}
+          onBlur={onSelectionBlur}
+          onTouchEnd={onSelectionTouchEnd}
           style={[
             styles.messageSelectionInput,
             styles.messageText,
@@ -445,7 +606,14 @@ function MessageRow({
   onEditCharacter,
   onLongPress,
   selecting,
-  onSelectionEnd,
+  selection,
+  selectionAdjusting,
+  selectionControlled,
+  preserveKeyboard,
+  onSelectionBlur,
+  onSelectionChange,
+  onSelectionOutsideTap,
+  onSelectionTouchEnd,
 }: {
   message: ChatMessage
   characterName: string
@@ -453,7 +621,14 @@ function MessageRow({
   onEditCharacter: () => void
   onLongPress: (message: ChatMessage, anchor: MessageAnchor) => void
   selecting: boolean
-  onSelectionEnd: () => void
+  selection?: MessageSelectionRange
+  selectionAdjusting: boolean
+  selectionControlled: boolean
+  preserveKeyboard: boolean
+  onSelectionBlur: () => void
+  onSelectionChange: (selection: MessageSelectionRange) => void
+  onSelectionOutsideTap: () => void
+  onSelectionTouchEnd: () => void
 }) {
   const isUser = message.sender === 'user'
   const isContinuation = !isUser && (message.groupIndex || 0) > 0
@@ -482,7 +657,6 @@ function MessageRow({
     <RNAnimated.View
       style={[
         styles.messageRow,
-        isUser ? styles.messageRowUser : styles.messageRowAssistant,
         hasFollowingSegment && styles.messageRowGrouped,
         {
           opacity: entryProgress,
@@ -492,69 +666,91 @@ function MessageRow({
         },
       ]}
     >
-      {!isUser && !isContinuation && (
-        <Pressable onPress={onEditCharacter} accessibilityLabel={`Edit ${characterName}`}>
-          <Avatar avatar={characterAvatar} name={characterName} size={34} />
-        </Pressable>
-      )}
-      {isContinuation && <View style={styles.avatarSpacer} />}
-      <View style={[styles.messageContent, isUser && styles.messageContentUser]}>
+      <View style={[
+        styles.messagePrimaryRow,
+        isUser ? styles.messagePrimaryRowUser : styles.messagePrimaryRowAssistant,
+      ]}>
         {!isUser && !isContinuation && (
-          <Pressable onPress={onEditCharacter} hitSlop={5}>
-            <Text style={styles.messageAuthor}>{characterName}</Text>
+          <Pressable onPress={onEditCharacter} accessibilityLabel={`Edit ${characterName}`}>
+            <Avatar avatar={characterAvatar} name={characterName} size={34} />
           </Pressable>
         )}
-        <View
-          ref={bubbleRef}
-          collapsable={false}
-          style={[styles.bubbleAnchor, selecting && styles.bubbleAnchorSelecting]}
-        >
-          <AnimatedPressable
-            layout={isUser ? undefined : MESSAGE_BUBBLE_LAYOUT}
-            delayLongPress={280}
-            disabled={message.loading || selecting}
-            onLongPress={handleLongPress}
-            style={[
-              styles.bubble,
-              isUser ? styles.userBubble : styles.assistantBubble,
-              selecting && styles.bubbleSelecting,
-            ]}
+        {isContinuation && <View style={styles.avatarSpacer} />}
+        <View style={[styles.messageContent, isUser && styles.messageContentUser]}>
+          {!isUser && !isContinuation && (
+            <Pressable onPress={onEditCharacter} hitSlop={5}>
+              <Text style={styles.messageAuthor}>{characterName}</Text>
+            </Pressable>
+          )}
+          <View
+            ref={bubbleRef}
+            collapsable={false}
+            style={[styles.bubbleAnchor, selecting && styles.bubbleAnchorSelecting]}
           >
-            <MessageBubbleContent
-              message={message}
-              isUser={isUser}
-              selecting={selecting}
-              onSelectionEnd={onSelectionEnd}
-            />
-          </AnimatedPressable>
+            <AnimatedPressable
+              layout={isUser ? undefined : MESSAGE_BUBBLE_LAYOUT}
+              delayLongPress={280}
+              disabled={message.loading || selecting}
+              onLongPress={handleLongPress}
+              style={[
+                styles.bubble,
+                isUser ? styles.userBubble : styles.assistantBubble,
+                selecting && styles.bubbleSelecting,
+              ]}
+            >
+              <MessageBubbleContent
+                message={message}
+                isUser={isUser}
+                selecting={selecting}
+                selection={selection}
+                selectionAdjusting={selectionAdjusting}
+                selectionControlled={selectionControlled}
+                preserveKeyboard={preserveKeyboard}
+                onSelectionBlur={onSelectionBlur}
+                onSelectionChange={onSelectionChange}
+                onSelectionOutsideTap={onSelectionOutsideTap}
+                onSelectionTouchEnd={onSelectionTouchEnd}
+              />
+            </AnimatedPressable>
+          </View>
         </View>
-        {message.quote && (
-          <View style={[styles.sentQuote, isUser && styles.sentQuoteUser]}>
-            <Text style={styles.sentQuoteText} numberOfLines={2}>
-              <Text style={styles.sentQuoteAuthor}>{message.quote.senderName}: </Text>
-              {message.quote.text}
-            </Text>
-          </View>
-        )}
-        {message.translationVisible && (message.translationLoading || message.translation || message.translationError) && (
-          <View style={styles.translationBox}>
-            {message.translationLoading ? (
-              <View style={styles.translationLoadingRow}>
-                <ActivityIndicator size="small" color={palette.textMuted} />
-                <Text style={styles.translationMeta}>Translating...</Text>
-              </View>
-            ) : (
-              <Text style={[
-                styles.translationText,
-                message.translationError && styles.translationErrorText,
-              ]}>
-                {message.translationError || message.translation}
-              </Text>
-            )}
-          </View>
-        )}
+        {isUser && <Avatar name="Me" avatar="Me" size={34} muted />}
       </View>
-      {isUser && <Avatar name="Me" avatar="Me" size={34} muted />}
+      {(message.quote || (
+        message.translationVisible
+        && (message.translationLoading || message.translation || message.translationError)
+      )) && (
+        <View style={[
+          styles.messageSupplement,
+          isUser ? styles.messageSupplementUser : styles.messageSupplementAssistant,
+        ]}>
+          {message.quote && (
+            <View style={[styles.sentQuote, isUser && styles.sentQuoteUser]}>
+              <Text style={styles.sentQuoteText} numberOfLines={2}>
+                <Text style={styles.sentQuoteAuthor}>{message.quote.senderName}: </Text>
+                {message.quote.text}
+              </Text>
+            </View>
+          )}
+          {message.translationVisible && (message.translationLoading || message.translation || message.translationError) && (
+            <View style={styles.translationBox}>
+              {message.translationLoading ? (
+                <View style={styles.translationLoadingRow}>
+                  <ActivityIndicator size="small" color={palette.textMuted} />
+                  <Text style={styles.translationMeta}>Translating...</Text>
+                </View>
+              ) : (
+                <Text style={[
+                  styles.translationText,
+                  message.translationError && styles.translationErrorText,
+                ]}>
+                  {message.translationError || message.translation}
+                </Text>
+              )}
+            </View>
+          )}
+        </View>
+      )}
     </RNAnimated.View>
   )
 }
@@ -597,19 +793,21 @@ export default function ChatScreen() {
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showScrollToLatest, setShowScrollToLatest] = useState(false)
-  const [selectingMessageKey, setSelectingMessageKey] = useState<string | null>(null)
-  const [messageActionMenu, setMessageActionMenu] = useState<{
-    anchor: MessageAnchor
-    messageKey: string
-    usableBottom: number
-  } | null>(null)
+  const [messageActionSession, setMessageActionSession] = useState<MessageActionSession | null>(null)
+  const [messageActionMenuInteractive, setMessageActionMenuInteractive] = useState(true)
   const listRef = useAnimatedRef<FlatList<ChatMessage>>()
   const composerInputRef = useRef<TextInput>(null)
   const composerRegionRef = useRef<View>(null)
   const messagesRef = useRef(messages)
+  const messageActionSessionRef = useRef<MessageActionSession | null>(null)
   const historyRequestRef = useRef(0)
   const messageSyncRequestRef = useRef(0)
   const messageActionRequestRef = useRef(0)
+  const messageActionMenuOpacity = useRef(new RNAnimated.Value(1)).current
+  const messageActionReappearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const messageSelectionBlurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const messageActionPressRef = useRef(false)
+  const composerFocusedRef = useRef(false)
   const quoteDraftRevisionRef = useRef(0)
   const sendingRef = useRef(false)
   const withinImmersiveRangeRef = useRef(true)
@@ -655,18 +853,148 @@ export default function ChatScreen() {
   const stagedDeliveryTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set())
 
   const closeMessageActionMenu = useCallback(() => {
+    const session = messageActionSessionRef.current
+    const restoreComposerFocus = Boolean(session?.preserveComposerFocus)
     messageActionRequestRef.current += 1
-    setMessageActionMenu(null)
-  }, [])
+    if (messageActionReappearTimerRef.current) {
+      clearTimeout(messageActionReappearTimerRef.current)
+      messageActionReappearTimerRef.current = null
+    }
+    if (messageSelectionBlurTimerRef.current) {
+      clearTimeout(messageSelectionBlurTimerRef.current)
+      messageSelectionBlurTimerRef.current = null
+    }
+    if (restoreComposerFocus) composerInputRef.current?.focus()
+    messageActionPressRef.current = false
+    messageActionSessionRef.current = null
+    setMessageActionSession(null)
+    setMessageActionMenuInteractive(true)
+    messageActionMenuOpacity.stopAnimation()
+    messageActionMenuOpacity.setValue(1)
+    if (restoreComposerFocus) {
+      requestAnimationFrame(() => composerInputRef.current?.focus())
+    }
+  }, [messageActionMenuOpacity])
+
+  const fadeOutMessageActionMenu = useCallback((generation: number) => {
+    if (messageActionSessionRef.current?.generation !== generation) return
+    if (messageActionReappearTimerRef.current) {
+      clearTimeout(messageActionReappearTimerRef.current)
+      messageActionReappearTimerRef.current = null
+    }
+    setMessageActionMenuInteractive(false)
+    messageActionMenuOpacity.stopAnimation()
+    RNAnimated.timing(messageActionMenuOpacity, {
+      toValue: 0,
+      duration: MESSAGE_ACTION_FADE_OUT_MS,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start()
+  }, [messageActionMenuOpacity])
+
+  const scheduleMessageActionMenuReturn = useCallback((generation: number, delay: number) => {
+    if (messageActionReappearTimerRef.current) {
+      clearTimeout(messageActionReappearTimerRef.current)
+    }
+    messageActionReappearTimerRef.current = setTimeout(() => {
+      messageActionReappearTimerRef.current = null
+      const current = messageActionSessionRef.current
+      if (!current || current.generation !== generation) return
+      if (current.selectionAdjusting) {
+        const next = { ...current, selectionAdjusting: false }
+        messageActionSessionRef.current = next
+        setMessageActionSession(next)
+      }
+      setMessageActionMenuInteractive(true)
+      messageActionMenuOpacity.stopAnimation()
+      RNAnimated.timing(messageActionMenuOpacity, {
+        toValue: 1,
+        duration: MESSAGE_ACTION_FADE_IN_MS,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }).start()
+    }, delay)
+  }, [messageActionMenuOpacity])
+
+  const updateMessageSelection = useCallback((
+    messageKey: string,
+    generation: number,
+    selection: MessageSelectionRange
+  ) => {
+    const current = messageActionSessionRef.current
+    if (!current
+      || current.messageKey !== messageKey
+      || current.generation !== generation) return
+    const message = messagesRef.current.find(item => (
+      (item.renderKey || item.id) === messageKey
+    ))
+    if (!message) return
+    const start = clamp(selection.start, 0, message.text.length)
+    const end = clamp(selection.end, 0, message.text.length)
+    const isInitialFocusCollapse = Date.now() - current.openedAt < MESSAGE_SELECTION_INITIALIZE_MS
+      && current.selection.start === 0
+      && current.selection.end === message.text.length
+      && start === end
+    if (isInitialFocusCollapse) return
+    const currentStart = Math.min(current.selection.start, current.selection.end)
+    const currentEnd = Math.max(current.selection.start, current.selection.end)
+    const tappedOutsideSelectedText = start === end
+      && (start < currentStart || start >= currentEnd)
+    if (tappedOutsideSelectedText) {
+      closeMessageActionMenu()
+      return
+    }
+    if (current.selection.start === start && current.selection.end === end) return
+    const next = {
+      ...current,
+      selection: { start, end },
+      selectionAdjusting: true,
+    }
+    messageActionSessionRef.current = next
+    fadeOutMessageActionMenu(current.generation)
+    scheduleMessageActionMenuReturn(current.generation, MESSAGE_SELECTION_IDLE_DELAY_MS)
+  }, [closeMessageActionMenu, fadeOutMessageActionMenu, scheduleMessageActionMenuReturn])
+
+  const handleMessageSelectionTouchEnd = useCallback((
+    messageKey: string,
+    generation: number
+  ) => {
+    const session = messageActionSessionRef.current
+    if (!session
+      || session.messageKey !== messageKey
+      || session.generation !== generation) return
+    // UIKit may deliver a touch-end while a selection handle is changing direction.
+    // A later selection event cancels this timer, leaving the native loupe uninterrupted.
+    scheduleMessageActionMenuReturn(session.generation, MESSAGE_ACTION_REAPPEAR_DELAY_MS)
+  }, [scheduleMessageActionMenuReturn])
+
+  const handleMessageSelectionBlur = useCallback((messageKey: string, generation: number) => {
+    if (messageSelectionBlurTimerRef.current) {
+      clearTimeout(messageSelectionBlurTimerRef.current)
+    }
+    const closeAfterActionSettles = () => {
+      messageSelectionBlurTimerRef.current = null
+      const session = messageActionSessionRef.current
+      if (!session
+        || session.messageKey !== messageKey
+        || session.generation !== generation) return
+      if (messageActionPressRef.current) {
+        messageSelectionBlurTimerRef.current = setTimeout(closeAfterActionSettles, 50)
+        return
+      }
+      closeMessageActionMenu()
+    }
+    messageSelectionBlurTimerRef.current = setTimeout(closeAfterActionSettles, 0)
+  }, [closeMessageActionMenu])
 
   useEffect(() => {
-    if (!messageActionMenu || Platform.OS !== 'android') return
+    if (!messageActionSession || Platform.OS !== 'android') return
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
       closeMessageActionMenu()
       return true
     })
     return () => subscription.remove()
-  }, [closeMessageActionMenu, messageActionMenu])
+  }, [closeMessageActionMenu, messageActionSession])
 
   useAnimatedReaction(
     () => ({
@@ -724,7 +1052,6 @@ export default function ChatScreen() {
 
   const prepareForIncomingMessage = useCallback(() => {
     closeMessageActionMenu()
-    setSelectingMessageKey(null)
     if (withinImmersiveRangeRef.current || followLatestRef.current) {
       startLatestScroll(withinImmersiveRangeRef.current)
       return
@@ -733,6 +1060,7 @@ export default function ChatScreen() {
   }, [closeMessageActionMenu, showLatestMessageButton, startLatestScroll])
 
   const handleComposerFocus = useCallback(() => {
+    composerFocusedRef.current = true
     if (initialScrollFrameRef.current !== null) {
       cancelAnimationFrame(initialScrollFrameRef.current)
       initialScrollFrameRef.current = null
@@ -741,6 +1069,10 @@ export default function ChatScreen() {
     initialScrollScheduledRef.current = false
     startLatestScroll(withinImmersiveRangeRef.current)
   }, [startLatestScroll])
+
+  const handleComposerBlur = useCallback(() => {
+    composerFocusedRef.current = false
+  }, [])
 
   const scrollToExactLatest = useCallback(() => {
     const { contentHeight, viewportHeight } = scrollMetricsRef.current
@@ -844,7 +1176,14 @@ export default function ChatScreen() {
     cancelAnimation(latestScrollProgress)
     stagedDeliveryTimersRef.current.forEach(timer => clearTimeout(timer))
     stagedDeliveryTimersRef.current.clear()
-  }, [latestScrollActive, latestScrollProgress])
+    if (messageActionReappearTimerRef.current) {
+      clearTimeout(messageActionReappearTimerRef.current)
+    }
+    if (messageSelectionBlurTimerRef.current) {
+      clearTimeout(messageSelectionBlurTimerRef.current)
+    }
+    messageActionMenuOpacity.stopAnimation()
+  }, [latestScrollActive, latestScrollProgress, messageActionMenuOpacity])
 
   useEffect(() => {
     messagesRef.current = messages
@@ -878,7 +1217,6 @@ export default function ChatScreen() {
     quoteDraftRevisionRef.current += 1
     unseenLatestRef.current = false
     setShowScrollToLatest(false)
-    setSelectingMessageKey(null)
     closeMessageActionMenu()
     setActiveCharacter(characterId)
     return () => setActiveCharacter(null)
@@ -1096,7 +1434,6 @@ export default function ChatScreen() {
       hideScrollToLatest()
       quoteDraftRevisionRef.current += 1
       setQuoteDraft(character.id, null)
-      setSelectingMessageKey(null)
       closeMessageActionMenu()
       setError(null)
     } catch (clearError) {
@@ -1194,14 +1531,22 @@ export default function ChatScreen() {
   }
 
   const copyMessage = async (message: ChatMessage) => {
+    const session = messageActionSessionRef.current
+    const selection = session?.messageKey === (message.renderKey || message.id)
+      ? session.selection
+      : { start: 0, end: message.text.length }
+    const start = clamp(Math.min(selection.start, selection.end), 0, message.text.length)
+    const end = clamp(Math.max(selection.start, selection.end), 0, message.text.length)
+    const selectedText = message.text.slice(start, end)
     closeMessageActionMenu()
-    await Clipboard.setStringAsync(message.text)
+    if (selectedText) await Clipboard.setStringAsync(selectedText)
   }
 
   const openMessageActionMenu = (message: ChatMessage, anchor: MessageAnchor) => {
     const requestId = messageActionRequestRef.current + 1
     messageActionRequestRef.current = requestId
     const messageKey = message.renderKey || message.id
+    const preserveComposerFocus = composerFocusedRef.current
     const fallbackBottom = window.height - insets.bottom
     const open = (usableBottom: number) => {
       if (requestId !== messageActionRequestRef.current) return
@@ -1209,8 +1554,39 @@ export default function ChatScreen() {
         (item.renderKey || item.id) === messageKey
       ))
       if (!messageStillExists) return
-      setSelectingMessageKey(null)
-      setMessageActionMenu({ anchor, messageKey, usableBottom })
+      if (messageActionReappearTimerRef.current) {
+        clearTimeout(messageActionReappearTimerRef.current)
+        messageActionReappearTimerRef.current = null
+      }
+      if (messageSelectionBlurTimerRef.current) {
+        clearTimeout(messageSelectionBlurTimerRef.current)
+        messageSelectionBlurTimerRef.current = null
+      }
+      messageActionMenuOpacity.stopAnimation()
+      messageActionMenuOpacity.setValue(1)
+      setMessageActionMenuInteractive(true)
+      const session: MessageActionSession = {
+        anchor,
+        generation: requestId,
+        messageKey,
+        openedAt: Date.now(),
+        preserveComposerFocus,
+        selection: { start: 0, end: message.text.length },
+        selectionAdjusting: false,
+        selectionControlled: true,
+        usableBottom,
+      }
+      messageActionSessionRef.current = session
+      setMessageActionSession(session)
+      if (Platform.OS === 'ios') {
+        requestAnimationFrame(() => {
+          const current = messageActionSessionRef.current
+          if (!current || current.generation !== requestId) return
+          const next = { ...current, selectionControlled: false }
+          messageActionSessionRef.current = next
+          setMessageActionSession(next)
+        })
+      }
     }
 
     if (!composerRegionRef.current) {
@@ -1225,7 +1601,6 @@ export default function ChatScreen() {
   const quoteMessage = (message: ChatMessage) => {
     if (!character) return
     closeMessageActionMenu()
-    setSelectingMessageKey(null)
     quoteDraftRevisionRef.current += 1
     setQuoteDraft(character.id, {
       sourceMessageId: message.sourceMessageId,
@@ -1239,12 +1614,6 @@ export default function ChatScreen() {
       composerInputRef.current?.focus()
       startLatestScroll(withinImmersiveRangeRef.current)
     })
-  }
-
-  const selectMessageText = (message: ChatMessage) => {
-    const messageKey = message.renderKey || message.id
-    closeMessageActionMenu()
-    requestAnimationFrame(() => setSelectingMessageKey(messageKey))
   }
 
   const clearQuotedMessage = () => {
@@ -1370,7 +1739,7 @@ export default function ChatScreen() {
       quoteDraftRevisionRef.current = quoteClearRevision
     }
     setQuoteDraft(character.id, null)
-    setSelectingMessageKey(null)
+    closeMessageActionMenu()
     setMessages(current => [
       ...current,
       ...(current.some(message => message.id === userMessage.id) ? [] : [userMessage]),
@@ -1495,7 +1864,6 @@ export default function ChatScreen() {
   }
 
   const handleContentSizeChange = (_width: number, height: number) => {
-    closeMessageActionMenu()
     scrollMetricsRef.current.contentHeight = height
     scrollContentHeight.value = height
     if (initialScrollRef.current) {
@@ -1507,22 +1875,50 @@ export default function ChatScreen() {
     }
   }
 
-  const messageActionMessage = messageActionMenu
+  const messageActionMessage = messageActionSession
     ? messages.find(message => (
-        (message.renderKey || message.id) === messageActionMenu.messageKey
+        (message.renderKey || message.id) === messageActionSession.messageKey
       ))
     : undefined
-  const messageActionLayout = messageActionMenu && messageActionMessage
+  const messageActionLayout = messageActionSession && messageActionMessage
     ? getMessageActionLayout({
-        anchor: messageActionMenu.anchor,
+        anchor: messageActionSession.anchor,
         viewportWidth: window.width,
         viewportHeight: window.height,
         safeLeft: insets.left,
         safeRight: insets.right,
         safeTop: insets.top,
         safeBottom: insets.bottom,
-        usableBottom: messageActionMenu.usableBottom,
+        usableBottom: messageActionSession.usableBottom,
       })
+    : null
+  const messageSelectionHole = messageActionSession
+    ? {
+        top: clamp(
+          messageActionSession.anchor.y - MESSAGE_SELECTION_HIT_PADDING,
+          0,
+          window.height
+        ),
+        right: clamp(
+          messageActionSession.anchor.x
+            + messageActionSession.anchor.width
+            + MESSAGE_SELECTION_HIT_PADDING,
+          0,
+          window.width
+        ),
+        bottom: clamp(
+          messageActionSession.anchor.y
+            + messageActionSession.anchor.height
+            + MESSAGE_SELECTION_HIT_PADDING,
+          0,
+          window.height
+        ),
+        left: clamp(
+          messageActionSession.anchor.x - MESSAGE_SELECTION_HIT_PADDING,
+          0,
+          window.width
+        ),
+      }
     : null
 
   if (!ready || (loadingHistory && messages.length === 0)) {
@@ -1568,32 +1964,68 @@ export default function ChatScreen() {
               ref={listRef}
               data={messages}
               keyExtractor={item => item.renderKey || item.id}
-              renderItem={({ item }) => (
-                <MessageRow
-                  message={item}
-                  characterName={character.name}
-                  characterAvatar={character.avatar}
-                  onEditCharacter={openEditor}
-                  onLongPress={openMessageActionMenu}
-                  selecting={selectingMessageKey === (item.renderKey || item.id)}
-                  onSelectionEnd={() => setSelectingMessageKey(current => (
-                    current === (item.renderKey || item.id) ? null : current
-                  ))}
-                />
-              )}
+              renderItem={({ item }) => {
+                const messageKey = item.renderKey || item.id
+                const selectionSession = messageActionSession?.messageKey === messageKey
+                  ? messageActionSession
+                  : undefined
+                return (
+                  <MessageRow
+                    message={item}
+                    characterName={character.name}
+                    characterAvatar={character.avatar}
+                    onEditCharacter={openEditor}
+                    onLongPress={openMessageActionMenu}
+                    selecting={Boolean(selectionSession)}
+                    selection={selectionSession?.selection}
+                    selectionAdjusting={Boolean(selectionSession?.selectionAdjusting)}
+                    selectionControlled={Boolean(selectionSession?.selectionControlled)}
+                    preserveKeyboard={Boolean(selectionSession?.preserveComposerFocus)}
+                    onSelectionBlur={() => {
+                      if (selectionSession) {
+                        handleMessageSelectionBlur(messageKey, selectionSession.generation)
+                      }
+                    }}
+                    onSelectionChange={selection => {
+                      if (selectionSession) {
+                        updateMessageSelection(
+                          messageKey,
+                          selectionSession.generation,
+                          selection
+                        )
+                      }
+                    }}
+                    onSelectionOutsideTap={closeMessageActionMenu}
+                    onSelectionTouchEnd={() => {
+                      if (selectionSession) {
+                        handleMessageSelectionTouchEnd(
+                          messageKey,
+                          selectionSession.generation
+                        )
+                      }
+                    }}
+                  />
+                )
+              }}
               style={styles.messageList}
               contentContainerStyle={styles.messageListContent}
-              removeClippedSubviews={!selectingMessageKey}
-              keyboardShouldPersistTaps="handled"
+              removeClippedSubviews={!messageActionSession}
+              scrollEnabled={!messageActionSession}
+              keyboardShouldPersistTaps={messageActionSession ? 'always' : 'handled'}
               keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
               onLayout={handleListLayout}
               onScroll={handleScroll}
               onScrollBeginDrag={() => {
-                setSelectingMessageKey(null)
+                closeMessageActionMenu()
                 manualScrollRef.current = true
                 followLatestRef.current = false
                 latestScrollActive.value = false
                 cancelAnimation(latestScrollProgress)
+              }}
+              onTouchEnd={() => {
+                if (!messageActionSessionRef.current && composerFocusedRef.current) {
+                  Keyboard.dismiss()
+                }
               }}
               onMomentumScrollEnd={() => {
                 manualScrollRef.current = false
@@ -1644,6 +2076,7 @@ export default function ChatScreen() {
                     style={styles.composerInput}
                     textAlignVertical="center"
                     onFocus={handleComposerFocus}
+                    onBlur={handleComposerBlur}
                   />
                   <Pressable
                     onPress={() => void sendMessage()}
@@ -1687,18 +2120,58 @@ export default function ChatScreen() {
         </View>
       </View>
 
-      {messageActionMenu && messageActionMessage && messageActionLayout && (
-        <Pressable
-          accessibilityViewIsModal
-          style={styles.messageActionBackdrop}
-          onPress={closeMessageActionMenu}
-        >
-          <View
-            onStartShouldSetResponder={() => true}
+      {messageActionSession && messageActionMessage && messageActionLayout && messageSelectionHole && (
+        <View pointerEvents="box-none" style={styles.messageActionOverlay}>
+          <Pressable
+            accessible={false}
+            onPress={closeMessageActionMenu}
+            style={[
+              styles.messageActionDismissRegion,
+              { top: 0, left: 0, right: 0, height: messageSelectionHole.top },
+            ]}
+          />
+          <Pressable
+            accessible={false}
+            onPress={closeMessageActionMenu}
+            style={[
+              styles.messageActionDismissRegion,
+              { top: messageSelectionHole.bottom, left: 0, right: 0, bottom: 0 },
+            ]}
+          />
+          <Pressable
+            accessible={false}
+            onPress={closeMessageActionMenu}
+            style={[
+              styles.messageActionDismissRegion,
+              {
+                top: messageSelectionHole.top,
+                left: 0,
+                width: messageSelectionHole.left,
+                height: Math.max(0, messageSelectionHole.bottom - messageSelectionHole.top),
+              },
+            ]}
+          />
+          <Pressable
+            accessible={false}
+            onPress={closeMessageActionMenu}
+            style={[
+              styles.messageActionDismissRegion,
+              {
+                top: messageSelectionHole.top,
+                left: messageSelectionHole.right,
+                right: 0,
+                height: Math.max(0, messageSelectionHole.bottom - messageSelectionHole.top),
+              },
+            ]}
+          />
+          <RNAnimated.View
+            accessibilityViewIsModal
+            pointerEvents={messageActionMenuInteractive ? 'auto' : 'none'}
             style={[
               styles.messageActionMenu,
               {
                 left: messageActionLayout.left,
+                opacity: messageActionMenuOpacity,
                 top: messageActionLayout.top,
                 width: messageActionLayout.width,
               },
@@ -1715,14 +2188,32 @@ export default function ChatScreen() {
               ]}
             />
             <Pressable
+              disabled={messageActionSession.selection.start === messageActionSession.selection.end}
+              onPressIn={() => {
+                messageActionPressRef.current = true
+              }}
+              onPressOut={() => {
+                messageActionPressRef.current = false
+              }}
               onPress={() => void copyMessage(messageActionMessage)}
-              style={({ pressed }) => [styles.messageAction, pressed && styles.messageActionPressed]}
+              style={({ pressed }) => [
+                styles.messageAction,
+                messageActionSession.selection.start === messageActionSession.selection.end
+                  && styles.messageActionDisabled,
+                pressed && styles.messageActionPressed,
+              ]}
             >
               <Ionicons name="copy-outline" size={18} color="#FFFFFF" />
               <Text style={styles.messageActionLabel}>Copy</Text>
             </Pressable>
             <View style={styles.messageActionDivider} />
             <Pressable
+              onPressIn={() => {
+                messageActionPressRef.current = true
+              }}
+              onPressOut={() => {
+                messageActionPressRef.current = false
+              }}
               onPress={() => quoteMessage(messageActionMessage)}
               style={({ pressed }) => [styles.messageAction, pressed && styles.messageActionPressed]}
             >
@@ -1731,6 +2222,12 @@ export default function ChatScreen() {
             </Pressable>
             <View style={styles.messageActionDivider} />
             <Pressable
+              onPressIn={() => {
+                messageActionPressRef.current = true
+              }}
+              onPressOut={() => {
+                messageActionPressRef.current = false
+              }}
               onPress={() => void translateMessage(messageActionMessage)}
               style={({ pressed }) => [
                 styles.messageAction,
@@ -1742,16 +2239,8 @@ export default function ChatScreen() {
                 {messageActionMessage.translationVisible ? 'Hide' : 'Translate'}
               </Text>
             </Pressable>
-            <View style={styles.messageActionDivider} />
-            <Pressable
-              onPress={() => selectMessageText(messageActionMessage)}
-              style={({ pressed }) => [styles.messageAction, pressed && styles.messageActionPressed]}
-            >
-              <Ionicons name="text-outline" size={19} color="#FFFFFF" />
-              <Text style={styles.messageActionLabel}>Select</Text>
-            </Pressable>
-          </View>
-        </Pressable>
+          </RNAnimated.View>
+        </View>
       )}
     </SafeAreaView>
   )
@@ -1832,6 +2321,10 @@ const styles = StyleSheet.create({
   messageRow: {
     width: '100%',
     marginBottom: MESSAGE_ROW_GAP,
+    flexDirection: 'column',
+  },
+  messagePrimaryRow: {
+    width: '100%',
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: 8,
@@ -1839,10 +2332,10 @@ const styles = StyleSheet.create({
   messageRowGrouped: {
     marginBottom: 6,
   },
-  messageRowAssistant: {
+  messagePrimaryRowAssistant: {
     justifyContent: 'flex-start',
   },
-  messageRowUser: {
+  messagePrimaryRowUser: {
     justifyContent: 'flex-end',
   },
   messageContent: {
@@ -1896,6 +2389,7 @@ const styles = StyleSheet.create({
     color: palette.text,
     fontSize: 16,
     lineHeight: 22,
+    includeFontPadding: false,
   },
   userMessageText: {
     color: '#FFFFFF',
@@ -1907,10 +2401,29 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     textAlignVertical: 'top',
     includeFontPadding: false,
+    transform: [{ translateY: Platform.OS === 'ios' ? -4 * StyleSheet.hairlineWidth : 0 }],
+  },
+  messageSelectionMeasurement: {
+    opacity: 0,
+    includeFontPadding: false,
+  },
+  messageSupplement: {
+    width: '76%',
+    marginTop: 5,
+    gap: 5,
+  },
+  messageSupplementAssistant: {
+    alignSelf: 'flex-start',
+    marginLeft: 42,
+    alignItems: 'flex-start',
+  },
+  messageSupplementUser: {
+    alignSelf: 'flex-end',
+    marginRight: 42,
+    alignItems: 'flex-end',
   },
   sentQuote: {
     maxWidth: '100%',
-    marginTop: 5,
     paddingHorizontal: 10,
     paddingVertical: 7,
     borderRadius: 6,
@@ -1931,7 +2444,6 @@ const styles = StyleSheet.create({
   },
   translationBox: {
     width: '100%',
-    marginTop: 5,
     paddingHorizontal: 10,
     paddingVertical: 8,
     borderRadius: 6,
@@ -2100,13 +2612,18 @@ const styles = StyleSheet.create({
   composerQuoteClosePressed: {
     opacity: 0.55,
   },
-  messageActionBackdrop: {
+  messageActionOverlay: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 100,
+  },
+  messageActionDismissRegion: {
+    position: 'absolute',
+    zIndex: 1,
     backgroundColor: 'transparent',
   },
   messageActionMenu: {
     position: 'absolute',
+    zIndex: 2,
     height: MESSAGE_ACTION_MENU_HEIGHT,
     paddingHorizontal: 4,
     borderRadius: 7,

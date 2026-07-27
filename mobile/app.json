@@ -52,6 +52,14 @@
           "photosPermission": "Allow Chatterra to select a character avatar.",
           "microphonePermission": false
         }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "buildReactNativeFromSource": true
+          }
+        }
       ]
     ],
     "experiments": {
