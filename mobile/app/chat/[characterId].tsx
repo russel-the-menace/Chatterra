@@ -822,6 +822,14 @@ export default function ChatScreen() {
   const [oldestMessageCursor, setOldestMessageCursor] = useState<MessageHistoryCursor | undefined>(
     () => initialCacheRef.current?.oldestMessageCursor
   )
+  const [initialListOffset, setInitialListOffset] = useState(
+    () => initialCacheRef.current?.initialScrollOffset || 0
+  )
+  const cachedInitialOffsetRef = useRef(initialCacheRef.current?.initialScrollOffset || 0)
+  const [initialPositionReady, setInitialPositionReady] = useState(
+    () => cachedInitialOffsetRef.current > 0
+  )
+  const [cachePositionRevision, setCachePositionRevision] = useState(0)
   const [activity, setActivity] = useState('Online')
   const [loadingHistory, setLoadingHistory] = useState(!initialCacheRef.current)
   const [sending, setSending] = useState(false)
@@ -1133,6 +1141,7 @@ export default function ChatScreen() {
     }
     initialScrollRef.current = false
     initialScrollScheduledRef.current = false
+    setInitialPositionReady(true)
     startLatestScroll(withinImmersiveRangeRef.current)
   }, [startLatestScroll])
 
@@ -1157,21 +1166,20 @@ export default function ChatScreen() {
     }
     initialScrollRef.current = true
     initialScrollScheduledRef.current = false
+    setInitialPositionReady(cachedInitialOffsetRef.current > 0)
   }, [])
 
   const settleInitialScroll = useCallback(() => {
     if (!initialScrollRef.current || initialScrollScheduledRef.current) return
     if (!scrollToExactLatest()) return
-    initialScrollScheduledRef.current = true
-    initialScrollFrameRef.current = requestAnimationFrame(() => {
-      scrollToExactLatest()
-      initialScrollFrameRef.current = requestAnimationFrame(() => {
-        scrollToExactLatest()
-        initialScrollRef.current = false
-        initialScrollScheduledRef.current = false
-        initialScrollFrameRef.current = null
-      })
-    })
+    initialScrollRef.current = false
+    initialScrollScheduledRef.current = false
+    const latestOffset = scrollMetricsRef.current.offsetY
+    if (cachedInitialOffsetRef.current !== latestOffset) {
+      cachedInitialOffsetRef.current = latestOffset
+      setCachePositionRevision(current => current + 1)
+    }
+    setInitialPositionReady(true)
   }, [scrollToExactLatest])
 
   const scheduleDeliveryTask = useCallback((task: () => void, delay: number) => {
@@ -1426,6 +1434,10 @@ export default function ChatScreen() {
         setConversationId(cachedHistory.conversationId)
         setHasMoreHistory(Boolean(cachedHistory.hasMoreHistory))
         setOldestMessageCursor(cachedHistory.oldestMessageCursor)
+        const offset = cachedHistory.initialScrollOffset || 0
+        cachedInitialOffsetRef.current = offset
+        setInitialListOffset(offset)
+        setInitialPositionReady(offset > 0)
         setLoadingHistory(false)
         if (Date.now() - cachedHistory.cachedAt > LOCAL_HISTORY_REFRESH_MS) {
           void loadConversation(true)
@@ -1454,6 +1466,7 @@ export default function ChatScreen() {
       messages,
       hasMoreHistory,
       oldestMessageCursor,
+      initialScrollOffset: cachedInitialOffsetRef.current,
       cachedAt: Date.now(),
     })
   }, [
@@ -1463,6 +1476,7 @@ export default function ChatScreen() {
     loadingHistory,
     messages,
     oldestMessageCursor,
+    cachePositionRevision,
     setConversationCache,
   ])
 
@@ -1594,6 +1608,9 @@ export default function ChatScreen() {
       setConversationId(null)
       setHasMoreHistory(false)
       setOldestMessageCursor(undefined)
+      cachedInitialOffsetRef.current = 0
+      setInitialListOffset(0)
+      setInitialPositionReady(false)
       setMessages([{
         id: `starter-${character.id}-${Date.now()}`,
         sender: 'assistant',
@@ -2145,6 +2162,7 @@ export default function ChatScreen() {
             <Reanimated.FlatList
               ref={listRef}
               data={messages}
+              contentOffset={{ x: 0, y: initialListOffset }}
               keyExtractor={item => item.renderKey || item.id}
               renderItem={({ item }) => {
                 const messageKey = item.renderKey || item.id
@@ -2216,6 +2234,11 @@ export default function ChatScreen() {
               onContentSizeChange={handleContentSizeChange}
               scrollEventThrottle={16}
             />
+            {!initialPositionReady && messages.length > 0 && (
+              <View pointerEvents="none" style={styles.initialHistoryPositioning}>
+                <ActivityIndicator size="small" color={palette.accent} />
+              </View>
+            )}
           </Reanimated.View>
 
           <Reanimated.View style={composerKeyboardAnimatedStyle}>
@@ -2494,6 +2517,12 @@ const styles = StyleSheet.create({
   },
   messageList: {
     flex: 1,
+  },
+  initialHistoryPositioning: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: palette.background,
   },
   messageListContent: {
     paddingHorizontal: 12,

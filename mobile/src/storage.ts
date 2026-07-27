@@ -92,6 +92,10 @@ const optionalNonNegativeInteger = (value: unknown) => (
   Number.isInteger(value) && Number(value) >= 0 ? Number(value) : undefined
 )
 
+const optionalNonNegativeNumber = (value: unknown) => (
+  typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
+)
+
 const parseChatMessage = (value: unknown): ChatMessage | undefined => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const message = value as Record<string, unknown>
@@ -140,6 +144,7 @@ const parseConversationHistoryCache = (value: unknown): ConversationHistoryCache
     }),
     hasMoreHistory: optionalBoolean(cache.hasMoreHistory),
     oldestMessageCursor: parseMessageHistoryCursor(cache.oldestMessageCursor),
+    initialScrollOffset: optionalNonNegativeNumber(cache.initialScrollOffset),
     cachedAt: Number(cache.cachedAt),
   }
 }

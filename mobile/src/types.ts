@@ -97,6 +97,7 @@ export type ConversationHistoryCache = {
   messages: ChatMessage[]
   hasMoreHistory?: boolean
   oldestMessageCursor?: MessageHistoryCursor
+  initialScrollOffset?: number
   cachedAt: number
 }
 
