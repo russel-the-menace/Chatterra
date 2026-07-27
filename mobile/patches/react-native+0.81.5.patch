@@ -1,8 +1,30 @@
 diff --git a/node_modules/react-native/Libraries/Text/TextInput/Multiline/RCTUITextView.mm b/node_modules/react-native/Libraries/Text/TextInput/Multiline/RCTUITextView.mm
-index 6e9c384..d302e0e 100644
+index 6e9c384..4e8c48b 100644
 --- a/node_modules/react-native/Libraries/Text/TextInput/Multiline/RCTUITextView.mm
 +++ b/node_modules/react-native/Libraries/Text/TextInput/Multiline/RCTUITextView.mm
-@@ -304,6 +304,15 @@ static UIColor *defaultPlaceholderColor(void)
+@@ -295,6 +295,21 @@ static UIColor *defaultPlaceholderColor(void)
+ 
+ #pragma mark - Context Menu
+ 
++#if defined(__IPHONE_OS_VERSION_MAX_ALLOWED) && __IPHONE_OS_VERSION_MAX_ALLOWED >= 160000
++- (UIMenu *)editMenuForTextRange:(__unused UITextRange *)textRange
++                 suggestedActions:(__unused NSArray<UIMenuElement *> *)suggestedActions API_AVAILABLE(ios(16.0))
++{
++  if (_contextMenuHidden) {
++#if DEBUG
++    NSLog(@"ChatterraTextMenu: UITextInput edit-menu intercepted");
++#endif
++    return [UIMenu menuWithChildren:@[]];
++  }
++
++  return [super editMenuForTextRange:textRange suggestedActions:suggestedActions];
++}
++#endif
++
+ - (BOOL)canPerformAction:(SEL)action withSender:(id)sender
+ {
+   if (_contextMenuHidden) {
+@@ -304,6 +319,15 @@ static UIColor *defaultPlaceholderColor(void)
    return [super canPerformAction:action withSender:sender];
  }
  
@@ -18,7 +40,7 @@ index 6e9c384..d302e0e 100644
  - (void)buildMenuWithBuilder:(id<UIMenuBuilder>)builder
  {
  #if defined(__IPHONE_OS_VERSION_MAX_ALLOWED) && __IPHONE_OS_VERSION_MAX_ALLOWED >= 170000
-@@ -315,6 +324,15 @@ static UIColor *defaultPlaceholderColor(void)
+@@ -315,6 +339,15 @@ static UIColor *defaultPlaceholderColor(void)
  #endif
  
    [super buildMenuWithBuilder:builder];
