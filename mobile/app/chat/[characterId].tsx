@@ -1207,6 +1207,12 @@ export default function ChatScreen() {
     composerFocusedRef.current = false
   }, [])
 
+  const rememberLatestScrollOffset = useCallback((offset: number) => {
+    if (Math.abs(cachedInitialOffsetRef.current - offset) < 1) return
+    cachedInitialOffsetRef.current = offset
+    setCachePositionRevision(current => current + 1)
+  }, [])
+
   const scrollToExactLatest = useCallback(() => {
     const { contentHeight, viewportHeight } = scrollMetricsRef.current
     if (contentHeight <= 0 || viewportHeight <= 0) return false
@@ -1214,8 +1220,9 @@ export default function ChatScreen() {
     const offset = Math.max(0, contentHeight - viewportHeight)
     listRef.current?.scrollToOffset({ offset, animated: false })
     scrollMetricsRef.current.offsetY = offset
+    rememberLatestScrollOffset(offset)
     return true
-  }, [listRef])
+  }, [listRef, rememberLatestScrollOffset])
 
   const resetInitialScroll = useCallback(() => {
     if (initialScrollFrameRef.current !== null) {
@@ -1233,10 +1240,7 @@ export default function ChatScreen() {
     initialScrollRef.current = false
     initialScrollScheduledRef.current = false
     const latestOffset = scrollMetricsRef.current.offsetY
-    if (cachedInitialOffsetRef.current !== latestOffset) {
-      cachedInitialOffsetRef.current = latestOffset
-      setCachePositionRevision(current => current + 1)
-    }
+    setInitialListOffset(latestOffset)
     setInitialPositionReady(true)
   }, [scrollToExactLatest])
 
@@ -2118,8 +2122,13 @@ export default function ChatScreen() {
       contentSize.height - layoutMeasurement.height - contentOffset.y
     )
     const withinImmersiveRange = distanceFromBottom <= layoutMeasurement.height / 2
+    const atLatest = distanceFromBottom <= 1
     withinImmersiveRangeRef.current = withinImmersiveRange
     if (manualScrollRef.current) followLatestRef.current = withinImmersiveRange
+    if (atLatest) rememberLatestScrollOffset(Math.max(
+      0,
+      contentSize.height - layoutMeasurement.height
+    ))
     if (withinImmersiveRange) hideScrollToLatest()
     if (manualScrollRef.current && contentOffset.y <= OLDER_HISTORY_TRIGGER_OFFSET) {
       void loadOlderHistory()
@@ -2149,8 +2158,15 @@ export default function ChatScreen() {
       settleInitialScroll()
       return
     }
-    if (followLatestRef.current && !latestScrollActive.value) {
-      scrollToExactLatest()
+    if (followLatestRef.current) {
+      if (!latestScrollActive.value) {
+        scrollToExactLatest()
+      } else {
+        rememberLatestScrollOffset(Math.max(
+          0,
+          height - scrollMetricsRef.current.viewportHeight
+        ))
+      }
     }
   }
 
@@ -2242,7 +2258,9 @@ export default function ChatScreen() {
             <Reanimated.FlatList
               ref={listRef}
               data={messages}
-              contentOffset={{ x: 0, y: initialListOffset }}
+              contentOffset={initialScrollRef.current
+                ? { x: 0, y: initialListOffset }
+                : undefined}
               keyExtractor={item => item.renderKey || item.id}
               renderItem={({ item }) => {
                 const messageKey = item.renderKey || item.id
