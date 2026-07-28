@@ -904,6 +904,7 @@ export default function ChatScreen() {
   const historyHydrationRequestRef = useRef(0)
   const historyPageRequestRef = useRef(0)
   const messageSyncRequestRef = useRef(0)
+  const localDeliveryGenerationRef = useRef(0)
   const messageActionRequestRef = useRef(0)
   const messageActionMenuOpacity = useRef(new RNAnimated.Value(1)).current
   const messageActionReappearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1388,6 +1389,11 @@ export default function ChatScreen() {
     if (quiet && hasPendingLocalDelivery()) return
     const requestId = historyRequestRef.current + 1
     historyRequestRef.current = requestId
+    const deliveryGeneration = localDeliveryGenerationRef.current
+    const requestIsCurrent = () => (
+      requestId === historyRequestRef.current
+      && deliveryGeneration === localDeliveryGenerationRef.current
+    )
     if (!quiet) setLoadingHistory(true)
 
     try {
@@ -1399,7 +1405,7 @@ export default function ChatScreen() {
             .localeCompare(left.lastMessageAt || left.updatedAt || left.createdAt)
         ))[0]
 
-      if (requestId !== historyRequestRef.current) return
+      if (!requestIsCurrent()) return
       if (quiet && hasPendingLocalDelivery()) return
       if (!quiet) {
         latestScrollActive.value = false
@@ -1428,7 +1434,7 @@ export default function ChatScreen() {
         })
       } else {
         const messagePage = await api.listMessagePage(matching.id, { limit: HISTORY_PAGE_SIZE })
-        if (requestId !== historyRequestRef.current) return
+        if (!requestIsCurrent()) return
         if (quiet && hasPendingLocalDelivery()) return
         const cachedHistory = getConversationCache(character.id)
         const cachedMessages = cachedHistory?.messages || []
@@ -1462,10 +1468,10 @@ export default function ChatScreen() {
       }
       setError(null)
     } catch (loadError) {
-      if (requestId !== historyRequestRef.current) return
+      if (!requestIsCurrent()) return
       setError(loadError instanceof Error ? loadError.message : 'Could not load this conversation.')
     } finally {
-      if (requestId === historyRequestRef.current) setLoadingHistory(false)
+      if (requestIsCurrent()) setLoadingHistory(false)
     }
   }, [
     character,
@@ -1554,10 +1560,12 @@ export default function ChatScreen() {
     const syncRequestId = messageSyncRequestRef.current + 1
     messageSyncRequestRef.current = syncRequestId
     const requestVersion = historyRequestRef.current
+    const deliveryGeneration = localDeliveryGenerationRef.current
     try {
       const messagePage = await api.listMessagePage(conversationId, { limit: HISTORY_PAGE_SIZE })
       if (syncRequestId !== messageSyncRequestRef.current
         || requestVersion !== historyRequestRef.current
+        || deliveryGeneration !== localDeliveryGenerationRef.current
         || sendingRef.current) return
       const mapped = mapMessages(messagePage.messages)
       const currentMessages = messagesRef.current
@@ -1575,6 +1583,7 @@ export default function ChatScreen() {
       setMessages(current => {
         if (syncRequestId !== messageSyncRequestRef.current
           || requestVersion !== historyRequestRef.current
+          || deliveryGeneration !== localDeliveryGenerationRef.current
           || sendingRef.current
           || current.some(message => message.loading)
           || stagedDeliveryTimersRef.current.size > 0) {
@@ -1615,6 +1624,7 @@ export default function ChatScreen() {
     const pageRequestId = historyPageRequestRef.current + 1
     historyPageRequestRef.current = pageRequestId
     const historyRequestId = historyRequestRef.current
+    const deliveryGeneration = localDeliveryGenerationRef.current
     const anchor = { ...scrollMetricsRef.current }
 
     try {
@@ -1623,7 +1633,8 @@ export default function ChatScreen() {
         before: oldestMessageCursor,
       })
       if (pageRequestId !== historyPageRequestRef.current
-        || historyRequestId !== historyRequestRef.current) return
+        || historyRequestId !== historyRequestRef.current
+        || deliveryGeneration !== localDeliveryGenerationRef.current) return
 
       const olderMessages = mapMessages(messagePage.messages)
       if (olderMessages.length > 0) {
@@ -1883,6 +1894,7 @@ export default function ChatScreen() {
     const composerText = messageToRetry ? messageToRetry.text.trim() : draft.trim()
     if (!composerText || !character || !userId || sendingRef.current) return
 
+    localDeliveryGenerationRef.current += 1
     sendingRef.current = true
     setSending(true)
     setError(null)
