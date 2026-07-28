@@ -31,6 +31,12 @@ import {
 
 type ConversationCacheEntry = ConversationHistoryCache
 
+export type ConversationViewCache = {
+  bottomOffset: number
+  latestMessageKey: string
+  messageCount: number
+}
+
 const MAX_PERSISTED_CONVERSATION_MESSAGES = 1_000
 
 type ChatContextValue = {
@@ -64,6 +70,8 @@ type ChatContextValue = {
   getConversationCache: (characterId: string) => ConversationCacheEntry | undefined
   hydrateConversationCache: (characterId: string) => Promise<ConversationCacheEntry | undefined>
   setConversationCache: (characterId: string, entry: ConversationCacheEntry) => void
+  getConversationViewCache: (characterId: string) => ConversationViewCache | undefined
+  setConversationViewCache: (characterId: string, entry: ConversationViewCache) => void
   clearConversationCache: (characterId: string) => void
 }
 
@@ -124,6 +132,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const [pinnedCharacterIds, setPinnedCharacterIds] = useState<Set<string>>(() => new Set())
   const activeCharacterRef = useRef<string | null>(null)
   const conversationCacheRef = useRef<Map<string, ConversationCacheEntry>>(new Map())
+  const conversationViewCacheRef = useRef<Map<string, ConversationViewCache>>(new Map())
   const conversationCacheDirtyRef = useRef<Map<string, ConversationCacheEntry>>(new Map())
   const conversationCacheTimerRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
   const conversationCacheWriteRef = useRef<Map<string, Promise<void>>>(new Map())
@@ -258,6 +267,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
           const nextConversationId = nextConversationIds[characterId] || null
           if (cached && cached.conversationId !== nextConversationId) {
             conversationCacheRef.current.delete(characterId)
+            conversationViewCacheRef.current.delete(characterId)
           }
         })
         setConversationVersions(current => {
@@ -521,12 +531,30 @@ export function ChatProvider({ children }: PropsWithChildren) {
         ...message
       }) => message)
     const stableEntry = { ...entry, messages: stableMessages }
+    const viewCache = conversationViewCacheRef.current.get(characterId)
+    const latestMessage = stableMessages.at(-1)
+    const latestMessageKey = latestMessage?.renderKey || latestMessage?.id
+    if (viewCache && (
+      viewCache.messageCount !== stableMessages.length
+      || viewCache.latestMessageKey !== latestMessageKey
+    )) {
+      conversationViewCacheRef.current.delete(characterId)
+    }
     conversationCacheRef.current.set(characterId, stableEntry)
     scheduleConversationCachePersistence(characterId, stableEntry)
   }, [scheduleConversationCachePersistence])
 
+  const getConversationViewCache = useCallback((characterId: string) => (
+    conversationViewCacheRef.current.get(characterId)
+  ), [])
+
+  const setConversationViewCache = useCallback((characterId: string, entry: ConversationViewCache) => {
+    conversationViewCacheRef.current.set(characterId, entry)
+  }, [])
+
   const clearConversationCache = useCallback((characterId: string) => {
     conversationCacheRef.current.delete(characterId)
+    conversationViewCacheRef.current.delete(characterId)
     conversationCacheDirtyRef.current.delete(characterId)
     const timer = conversationCacheTimerRef.current.get(characterId)
     if (timer) {
@@ -567,6 +595,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
     getConversationCache,
     hydrateConversationCache,
     setConversationCache,
+    getConversationViewCache,
+    setConversationViewCache,
     clearConversationCache,
   }), [
     characters,
@@ -577,6 +607,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     getDraft,
     getQuoteDraft,
     getConversationCache,
+    getConversationViewCache,
     hydrateConversationCache,
     markCharacterRead,
     proactivePreviews,
@@ -587,6 +618,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     setActiveCharacter,
     setCharacterPinned,
     setConversationCache,
+    setConversationViewCache,
     setDraft,
     setQuoteDraft,
     unreadCharacterIds,

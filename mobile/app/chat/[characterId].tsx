@@ -859,8 +859,10 @@ export default function ChatScreen() {
     pinnedCharacterIds,
     setCharacterPinned,
     getConversationCache,
+    getConversationViewCache,
     hydrateConversationCache,
     setConversationCache,
+    setConversationViewCache,
     clearConversationCache,
   } = useChat()
   const character = useMemo(
@@ -870,6 +872,23 @@ export default function ChatScreen() {
   const draft = characterId ? getDraft(characterId) : ''
   const quotedMessage = characterId ? getQuoteDraft(characterId) : null
   const initialCacheRef = useRef(characterId ? getConversationCache(characterId) : undefined)
+  const initialViewCacheRef = useRef(
+    characterId ? getConversationViewCache(characterId) : undefined
+  )
+  const initialViewCache = initialViewCacheRef.current
+  const initialLatestMessage = initialCacheRef.current?.messages.at(-1)
+  const hasInitialViewCache = Boolean(
+    initialViewCache
+    && initialViewCache.messageCount === initialCacheRef.current?.messages.length
+    && initialViewCache.latestMessageKey === (
+      initialLatestMessage?.renderKey || initialLatestMessage?.id
+    )
+  )
+  const initialContentOffsetRef = useRef<{ x: number; y: number } | undefined>(
+    hasInitialViewCache && initialViewCache
+      ? { x: 0, y: initialViewCache.bottomOffset }
+      : undefined
+  )
   const [messages, setMessages] = useState<ChatMessage[]>(() => initialCacheRef.current?.messages || [])
   const [conversationId, setConversationId] = useState<string | null>(
     initialCacheRef.current?.conversationId || null
@@ -880,7 +899,7 @@ export default function ChatScreen() {
   const [oldestMessageCursor, setOldestMessageCursor] = useState<MessageHistoryCursor | undefined>(
     () => initialCacheRef.current?.oldestMessageCursor
   )
-  const [initialPositionReady, setInitialPositionReady] = useState(false)
+  const [initialPositionReady, setInitialPositionReady] = useState(hasInitialViewCache)
   const [activity, setActivity] = useState('Online')
   const [loadingHistory, setLoadingHistory] = useState(!initialCacheRef.current)
   const [sending, setSending] = useState(false)
@@ -917,7 +936,7 @@ export default function ChatScreen() {
   const followLatestRef = useRef(true)
   const unseenLatestRef = useRef(false)
   const manualScrollRef = useRef(false)
-  const initialScrollRef = useRef(true)
+  const initialScrollRef = useRef(!hasInitialViewCache)
   const initialScrollScheduledRef = useRef(false)
   const initialScrollFrameRef = useRef<number | null>(null)
   const loadingOlderHistoryRef = useRef(false)
@@ -1222,6 +1241,7 @@ export default function ChatScreen() {
       cancelAnimationFrame(initialScrollFrameRef.current)
       initialScrollFrameRef.current = null
     }
+    initialContentOffsetRef.current = undefined
     initialScrollRef.current = true
     initialScrollScheduledRef.current = false
     setInitialPositionReady(false)
@@ -1336,6 +1356,18 @@ export default function ChatScreen() {
   useEffect(() => {
     messagesRef.current = messages
   }, [messages])
+
+  useEffect(() => () => {
+    if (!characterId) return
+    const latestMessage = messagesRef.current.at(-1)
+    const { contentHeight, viewportHeight } = scrollMetricsRef.current
+    if (!latestMessage || contentHeight <= 0 || viewportHeight <= 0) return
+    setConversationViewCache(characterId, {
+      bottomOffset: Math.max(0, contentHeight - viewportHeight),
+      latestMessageKey: latestMessage.renderKey || latestMessage.id,
+      messageCount: messagesRef.current.length,
+    })
+  }, [characterId, setConversationViewCache])
 
   useEffect(() => {
     const pendingDeliveryMessageId = quotedMessage?.pendingDeliveryMessageId
@@ -1506,8 +1538,19 @@ export default function ChatScreen() {
     const deliveryGeneration = localDeliveryGenerationRef.current
 
     void (async () => {
-      resetInitialScroll()
-      const cachedHistory = getConversationCache(hydratedCharacterId)
+      const inMemoryHistory = getConversationCache(hydratedCharacterId)
+      const inMemoryView = getConversationViewCache(hydratedCharacterId)
+      const inMemoryLatestMessage = inMemoryHistory?.messages.at(-1)
+      const canRestoreView = Boolean(
+        inMemoryHistory
+        && inMemoryView
+        && inMemoryView.messageCount === inMemoryHistory.messages.length
+        && inMemoryView.latestMessageKey === (
+          inMemoryLatestMessage?.renderKey || inMemoryLatestMessage?.id
+        )
+      )
+      if (!canRestoreView) resetInitialScroll()
+      const cachedHistory = inMemoryHistory
         || await hydrateConversationCache(hydratedCharacterId)
       if (
         cancelled
@@ -1518,12 +1561,19 @@ export default function ChatScreen() {
       if (!cachedHistory) {
         void loadConversationRef.current(false)
       } else {
+        if (canRestoreView && inMemoryView) {
+          initialContentOffsetRef.current = { x: 0, y: inMemoryView.bottomOffset }
+          initialScrollRef.current = false
+          initialScrollScheduledRef.current = false
+          setInitialPositionReady(true)
+        } else {
+          resetInitialScroll()
+        }
         messagesRef.current = cachedHistory.messages
         setMessages(cachedHistory.messages)
         setConversationId(cachedHistory.conversationId)
         setHasMoreHistory(Boolean(cachedHistory.hasMoreHistory))
         setOldestMessageCursor(cachedHistory.oldestMessageCursor)
-        setInitialPositionReady(false)
         setLoadingHistory(false)
         if (Date.now() - cachedHistory.cachedAt > LOCAL_HISTORY_REFRESH_MS) {
           void loadConversationRef.current(true)
@@ -1538,6 +1588,7 @@ export default function ChatScreen() {
   }, [
     character?.id,
     getConversationCache,
+    getConversationViewCache,
     hydrateConversationCache,
     refreshState,
     resetInitialScroll,
@@ -2296,6 +2347,7 @@ export default function ChatScreen() {
             <Reanimated.FlatList
               ref={listRef}
               data={messages}
+              contentOffset={initialContentOffsetRef.current}
               disableVirtualization={!initialPositionReady}
               initialNumToRender={Math.max(1, messages.length)}
               maxToRenderPerBatch={Math.max(1, messages.length)}
