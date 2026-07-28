@@ -870,6 +870,9 @@ export default function ChatScreen() {
   const draft = characterId ? getDraft(characterId) : ''
   const quotedMessage = characterId ? getQuoteDraft(characterId) : null
   const initialCacheRef = useRef(characterId ? getConversationCache(characterId) : undefined)
+  const hasInitialScrollOffsetRef = useRef(
+    typeof initialCacheRef.current?.initialScrollOffset === 'number'
+  )
   const [messages, setMessages] = useState<ChatMessage[]>(() => initialCacheRef.current?.messages || [])
   const [conversationId, setConversationId] = useState<string | null>(
     initialCacheRef.current?.conversationId || null
@@ -884,7 +887,9 @@ export default function ChatScreen() {
     () => initialCacheRef.current?.initialScrollOffset || 0
   )
   const cachedInitialOffsetRef = useRef(initialCacheRef.current?.initialScrollOffset || 0)
-  const [initialPositionReady, setInitialPositionReady] = useState(false)
+  const [initialPositionReady, setInitialPositionReady] = useState(
+    () => hasInitialScrollOffsetRef.current
+  )
   const [cachePositionRevision, setCachePositionRevision] = useState(0)
   const [activity, setActivity] = useState('Online')
   const [loadingHistory, setLoadingHistory] = useState(!initialCacheRef.current)
@@ -1232,15 +1237,24 @@ export default function ChatScreen() {
     }
     initialScrollRef.current = true
     initialScrollScheduledRef.current = false
-    setInitialPositionReady(false)
+    setInitialPositionReady(hasInitialScrollOffsetRef.current)
   }, [])
 
   const settleInitialScroll = useCallback(() => {
     if (!initialScrollRef.current || initialScrollScheduledRef.current) return
+    // A previous bottom offset can be handed to the native scroll view before
+    // its first paint. Scrolling again after layout causes a visible entry jump.
+    if (hasInitialScrollOffsetRef.current) {
+      initialScrollRef.current = false
+      initialScrollScheduledRef.current = false
+      setInitialPositionReady(true)
+      return
+    }
     if (!scrollToExactLatest()) return
     initialScrollRef.current = false
     initialScrollScheduledRef.current = false
     const latestOffset = scrollMetricsRef.current.offsetY
+    hasInitialScrollOffsetRef.current = true
     setInitialListOffset(latestOffset)
     setInitialPositionReady(true)
   }, [scrollToExactLatest])
@@ -1520,11 +1534,10 @@ export default function ChatScreen() {
         setHasMoreHistory(Boolean(cachedHistory.hasMoreHistory))
         setOldestMessageCursor(cachedHistory.oldestMessageCursor)
         const offset = cachedHistory.initialScrollOffset || 0
+        hasInitialScrollOffsetRef.current = typeof cachedHistory.initialScrollOffset === 'number'
         cachedInitialOffsetRef.current = offset
         setInitialListOffset(offset)
-        // Keep the cached offset for the first native layout, but don't expose
-        // the list until its measured bottom offset has been applied.
-        setInitialPositionReady(false)
+        setInitialPositionReady(hasInitialScrollOffsetRef.current)
         setLoadingHistory(false)
         if (Date.now() - cachedHistory.cachedAt > LOCAL_HISTORY_REFRESH_MS) {
           void loadConversationRef.current(true)
@@ -2357,7 +2370,10 @@ export default function ChatScreen() {
                   />
                 )
               }}
-              style={styles.messageList}
+              style={[
+                styles.messageList,
+                !initialPositionReady && styles.messageListPositioning,
+              ]}
               contentContainerStyle={styles.messageListContent}
               removeClippedSubviews={!messageActionSession}
               scrollEnabled={!messageActionSession}
@@ -2674,6 +2690,9 @@ const styles = StyleSheet.create({
   },
   messageList: {
     flex: 1,
+  },
+  messageListPositioning: {
+    opacity: 0,
   },
   initialHistoryPositioning: {
     ...StyleSheet.absoluteFillObject,
