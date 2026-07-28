@@ -870,9 +870,6 @@ export default function ChatScreen() {
   const draft = characterId ? getDraft(characterId) : ''
   const quotedMessage = characterId ? getQuoteDraft(characterId) : null
   const initialCacheRef = useRef(characterId ? getConversationCache(characterId) : undefined)
-  const hasInitialScrollOffsetRef = useRef(
-    typeof initialCacheRef.current?.initialScrollOffset === 'number'
-  )
   const [messages, setMessages] = useState<ChatMessage[]>(() => initialCacheRef.current?.messages || [])
   const [conversationId, setConversationId] = useState<string | null>(
     initialCacheRef.current?.conversationId || null
@@ -883,14 +880,7 @@ export default function ChatScreen() {
   const [oldestMessageCursor, setOldestMessageCursor] = useState<MessageHistoryCursor | undefined>(
     () => initialCacheRef.current?.oldestMessageCursor
   )
-  const [initialListOffset, setInitialListOffset] = useState(
-    () => initialCacheRef.current?.initialScrollOffset || 0
-  )
-  const cachedInitialOffsetRef = useRef(initialCacheRef.current?.initialScrollOffset || 0)
-  const [initialPositionReady, setInitialPositionReady] = useState(
-    () => hasInitialScrollOffsetRef.current
-  )
-  const [cachePositionRevision, setCachePositionRevision] = useState(0)
+  const [initialPositionReady, setInitialPositionReady] = useState(false)
   const [activity, setActivity] = useState('Online')
   const [loadingHistory, setLoadingHistory] = useState(!initialCacheRef.current)
   const [sending, setSending] = useState(false)
@@ -1201,6 +1191,7 @@ export default function ChatScreen() {
   }, [closeMessageActionMenu, showLatestMessageButton, startLatestScroll])
 
   const handleComposerFocus = useCallback(() => {
+    if (initialScrollRef.current) return
     composerFocusedRef.current = true
     if (initialScrollFrameRef.current !== null) {
       cancelAnimationFrame(initialScrollFrameRef.current)
@@ -1216,12 +1207,6 @@ export default function ChatScreen() {
     composerFocusedRef.current = false
   }, [])
 
-  const rememberLatestScrollOffset = useCallback((offset: number) => {
-    if (Math.abs(cachedInitialOffsetRef.current - offset) < 1) return
-    cachedInitialOffsetRef.current = offset
-    setCachePositionRevision(current => current + 1)
-  }, [])
-
   const scrollToExactLatest = useCallback(() => {
     const { contentHeight, viewportHeight } = scrollMetricsRef.current
     if (contentHeight <= 0 || viewportHeight <= 0) return false
@@ -1229,9 +1214,8 @@ export default function ChatScreen() {
     const offset = Math.max(0, contentHeight - viewportHeight)
     listRef.current?.scrollToOffset({ offset, animated: false })
     scrollMetricsRef.current.offsetY = offset
-    rememberLatestScrollOffset(offset)
     return true
-  }, [listRef, rememberLatestScrollOffset])
+  }, [listRef])
 
   const resetInitialScroll = useCallback(() => {
     if (initialScrollFrameRef.current !== null) {
@@ -1240,19 +1224,11 @@ export default function ChatScreen() {
     }
     initialScrollRef.current = true
     initialScrollScheduledRef.current = false
-    setInitialPositionReady(hasInitialScrollOffsetRef.current)
+    setInitialPositionReady(false)
   }, [])
 
   const settleInitialScroll = useCallback(() => {
     if (!initialScrollRef.current || initialScrollScheduledRef.current) return
-    // A previous bottom offset can be handed to the native scroll view before
-    // its first paint. Scrolling again after layout causes a visible entry jump.
-    if (hasInitialScrollOffsetRef.current) {
-      initialScrollRef.current = false
-      initialScrollScheduledRef.current = false
-      setInitialPositionReady(true)
-      return
-    }
     if (!scrollToExactLatest()) return
     initialScrollScheduledRef.current = true
     initialScrollFrameRef.current = requestAnimationFrame(() => {
@@ -1266,9 +1242,6 @@ export default function ChatScreen() {
         initialScrollRef.current = false
         initialScrollScheduledRef.current = false
         initialScrollFrameRef.current = null
-        const latestOffset = scrollMetricsRef.current.offsetY
-        hasInitialScrollOffsetRef.current = true
-        setInitialListOffset(latestOffset)
         setInitialPositionReady(true)
       })
     })
@@ -1550,11 +1523,7 @@ export default function ChatScreen() {
         setConversationId(cachedHistory.conversationId)
         setHasMoreHistory(Boolean(cachedHistory.hasMoreHistory))
         setOldestMessageCursor(cachedHistory.oldestMessageCursor)
-        const offset = cachedHistory.initialScrollOffset || 0
-        hasInitialScrollOffsetRef.current = typeof cachedHistory.initialScrollOffset === 'number'
-        cachedInitialOffsetRef.current = offset
-        setInitialListOffset(offset)
-        setInitialPositionReady(hasInitialScrollOffsetRef.current)
+        setInitialPositionReady(false)
         setLoadingHistory(false)
         if (Date.now() - cachedHistory.cachedAt > LOCAL_HISTORY_REFRESH_MS) {
           void loadConversationRef.current(true)
@@ -1582,7 +1551,6 @@ export default function ChatScreen() {
       messages,
       hasMoreHistory,
       oldestMessageCursor,
-      initialScrollOffset: cachedInitialOffsetRef.current,
       cachedAt: Date.now(),
     })
   }, [
@@ -1592,7 +1560,6 @@ export default function ChatScreen() {
     loadingHistory,
     messages,
     oldestMessageCursor,
-    cachePositionRevision,
     setConversationCache,
   ])
 
@@ -1734,8 +1701,6 @@ export default function ChatScreen() {
       setConversationId(null)
       setHasMoreHistory(false)
       setOldestMessageCursor(undefined)
-      cachedInitialOffsetRef.current = 0
-      setInitialListOffset(0)
       setInitialPositionReady(false)
       setMessages([{
         id: `starter-${character.id}-${Date.now()}`,
@@ -2205,13 +2170,8 @@ export default function ChatScreen() {
       contentSize.height - layoutMeasurement.height - contentOffset.y
     )
     const withinImmersiveRange = distanceFromBottom <= layoutMeasurement.height / 2
-    const atLatest = distanceFromBottom <= 1
     withinImmersiveRangeRef.current = withinImmersiveRange
     if (manualScrollRef.current) followLatestRef.current = withinImmersiveRange
-    if (atLatest) rememberLatestScrollOffset(Math.max(
-      0,
-      contentSize.height - layoutMeasurement.height
-    ))
     if (withinImmersiveRange) hideScrollToLatest()
     if (manualScrollRef.current && contentOffset.y <= OLDER_HISTORY_TRIGGER_OFFSET) {
       void loadOlderHistory()
@@ -2244,11 +2204,6 @@ export default function ChatScreen() {
     if (followLatestRef.current) {
       if (!latestScrollActive.value) {
         scrollToExactLatest()
-      } else {
-        rememberLatestScrollOffset(Math.max(
-          0,
-          height - scrollMetricsRef.current.viewportHeight
-        ))
       }
     }
   }
@@ -2341,13 +2296,9 @@ export default function ChatScreen() {
             <Reanimated.FlatList
               ref={listRef}
               data={messages}
-              contentOffset={initialScrollRef.current
-                ? { x: 0, y: initialListOffset }
-                : undefined}
-              initialNumToRender={hasInitialScrollOffsetRef.current
-                ? 10
-                : Math.max(1, Math.min(messages.length, HISTORY_PAGE_SIZE))}
-              maxToRenderPerBatch={HISTORY_PAGE_SIZE}
+              disableVirtualization={!initialPositionReady}
+              initialNumToRender={Math.max(1, messages.length)}
+              maxToRenderPerBatch={Math.max(1, messages.length)}
               keyExtractor={item => item.renderKey || item.id}
               renderItem={({ item }) => {
                 const messageKey = item.renderKey || item.id
