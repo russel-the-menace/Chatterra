@@ -60,7 +60,8 @@ const createLocalId = () => `${Date.now()}-${Math.random().toString(36).slice(2)
 
 const LATEST_SCROLL_DURATION_MS = 280
 const MESSAGE_REVEAL_DURATION_MS = 220
-const OUTGOING_DELIVERY_INDICATOR_DELAY_MS = 550
+const OUTGOING_DELIVERY_INDICATOR_DELAY_MS = 1_000
+const OUTGOING_DELIVERY_TIMEOUT_MS = 60_000
 const MESSAGE_ROW_GAP = 14
 const LATEST_MESSAGE_COMPOSER_GAP = 15
 const MESSAGE_ACTION_MENU_MAX_WIDTH = 240
@@ -902,6 +903,7 @@ export default function ChatScreen() {
   const messageActionSessionRef = useRef<MessageActionSession | null>(null)
   const historyRequestRef = useRef(0)
   const historyHydrationRequestRef = useRef(0)
+  const hydratedConversationKeyRef = useRef<string | null>(null)
   const historyPageRequestRef = useRef(0)
   const messageSyncRequestRef = useRef(0)
   const localDeliveryGenerationRef = useRef(0)
@@ -1485,20 +1487,34 @@ export default function ChatScreen() {
     userId,
   ])
 
+  const loadConversationRef = useRef(loadConversation)
   useEffect(() => {
-    if (!character || !userId) return
+    loadConversationRef.current = loadConversation
+  }, [loadConversation])
+
+  useEffect(() => {
+    const hydratedCharacterId = character?.id
+    if (!hydratedCharacterId || !userId) return
+    const hydrationKey = `${userId}:${hydratedCharacterId}`
+    if (hydratedConversationKeyRef.current === hydrationKey) return
+    hydratedConversationKeyRef.current = hydrationKey
     let cancelled = false
     const requestId = historyHydrationRequestRef.current + 1
     historyHydrationRequestRef.current = requestId
+    const deliveryGeneration = localDeliveryGenerationRef.current
 
     void (async () => {
       resetInitialScroll()
-      const cachedHistory = getConversationCache(character.id)
-        || await hydrateConversationCache(character.id)
-      if (cancelled || requestId !== historyHydrationRequestRef.current) return
+      const cachedHistory = getConversationCache(hydratedCharacterId)
+        || await hydrateConversationCache(hydratedCharacterId)
+      if (
+        cancelled
+        || requestId !== historyHydrationRequestRef.current
+        || deliveryGeneration !== localDeliveryGenerationRef.current
+      ) return
 
       if (!cachedHistory) {
-        void loadConversation(false)
+        void loadConversationRef.current(false)
       } else {
         messagesRef.current = cachedHistory.messages
         setMessages(cachedHistory.messages)
@@ -1511,7 +1527,7 @@ export default function ChatScreen() {
         setInitialPositionReady(offset > 0)
         setLoadingHistory(false)
         if (Date.now() - cachedHistory.cachedAt > LOCAL_HISTORY_REFRESH_MS) {
-          void loadConversation(true)
+          void loadConversationRef.current(true)
         }
       }
       void refreshState()
@@ -1521,10 +1537,9 @@ export default function ChatScreen() {
       cancelled = true
     }
   }, [
-    character,
+    character?.id,
     getConversationCache,
     hydrateConversationCache,
-    loadConversation,
     refreshState,
     resetInitialScroll,
     userId,
@@ -1895,6 +1910,10 @@ export default function ChatScreen() {
     if (!composerText || !character || !userId || sendingRef.current) return
 
     localDeliveryGenerationRef.current += 1
+    const deliveryGeneration = localDeliveryGenerationRef.current
+    const isCurrentDelivery = () => (
+      deliveryGeneration === localDeliveryGenerationRef.current
+    )
     sendingRef.current = true
     setSending(true)
     setError(null)
@@ -2032,6 +2051,7 @@ export default function ChatScreen() {
       ]
     })
     let userMessageConfirmed = false
+    let deliveryTimeout: ReturnType<typeof setTimeout> | undefined
 
     const confirmUserMessage = (sourceMessageId: string) => {
       userMessageConfirmed = true
@@ -2053,6 +2073,19 @@ export default function ChatScreen() {
       )))
     }
 
+    deliveryTimeout = setTimeout(() => {
+      if (!isCurrentDelivery() || userMessageConfirmed) return
+      setMessages(current => current.map(message => (
+        message.id === userMessage.id && message.deliveryState === 'sending'
+          ? { ...message, deliveryState: 'failed' }
+          : message
+      )))
+      // The network request may still be resolving its final status check. Release the
+      // composer now so the retry affordance behaves as soon as it becomes visible.
+      sendingRef.current = false
+      setSending(false)
+    }, OUTGOING_DELIVERY_TIMEOUT_MS)
+
     try {
       const response = await api.sendMessage({
         message: text,
@@ -2062,6 +2095,7 @@ export default function ChatScreen() {
         character,
         quote,
       })
+      if (!isCurrentDelivery()) return
       if (response.userMessageId) {
         confirmUserMessage(response.userMessageId)
       }
@@ -2081,6 +2115,7 @@ export default function ChatScreen() {
         throw new Error('The server returned no usable response.')
       }
     } catch (sendError) {
+      if (!isCurrentDelivery()) return
       setMessages(current => current.filter(message => message.id !== loadingId))
       const persistedUserMessageId = sendError instanceof ApiError
         && sendError.payload?.messagePersisted === true
@@ -2104,6 +2139,7 @@ export default function ChatScreen() {
           // The exact client message ID makes this safe to reconcile on the next sync.
         }
       }
+      if (!isCurrentDelivery()) return
       if (reconciledUserMessageId) {
         confirmUserMessage(reconciledUserMessageId)
         if (reconciledConversationId) setConversationId(reconciledConversationId)
@@ -2116,9 +2152,12 @@ export default function ChatScreen() {
         )))
       }
     } finally {
-      sendingRef.current = false
-      setSending(false)
-      void refreshState()
+      if (deliveryTimeout) clearTimeout(deliveryTimeout)
+      if (isCurrentDelivery()) {
+        sendingRef.current = false
+        setSending(false)
+        void refreshState()
+      }
     }
   }
 
