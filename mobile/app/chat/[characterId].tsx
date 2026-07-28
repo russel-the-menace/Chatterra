@@ -884,9 +884,7 @@ export default function ChatScreen() {
     () => initialCacheRef.current?.initialScrollOffset || 0
   )
   const cachedInitialOffsetRef = useRef(initialCacheRef.current?.initialScrollOffset || 0)
-  const [initialPositionReady, setInitialPositionReady] = useState(
-    () => cachedInitialOffsetRef.current > 0
-  )
+  const [initialPositionReady, setInitialPositionReady] = useState(false)
   const [cachePositionRevision, setCachePositionRevision] = useState(0)
   const [activity, setActivity] = useState('Online')
   const [loadingHistory, setLoadingHistory] = useState(!initialCacheRef.current)
@@ -1234,7 +1232,7 @@ export default function ChatScreen() {
     }
     initialScrollRef.current = true
     initialScrollScheduledRef.current = false
-    setInitialPositionReady(cachedInitialOffsetRef.current > 0)
+    setInitialPositionReady(false)
   }, [])
 
   const settleInitialScroll = useCallback(() => {
@@ -1524,7 +1522,9 @@ export default function ChatScreen() {
         const offset = cachedHistory.initialScrollOffset || 0
         cachedInitialOffsetRef.current = offset
         setInitialListOffset(offset)
-        setInitialPositionReady(offset > 0)
+        // Keep the cached offset for the first native layout, but don't expose
+        // the list until its measured bottom offset has been applied.
+        setInitialPositionReady(false)
         setLoadingHistory(false)
         if (Date.now() - cachedHistory.cachedAt > LOCAL_HISTORY_REFRESH_MS) {
           void loadConversationRef.current(true)
