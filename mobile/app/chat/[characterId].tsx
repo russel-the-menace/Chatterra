@@ -1189,6 +1189,9 @@ export default function ChatScreen() {
   ])
 
   const prepareForIncomingMessage = useCallback((count = 1) => {
+    // The initial page load can race the workspace sync. Until the first
+    // transcript is positioned, server history is not an incoming delivery.
+    if (initialScrollRef.current || messagesRef.current.length === 0) return
     closeMessageActionMenu()
     if (withinImmersiveRangeRef.current || followLatestRef.current) {
       startLatestScroll(withinImmersiveRangeRef.current)
@@ -1251,12 +1254,24 @@ export default function ChatScreen() {
       return
     }
     if (!scrollToExactLatest()) return
-    initialScrollRef.current = false
-    initialScrollScheduledRef.current = false
-    const latestOffset = scrollMetricsRef.current.offsetY
-    hasInitialScrollOffsetRef.current = true
-    setInitialListOffset(latestOffset)
-    setInitialPositionReady(true)
+    initialScrollScheduledRef.current = true
+    initialScrollFrameRef.current = requestAnimationFrame(() => {
+      if (!initialScrollRef.current) return
+      // Variable-height rows continue to mount after the first content-size
+      // callback. Align across two frames before exposing the virtualized list.
+      scrollToExactLatest()
+      initialScrollFrameRef.current = requestAnimationFrame(() => {
+        if (!initialScrollRef.current) return
+        scrollToExactLatest()
+        initialScrollRef.current = false
+        initialScrollScheduledRef.current = false
+        initialScrollFrameRef.current = null
+        const latestOffset = scrollMetricsRef.current.offsetY
+        hasInitialScrollOffsetRef.current = true
+        setInitialListOffset(latestOffset)
+        setInitialPositionReady(true)
+      })
+    })
   }, [scrollToExactLatest])
 
   const scheduleDeliveryTask = useCallback((task: () => void, delay: number) => {
@@ -1464,7 +1479,9 @@ export default function ChatScreen() {
           const newAssistantMessageCount = mappedMessages.filter(message => (
             message.sender === 'assistant' && !existingIds.has(message.id)
           )).length
-          if (newAssistantMessageCount > 0) {
+          if (newAssistantMessageCount > 0
+            && !initialScrollRef.current
+            && messagesRef.current.length > 0) {
             prepareForIncomingMessage(newAssistantMessageCount)
           }
         }
@@ -1605,7 +1622,9 @@ export default function ChatScreen() {
       const newAssistantMessageCount = mapped.filter(message => (
         message.sender === 'assistant' && !knownIds.has(message.id)
       )).length
-      if (newAssistantMessageCount > 0) {
+      if (newAssistantMessageCount > 0
+        && !initialScrollRef.current
+        && currentMessages.length > 0) {
         prepareForIncomingMessage(newAssistantMessageCount)
       }
       setMessages(current => {
@@ -2325,6 +2344,10 @@ export default function ChatScreen() {
               contentOffset={initialScrollRef.current
                 ? { x: 0, y: initialListOffset }
                 : undefined}
+              initialNumToRender={hasInitialScrollOffsetRef.current
+                ? 10
+                : Math.max(1, Math.min(messages.length, HISTORY_PAGE_SIZE))}
+              maxToRenderPerBatch={HISTORY_PAGE_SIZE}
               keyExtractor={item => item.renderKey || item.id}
               renderItem={({ item }) => {
                 const messageKey = item.renderKey || item.id
