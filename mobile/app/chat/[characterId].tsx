@@ -48,7 +48,7 @@ import { api, ApiError } from '@/src/api'
 import { useChat } from '@/src/chat-context'
 import { starterMessageForCharacter } from '@/src/starter-message'
 import { palette } from '@/src/theme'
-import { useVoiceInput, VoiceInputStatus } from '@/src/voice-input'
+import { useVoiceInput } from '@/src/voice-input'
 import {
   ChatMessage,
   ChatResponse,
@@ -86,13 +86,6 @@ const MESSAGE_BUBBLE_LAYOUT = LinearTransition
   .duration(MESSAGE_REVEAL_DURATION_MS)
   .easing(ReanimatedEasing.out(ReanimatedEasing.cubic))
 const AnimatedPressable = Reanimated.createAnimatedComponent(Pressable)
-
-const voiceStatusLabel = (status: VoiceInputStatus, error?: string) => {
-  if (status === 'recording') return 'Listening...'
-  if (status === 'processing') return 'Converting speech...'
-  if (status === 'error') return error || 'Voice input failed.'
-  return ''
-}
 
 type MessageAnchor = {
   x: number
@@ -989,6 +982,7 @@ export default function ChatScreen() {
     }
   })
   const stagedDeliveryTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set())
+  const lastVoiceErrorRef = useRef<string | null>(null)
   const voiceInput = useVoiceInput({
     language: character?.language,
     onTranscriptChange: (text, metadata) => {
@@ -997,6 +991,16 @@ export default function ChatScreen() {
       setVoiceMetadata(metadata)
     },
   })
+
+  useEffect(() => {
+    if (!voiceInput.error) {
+      lastVoiceErrorRef.current = null
+      return
+    }
+    if (lastVoiceErrorRef.current === voiceInput.error) return
+    lastVoiceErrorRef.current = voiceInput.error
+    Alert.alert('Voice input unavailable', voiceInput.error)
+  }, [voiceInput.error])
 
   const closeMessageActionMenu = useCallback(() => {
     const session = messageActionSessionRef.current
@@ -2310,8 +2314,6 @@ export default function ChatScreen() {
     voiceInput.toggle(draft)
   }
 
-  const voiceStatus = voiceStatusLabel(voiceInput.status, voiceInput.error)
-
   const messageActionMessage = messageActionSession
     ? messages.find(message => (
         (message.renderKey || message.id) === messageActionSession.messageKey
@@ -2539,7 +2541,9 @@ export default function ChatScreen() {
                     onPress={handleVoicePress}
                     disabled={voiceInput.status === 'processing'}
                     accessibilityRole="button"
-                    accessibilityLabel={voiceInput.status === 'recording' ? 'Stop voice input' : 'Start voice input'}
+                    accessibilityLabel={voiceInput.error
+                      ? `Voice input unavailable: ${voiceInput.error}`
+                      : voiceInput.status === 'recording' ? 'Stop voice input' : 'Start voice input'}
                     accessibilityState={{
                       busy: voiceInput.status === 'processing',
                       selected: voiceInput.status === 'recording',
@@ -2583,22 +2587,6 @@ export default function ChatScreen() {
                       ? <ActivityIndicator size="small" color="#FFFFFF" />
                       : <Ionicons name="arrow-up" size={22} color="#FFFFFF" />}
                   </Pressable>
-                </View>
-                <View style={[
-                  styles.voiceStatus,
-                  !voiceStatus && styles.voiceStatusHidden,
-                ]} accessibilityLiveRegion="polite">
-                  <Ionicons
-                    name={voiceInput.status === 'error' ? 'alert-circle-outline' : 'mic-outline'}
-                    size={15}
-                    color={voiceInput.status === 'error' ? palette.danger : palette.textMuted}
-                  />
-                  <Text style={[
-                    styles.voiceStatusText,
-                    voiceInput.status === 'error' && styles.voiceStatusError,
-                  ]}>
-                    {voiceStatus || ' '}
-                  </Text>
                 </View>
                 {quotedMessage && (
                   <View style={styles.composerQuote}>
@@ -3148,24 +3136,6 @@ const styles = StyleSheet.create({
   },
   sendButtonPressed: {
     backgroundColor: palette.accentPressed,
-  },
-  voiceStatus: {
-    minHeight: 18,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 2,
-  },
-  voiceStatusHidden: {
-    opacity: 0,
-  },
-  voiceStatusText: {
-    color: palette.textMuted,
-    fontSize: 12,
-    lineHeight: 16,
-  },
-  voiceStatusError: {
-    color: palette.danger,
   },
   composerQuote: {
     minHeight: 42,

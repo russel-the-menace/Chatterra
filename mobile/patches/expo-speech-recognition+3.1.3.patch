@@ -1,0 +1,30 @@
+diff --git a/node_modules/expo-speech-recognition/ios/ExpoSpeechRecognizer.swift b/node_modules/expo-speech-recognition/ios/ExpoSpeechRecognizer.swift
+index c474f80..151d447 100644
+--- a/node_modules/expo-speech-recognition/ios/ExpoSpeechRecognizer.swift
++++ b/node_modules/expo-speech-recognition/ios/ExpoSpeechRecognizer.swift
+@@ -509,7 +509,7 @@ actor ExpoSpeechRecognizer: ObservableObject {
+     }
+     if audioEngine?.isRunning ?? false {
+       audioEngine?.stop()
+-      audioEngine?.inputNode.removeTap(onBus: 0)
++      audioEngine?.attachedNodes.forEach { $0.removeTap(onBus: 0) }
+       audioEngine?.inputNode.reset()
+       audioEngine?.reset()
+       audioEngine = nil
+@@ -531,7 +531,6 @@ actor ExpoSpeechRecognizer: ObservableObject {
+     audioEngine?.attachedNodes.forEach(
+       { $0.removeTap(onBus: 0) }
+     )
+-    audioEngine?.inputNode.removeTap(onBus: 0)
+     audioEngine?.inputNode.reset()
+     audioEngine?.reset()
+     audioEngine = nil
+@@ -786,7 +785,7 @@ actor ExpoSpeechRecognizer: ObservableObject {
+     // Stop and clean up the old audio engine before creating a new one
+     if let oldEngine = self.audioEngine {
+       oldEngine.stop()
+-      oldEngine.inputNode.removeTap(onBus: 0)
++      oldEngine.attachedNodes.forEach { $0.removeTap(onBus: 0) }
+       oldEngine.inputNode.reset()
+       oldEngine.reset()
+     }
