@@ -22,6 +22,9 @@ export const starterMessageForCharacter = (character: CharacterLanguageInput) =>
   if (character.id === 'c3') {
     return "Hey, it's Maya. I just finished sorting out my notes for the day. Come keep me company for a minute?"
   }
+  if (character.id === 'seed-sofia-argentina-spanish') {
+    return "Hi, I'm Sofía. We can start from zero and work toward B2, one small step at a time. First Spanish word: hola means hello. Want to try writing hola?"
+  }
 
   if (isCantonese(character.language)) {
     return `你好，我係${character.name || '我'}。你而家想傾咩？`

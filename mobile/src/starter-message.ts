@@ -6,6 +6,7 @@ const languageCode = (language?: string) => {
   if (/mandarin|普通话|普通話|国语|國語/u.test(normalized)) return 'mandarin'
   if (/korean|한국어|韩语|韓語|朝鮮語|조선말/u.test(normalized)) return 'korean'
   if (/japanese|日本語|日语|日語/u.test(normalized)) return 'japanese'
+  if (/spanish|español|espanol|西班牙语|西班牙語/u.test(normalized)) return 'spanish'
   if (/english|英语|英語/u.test(normalized)) return 'english'
   return 'unknown'
 }
@@ -24,6 +25,9 @@ export const starterMessageForCharacter = (character: Character) => {
   if (character.id === 'c3') {
     return "Hey, it's Maya. I just finished sorting out my notes for the day. Come keep me company for a minute?"
   }
+  if (character.id === 'seed-sofia-argentina-spanish') {
+    return "Hi, I'm Sofía. We can start from zero and work toward B2, one small step at a time. First Spanish word: hola means hello. Want to try writing hola?"
+  }
   if (character.id === 'c2' && code === 'english') {
     return 'Hi. I will help you practice English and point out useful mistakes when it helps, while keeping the conversation natural. Tell me about your current project.'
   }
@@ -37,6 +41,8 @@ export const starterMessageForCharacter = (character: Character) => {
       return `こんにちは、${character.name || 'Interviewer'}です。今日は何を話したい？`
     case 'korean':
       return `안녕하세요, ${character.name || 'Interviewer'}입니다. 오늘은 무슨 이야기를 할까요?`
+    case 'spanish':
+      return `Hola, soy ${character.name || 'Interviewer'}. ¿De qué te gustaría hablar hoy?`
     case 'english':
       return `Hello, I'm ${character.name || 'Interviewer'}. What would you like to talk about?`
     default:

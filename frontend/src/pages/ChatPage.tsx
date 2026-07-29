@@ -1150,40 +1150,7 @@ export default function ChatPage(): JSX.Element{
             />
           </label>
 
-          <div className="add-menu-wrap">
-            <button
-              className={"wechat-add-button " + (showAddDrawer ? 'open' : '')}
-              onClick={() => setShowAddDrawer(prev => !prev)}
-              aria-label="Add"
-              aria-expanded={showAddDrawer}
-            >
-              <span className="plus">+</span>
-            </button>
-
-            {showAddDrawer && (
-              <>
-                <button
-                  className="drawer-backdrop"
-                  aria-label="Close add menu"
-                  onClick={() => setShowAddDrawer(false)}
-                />
-                <div className="wechat-drawer" role="menu" aria-label="Add menu">
-                  <button type="button" className="drawer-item" onClick={() => handleAddAction('group')}>
-                    <span className="drawer-icon">💬</span>
-                    <span>Start Group Chat</span>
-                  </button>
-                  <button type="button" className="drawer-item" onClick={() => handleAddAction('character')}>
-                    <span className="drawer-icon">👤+</span>
-                    <span>Add Character</span>
-                  </button>
-                  <button type="button" className="drawer-item" onClick={() => handleAddAction('clear')}>
-                    <span className="drawer-icon">⌫</span>
-                    <span>Clear History</span>
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
+          {/* Characters are source-managed; the editor remains available for existing routes. */}
         </div>
 
         <div className="contacts-list">

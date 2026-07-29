@@ -62,6 +62,7 @@ const recognitionLanguageHint = (preferredLanguage?: string) => {
   if (/korean|한국|韩语|韓語/u.test(preferred)) return 'ko-KR'
   if (/arabic|阿拉伯/u.test(preferred)) return 'ar-SA'
   if (/russian|俄语|俄語/u.test(preferred)) return 'ru-RU'
+  if (/spanish|español|espanol|西班牙语|西班牙語/u.test(preferred)) return 'es-AR'
   if (/english|英语|英語/u.test(preferred)) return 'en-US'
 
   const locale = typeof Intl === 'undefined'

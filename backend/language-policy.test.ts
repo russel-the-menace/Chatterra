@@ -135,4 +135,11 @@ assert.equal(japanese.locale, 'ja-JP')
 assert.equal(isResponseLanguageCompliant('今日の解析の授業、かなり難しかった。', japanese), true)
 assert.equal(isResponseLanguageCompliant('오늘 수업 어려웠어.', japanese), false)
 
+const spanishTutor = resolveResponseLanguagePolicy('Argentine Spanish with English explanations')
+assert.equal(spanishTutor.code, 'spanish')
+assert.equal(spanishTutor.locale, 'es-AR')
+assert.equal(spanishTutor.strict, false)
+assert.match(spanishTutor.instruction, /Argentine Spanish/u)
+assert.equal(isResponseLanguageCompliant('Hola means hello.', spanishTutor), true)
+
 console.log('language policy checks passed')

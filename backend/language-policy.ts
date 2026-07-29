@@ -4,6 +4,7 @@ export type ResponseLanguageCode =
   | 'mandarin'
   | 'japanese'
   | 'korean'
+  | 'spanish'
   | 'unknown'
 
 export type ResponseLanguagePolicy = {
@@ -49,6 +50,7 @@ export type ResponseLanguageAssessment = {
     | 'mandarin'
     | 'japanese'
     | 'korean'
+    | 'spanish'
 }
 
 export type ResponseLanguageContext = {
@@ -93,10 +95,14 @@ type LanguageMetrics = {
 
 const isStrictSetting = (setting: string) => {
   if (/\b(?:only|exclusively|solely)\b|只|仅|只能|只讲|只用/iu.test(setting)) return true
-  return !/(?:\band\b|\bor\b|和|或|、|,|，|\/|\+)/iu.test(setting)
+  return !/(?:\b(?:and|or|with|bilingual)\b|和|或|、|,|，|\/|\+)/iu.test(setting)
 }
 
 const instructionFor = (code: ResponseLanguageCode, setting: string, strict: boolean) => {
+  if (code === 'spanish' && /\benglish\b/iu.test(setting) && !strict) {
+    return 'Output language contract: teach Argentine Spanish through short, natural Spanish examples and exercises, while giving grammar, vocabulary, correction, and learning guidance in clear English. Use English as the explanation language unless the user explicitly asks for another language.'
+  }
+
   if (!strict) {
     return `Language preference: ${setting}. Follow this preference naturally and do not switch languages without a conversational reason.`
   }
@@ -112,6 +118,8 @@ const instructionFor = (code: ResponseLanguageCode, setting: string, strict: boo
       return 'Output language contract: respond exclusively in natural Japanese. Understand English input when necessary, but do not mirror it or switch the answer to English. Do not translate the response unless the user explicitly asks for a translation.'
     case 'korean':
       return 'Output language contract: respond exclusively in natural Korean. Understand English input when necessary, but do not mirror it or switch the answer to English. Do not translate the response unless the user explicitly asks for a translation.'
+    case 'spanish':
+      return 'Output language contract: respond exclusively in natural Spanish. Do not switch to English or another language unless the user explicitly asks for a translation or explanation.'
     default:
       return `Output language contract: respond exclusively in ${setting}. Do not answer in another language and do not translate the response.`
   }
@@ -129,9 +137,11 @@ export const resolveResponseLanguagePolicy = (language?: string): ResponseLangua
           ? 'korean'
           : /japanese|日本語|日语|日語/u.test(normalized)
             ? 'japanese'
-            : /english|英语|英語/u.test(normalized)
-              ? 'english'
-              : 'unknown'
+            : /spanish|español|espanol|西班牙语|西班牙語/u.test(normalized)
+                ? 'spanish'
+                : /english|英语|英語/u.test(normalized)
+                  ? 'english'
+                  : 'unknown'
   const strict = isStrictSetting(setting)
   const label = code === 'unknown'
     ? setting
@@ -146,6 +156,8 @@ export const resolveResponseLanguagePolicy = (language?: string): ResponseLangua
           ? 'ko-KR'
           : code === 'english'
             ? 'en-US'
+            : code === 'spanish'
+              ? 'es-AR'
             : 'und'
 
   return {
@@ -171,6 +183,8 @@ export const starterMessageForPolicy = (
       return `こんにちは、${characterName}です。今日は何を話したい？`
     case 'korean':
       return `안녕하세요, ${characterName}입니다. 오늘은 무슨 이야기를 할까요?`
+    case 'spanish':
+      return `Hola, soy ${characterName}. ¿De qué te gustaría hablar hoy?`
     case 'english':
       return `Hello, I'm ${characterName}. What would you like to talk about?`
     default:
@@ -248,6 +262,10 @@ export const assessResponseLanguage = (
         ? { compliant: true, reason: 'korean' }
         : { compliant: false, reason: 'latin_contamination' }
     }
+    case 'spanish':
+      return LATIN.test(normalized) && !CJK.test(normalized) && !JAPANESE.test(normalized) && !KOREAN.test(normalized)
+        ? { compliant: true, reason: 'spanish' }
+        : { compliant: false, reason: 'latin_contamination' }
     default:
       return { compliant: true, reason: 'unknown_language' }
   }

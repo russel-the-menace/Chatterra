@@ -148,6 +148,10 @@ const MEMORY_CANDIDATE_LIMIT = 100
 export const MESSAGE_BREAK_TOKEN = '<<<MESSAGE_BREAK>>>'
 const MAYA_ONE_LINE_SENTENCE_CHARACTERS = 36
 const MAYA_TEXTING_EMOJI = /\p{Extended_Pictographic}/u
+const LANGUAGE_FEEDBACK_FRIEND_IDS = new Set([
+  'seed-minjun-friend',
+  'seed-ren-friend'
+])
 
 const stopWords = new Set([
   'a', 'an', 'and', 'are', 'as', 'at', 'be', 'been', 'but', 'by', 'do', 'for',
@@ -735,6 +739,7 @@ const assembleSystemPrompt = ({
   learningContext: LearningContext
   responseLanguage: ResponseLanguagePolicy
 }) => {
+  const languageFeedbackFriend = LANGUAGE_FEEDBACK_FRIEND_IDS.has(character.id)
   const contextPacket = {
     mode,
     currentSituation: {
@@ -796,6 +801,8 @@ const assembleSystemPrompt = ({
         ? 'The user explicitly requested language help. Correct selectively, explain briefly, and continue the conversation.'
         : style.correctionPolicy === 'selective'
           ? 'Correct only a useful mistake when doing so will not interrupt the social meaning of the turn.'
+          : languageFeedbackFriend
+            ? 'Language-friend feedback: in an otherwise normal conversation, when the user attempts this character\'s language and there is one high-value naturalness improvement, reply to their meaning first and then offer one concise, optional suggestion. Do not correct every turn or interrupt emotional content.'
           : 'Do not introduce language correction.',
     '',
     'Authored character identity:',

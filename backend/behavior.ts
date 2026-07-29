@@ -166,6 +166,7 @@ export const timeZoneForCharacter = (character: Character) => {
   const authored = `${character.company || ''} ${character.scenario || ''} ${character.background || ''}`.toLowerCase()
   if (/\b(?:new york|nyc)\b/.test(authored)) return 'America/New_York'
   if (/\b(?:india|bengaluru|bangalore|mumbai|delhi)\b/.test(authored)) return 'Asia/Kolkata'
+  if (/\b(?:argentina|buenos aires|córdoba|cordoba)\b/.test(authored)) return 'America/Argentina/Cordoba'
   return 'Asia/Shanghai'
 }
 

@@ -30,7 +30,6 @@ import { isExpoPushToken } from './push-notifications'
 import { translateToEnglish, TranslationServiceError } from './translation-service'
 import {
   clearChatHistory,
-  createCharacter,
   getOrCreateConversationWithStarter,
   getCharacter,
   getConversation,
@@ -48,8 +47,7 @@ import {
   listRecentMessages,
   upsertExpoPushDevice,
   updateAssistantMessageVoice,
-  upsertMessageTranslation,
-  updateCharacter
+  upsertMessageTranslation
 } from './repository'
 import {
   planMayaVoiceMessage,
@@ -80,38 +78,6 @@ const asyncRoute = (
   handler: (req: Request, res: Response, next: NextFunction) => Promise<any>
 ) => (req: Request, res: Response, next: NextFunction) => {
   Promise.resolve(handler(req, res, next)).catch(next)
-}
-
-const characterTextFields: Array<keyof Character> = [
-  'name',
-  'avatar',
-  'role',
-  'company',
-  'personality',
-  'scenario',
-  'goal',
-  'language',
-  'background',
-  'systemPromptTemplate'
-]
-
-const characterFromPayload = (payload: any, existing?: Character): Character => {
-  const now = new Date().toISOString()
-  const character: Character = {
-    ...(existing || {} as Character),
-    id: existing?.id || newId(),
-    name: existing?.name || '',
-    createdAt: existing?.createdAt || now,
-    updatedAt: now
-  }
-
-  characterTextFields.forEach(field => {
-    if (typeof payload?.[field] === 'string') {
-      ;(character as any)[field] = payload[field].trim()
-    }
-  })
-
-  return character
 }
 
 const voiceMetadataFromPayload = (payload: any): VoiceTranscriptMetadata | undefined => {
@@ -146,6 +112,9 @@ const getStarterMessage = (character?: Character) => {
   }
   if (character?.id === 'c3') {
     return "Hey, it's Maya. I just finished sorting out my notes for the day. Come keep me company for a minute?"
+  }
+  if (character?.id === 'seed-sofia-argentina-spanish') {
+    return "Hi, I'm Sofía. We can start from zero and work toward B2, one small step at a time. First Spanish word: hola means hello. Want to try writing hola?"
   }
   if (character?.id === 'c2') {
     if (languagePolicy.code === 'english') {
@@ -208,27 +177,13 @@ app.put('/api/users/:id/characters/:characterId/pin', asyncRoute(async (req, res
   return res.json({ characterId: req.params.characterId, pinned })
 }))
 
-app.post('/api/characters', asyncRoute(async (req, res) => {
-  const character = characterFromPayload(req.body || {})
-  if (!character.name) return res.status(400).json({ error: 'name is required' })
+app.post('/api/characters', (_req, res) => {
+  return res.status(405).json({ error: 'characters are source-managed; add them through seed data and migrations' })
+})
 
-  const created = await createCharacter(character)
-  return res.status(201).json({ character: created })
-}))
-
-app.put('/api/characters/:id', asyncRoute(async (req, res) => {
-  const id = req.params.id
-  if (!id) return res.status(400).json({ error: 'id required' })
-
-  const existing = await getCharacter(id)
-  if (!existing) return res.status(404).json({ error: 'character not found' })
-
-  const nextCharacter = characterFromPayload(req.body || {}, existing)
-  if (!nextCharacter.name) return res.status(400).json({ error: 'name is required' })
-
-  const updated = await updateCharacter(nextCharacter)
-  return res.json({ character: updated })
-}))
+app.put('/api/characters/:id', (_req, res) => {
+  return res.status(405).json({ error: 'characters are source-managed; update them through seed data and migrations' })
+})
 
 app.get('/api/conversations', asyncRoute(async (req, res) => {
   const userId = String(req.query.userId || '')

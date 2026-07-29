@@ -46,6 +46,15 @@ const teacher: Character = {
   scenario: 'English practice for developers'
 }
 
+const sofia: Character = {
+  ...teacher,
+  id: 'seed-sofia-argentina-spanish',
+  name: 'Sofía Álvarez',
+  role: 'Argentine Spanish tutor and friend',
+  company: 'Córdoba, Argentina',
+  language: 'Argentine Spanish with English explanations'
+}
+
 assert.equal(resolveCharacterMode(arjun), 'companion')
 assert.equal(timeZoneForCharacter(arjun), 'Asia/Kolkata')
 assert.equal(deriveProactivePolicy(arjun).enabled, false)
@@ -54,6 +63,8 @@ assert.equal(resolveCharacterMode(ren), 'companion')
 assert.equal(timeZoneForCharacter(minjun), 'Asia/Shanghai')
 assert.equal(timeZoneForCharacter(ren), 'Asia/Shanghai')
 assert.equal(resolveCharacterMode(teacher), 'practice')
+assert.equal(resolveCharacterMode(sofia), 'practice')
+assert.equal(timeZoneForCharacter(sofia), 'America/Argentina/Cordoba')
 
 console.log('character policy checks passed')
 void closeDatabase()
