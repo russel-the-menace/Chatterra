@@ -2310,6 +2310,8 @@ export default function ChatScreen() {
     voiceInput.toggle(draft)
   }
 
+  const voiceStatus = voiceStatusLabel(voiceInput.status, voiceInput.error)
+
   const messageActionMessage = messageActionSession
     ? messages.find(message => (
         (message.renderKey || message.id) === messageActionSession.messageKey
@@ -2550,13 +2552,15 @@ export default function ChatScreen() {
                       pressed && voiceInput.status !== 'processing' && styles.voiceButtonPressed,
                     ]}
                   >
-                    {voiceInput.status === 'processing'
-                      ? <ActivityIndicator size="small" color={palette.accent} />
-                      : <Ionicons
-                          name={voiceInput.status === 'recording' ? 'stop' : 'mic-outline'}
-                          size={21}
-                          color={voiceInput.status === 'error' ? palette.danger : palette.accent}
-                        />}
+                    <Ionicons
+                      name={voiceInput.status === 'recording'
+                        ? 'stop'
+                        : voiceInput.status === 'processing'
+                          ? 'ellipsis-horizontal'
+                          : 'mic-outline'}
+                      size={21}
+                      color={voiceInput.status === 'error' ? palette.danger : palette.accent}
+                    />
                   </Pressable>
                   <Pressable
                     onPress={() => void sendMessage()}
@@ -2580,21 +2584,22 @@ export default function ChatScreen() {
                       : <Ionicons name="arrow-up" size={22} color="#FFFFFF" />}
                   </Pressable>
                 </View>
-                {voiceStatusLabel(voiceInput.status, voiceInput.error) && (
-                  <View style={styles.voiceStatus} accessibilityLiveRegion="polite">
-                    <Ionicons
-                      name={voiceInput.status === 'error' ? 'alert-circle-outline' : 'mic-outline'}
-                      size={15}
-                      color={voiceInput.status === 'error' ? palette.danger : palette.textMuted}
-                    />
-                    <Text style={[
-                      styles.voiceStatusText,
-                      voiceInput.status === 'error' && styles.voiceStatusError,
-                    ]}>
-                      {voiceStatusLabel(voiceInput.status, voiceInput.error)}
-                    </Text>
-                  </View>
-                )}
+                <View style={[
+                  styles.voiceStatus,
+                  !voiceStatus && styles.voiceStatusHidden,
+                ]} accessibilityLiveRegion="polite">
+                  <Ionicons
+                    name={voiceInput.status === 'error' ? 'alert-circle-outline' : 'mic-outline'}
+                    size={15}
+                    color={voiceInput.status === 'error' ? palette.danger : palette.textMuted}
+                  />
+                  <Text style={[
+                    styles.voiceStatusText,
+                    voiceInput.status === 'error' && styles.voiceStatusError,
+                  ]}>
+                    {voiceStatus || ' '}
+                  </Text>
+                </View>
                 {quotedMessage && (
                   <View style={styles.composerQuote}>
                     <Text style={styles.composerQuoteText} numberOfLines={2}>
@@ -3150,6 +3155,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 5,
     paddingHorizontal: 2,
+  },
+  voiceStatusHidden: {
+    opacity: 0,
   },
   voiceStatusText: {
     color: palette.textMuted,

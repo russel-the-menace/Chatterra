@@ -75,6 +75,12 @@ const recognitionLanguageHint = (preferredLanguage?: string) => {
   return locale
 }
 
+const supportsContinuousRecognition = () => {
+  if (Platform.OS !== 'ios') return false
+  const version = Number.parseFloat(String(Platform.Version))
+  return Number.isFinite(version) && version >= 17
+}
+
 const voiceErrorMessage = (event: ExpoSpeechRecognitionErrorEvent) => {
   switch (event.error) {
     case 'not-allowed':
@@ -175,10 +181,15 @@ export const useVoiceInput = ({ language, onTranscriptChange }: VoiceInputOption
       ExpoSpeechRecognitionModule.start({
         lang: recognitionLanguageHint(language),
         interimResults: true,
-        continuous: Platform.OS === 'ios',
+        // iOS 16 has the same Speech APIs, but its long-running recognition sessions
+        // are less reliable. Keep it to one short utterance there.
+        continuous: supportsContinuousRecognition(),
         maxAlternatives: 1,
         addsPunctuation: true,
         iosTaskHint: 'dictation',
+        iosCategory: Platform.OS === 'ios'
+          ? { category: 'record', categoryOptions: [], mode: 'measurement' }
+          : undefined,
       })
     } catch {
       updateSnapshot({ status: 'error', error: 'Voice input could not be started.' })
