@@ -12,6 +12,8 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.chatterra.mobile",
       "infoPlist": {
+        "NSMicrophoneUsageDescription": "Allow Chatterra to use the microphone for voice messages.",
+        "NSSpeechRecognitionUsageDescription": "Allow Chatterra to transcribe your speech.",
         "NSLocalNetworkUsageDescription": "Chatterra connects to your local development server.",
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
