@@ -52,12 +52,12 @@ sessions before exposing another user's data.
 
 ## Mobile Push Notifications
 
-The native app requests notification permission on a real device and registers an
-Expo push token with the backend. When a character sends a proactive message, the
-backend sends a system notification with the character name and message preview; tapping
-it opens that character's chat. Set `EXPO_PUBLIC_EAS_PROJECT_ID` in `mobile/.env` after
-running `eas init`, configure APNs credentials for `com.chatterra.mobile`, and install a
-new native iOS build. See [`mobile/README.md`](mobile/README.md) for the full setup.
+The remote-push implementation is present but disabled while using a free Apple Personal
+Team. Re-enable it later by setting `EXPO_PUBLIC_PUSH_NOTIFICATIONS_ENABLED=true` and
+`PUSH_NOTIFICATIONS_ENABLED=true`, restoring the `expo-notifications` plugin in
+`mobile/app.json`, setting `EXPO_PUBLIC_EAS_PROJECT_ID`, configuring APNs credentials for
+`com.chatterra.mobile`, and installing a new native iOS build. See
+[`mobile/README.md`](mobile/README.md) for details.
 
 Database design and migration details are documented in
 [`backend/DATABASE.md`](backend/DATABASE.md). The target behavioral

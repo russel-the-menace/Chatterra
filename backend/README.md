@@ -37,8 +37,8 @@ Environment variables:
 - `PROACTIVE_SCHEDULER_ENABLED`: set to `false` to disable background character
   initiation; enabled by default.
 - `PROACTIVE_SCHEDULER_INTERVAL_MS`: scheduler scan interval, default `30000`.
-- `PUSH_NOTIFICATIONS_ENABLED`: set to `false` to suppress Expo push delivery while
-  retaining proactive messages; enabled by default.
+- `PUSH_NOTIFICATIONS_ENABLED`: set to `true` to enable Expo push delivery for proactive
+  messages; disabled by default.
 - `EXPO_PUSH_ENDPOINT`: optional override for the Expo Push API endpoint, useful for
   isolated integration tests or a compatible gateway.
 - `PROACTIVE_MIN_DELAY_MINUTES` and `PROACTIVE_MAX_DELAY_MINUTES`: optional internal

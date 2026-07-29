@@ -7,7 +7,9 @@ import { useRouter } from 'expo-router'
 
 import { api } from './api'
 
-if (Platform.OS !== 'web') {
+const pushNotificationsEnabled = process.env.EXPO_PUBLIC_PUSH_NOTIFICATIONS_ENABLED === 'true'
+
+if (pushNotificationsEnabled && Platform.OS !== 'web') {
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
       shouldShowBanner: true,
@@ -31,7 +33,7 @@ const notificationCharacterId = (response: Notifications.NotificationResponse) =
 }
 
 const requestAndRegisterExpoPushToken = async (userId: string) => {
-  if (Platform.OS === 'web' || !Device.isDevice) return false
+  if (!pushNotificationsEnabled || Platform.OS === 'web' || !Device.isDevice) return false
 
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync('messages', {
@@ -67,7 +69,7 @@ export function usePushNotifications(userId: string | null) {
   const openedNotificationIdsRef = useRef(new Set<string>())
 
   useEffect(() => {
-    if (Platform.OS === 'web') return
+    if (!pushNotificationsEnabled || Platform.OS === 'web') return
 
     const openNotification = (response: Notifications.NotificationResponse) => {
       const notificationId = response.notification.request.identifier

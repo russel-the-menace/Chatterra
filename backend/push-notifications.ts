@@ -30,7 +30,7 @@ export const notificationPreview = (content: string) => {
   return `${compact.slice(0, MAX_NOTIFICATION_BODY_LENGTH - 1).trimEnd()}…`
 }
 
-export const pushNotificationsEnabled = () => process.env.PUSH_NOTIFICATIONS_ENABLED !== 'false'
+export const pushNotificationsEnabled = () => process.env.PUSH_NOTIFICATIONS_ENABLED === 'true'
 
 export const buildExpoPushMessages = (
   tokens: string[],

@@ -116,49 +116,22 @@ pulling changes that affect the native configuration.
 
 ## Push Notifications
 
-On a physical device, Chatterra asks for system notification permission after the local
-user ID is available. When a character proactively sends a message, the backend uses the
-Expo Push Service to deliver a banner notification; tapping it opens that character's
-chat. The app registers its token only after permission is granted.
+The remote-push implementation is currently disabled because it requires a paid Apple
+Developer Program account for APNs. With the default configuration, the app does not ask
+for notification permission, register a device token, or send push requests.
 
 Set an EAS project ID in `mobile/.env` after `eas init`:
 
 ```bash
 EXPO_PUBLIC_EAS_PROJECT_ID=YOUR_EAS_PROJECT_ID
+EXPO_PUBLIC_PUSH_NOTIFICATIONS_ENABLED=true
 ```
 
 For iOS, configure APNs credentials for `com.chatterra.mobile` in the associated Expo
-project and install a newly built development or production app. The iOS simulator cannot
-validate remote push delivery; this app already requires a native build for dictation.
-
-## Push Notifications
-
-The app requests notification permission on a physical device after its user identity
-is available. When a character sends a proactive message that has been successfully
-saved by the backend, the server sends a standard system notification. A tap opens
-that character's chat. Messages sent while the user is actively chatting do not create
-an extra push notification.
-
-Remote notification registration requires an EAS project ID. Initialize the Expo
-project in the account that will own the iOS build, then add the resulting ID to
-`mobile/.env`:
-
-```bash
-npx eas-cli@latest init
-```
-
-```bash
-EXPO_PUBLIC_EAS_PROJECT_ID=YOUR_EAS_PROJECT_ID
-```
-
-The backend migration `015_add_expo_push_devices.sql` must be applied before a device
-can register. The server sends through Expo Push Service by default; set
-`PUSH_NOTIFICATIONS_ENABLED=false` in `backend/.env` to suspend delivery. Configure
-Apple Push Notification credentials in the same EAS project and install a new iOS
-development or production build. Expo Go is not a valid test target for this feature.
-
-The notification preview is limited to 140 characters of the message text, so only
-enable it where lock-screen preview is appropriate.
+project, set `PUSH_NOTIFICATIONS_ENABLED=true` in the backend, restore the
+`expo-notifications` plugin in `app.json`, and install a newly built development or
+production app. The iOS simulator cannot validate remote push delivery; this app already
+requires a native build for dictation.
 
 ## Chat Scroll Invariants
 
