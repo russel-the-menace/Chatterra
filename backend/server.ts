@@ -28,10 +28,12 @@ import { createInferenceTrace } from './inference-logger'
 import { processDueProactiveActions } from './proactive-service'
 import { isExpoPushToken } from './push-notifications'
 import { translateToEnglish, TranslationServiceError } from './translation-service'
+import { parseCustomCharacterDocument } from './custom-character'
 import {
   clearChatHistory,
+  createCharacter,
   getOrCreateConversationWithStarter,
-  getCharacter,
+  getCharacterForUser,
   getConversation,
   getMessageTranslation,
   getOwnedMessage,
@@ -47,7 +49,8 @@ import {
   listRecentMessages,
   upsertExpoPushDevice,
   updateAssistantMessageVoice,
-  upsertMessageTranslation
+  upsertMessageTranslation,
+  updateCharacter
 } from './repository'
 import {
   planMayaVoiceMessage,
@@ -122,6 +125,10 @@ const getStarterMessage = (character?: Character) => {
     }
   }
 
+  if (character?.runtimeConfig?.starterMessage) {
+    return character.runtimeConfig.starterMessage
+  }
+
   return starterMessageForPolicy(character?.name || 'Interviewer', languagePolicy)
 }
 
@@ -137,8 +144,9 @@ app.get('/api/health', asyncRoute(async (_req, res) => {
   })
 }))
 
-app.get('/api/characters', asyncRoute(async (_req, res) => {
-  const characters = await listCharacters()
+app.get('/api/characters', asyncRoute(async (req, res) => {
+  const userId = typeof req.query.userId === 'string' ? req.query.userId.trim() : undefined
+  const characters = await listCharacters(userId)
   return res.json({ characters })
 }))
 
@@ -177,13 +185,65 @@ app.put('/api/users/:id/characters/:characterId/pin', asyncRoute(async (req, res
   return res.json({ characterId: req.params.characterId, pinned })
 }))
 
-app.post('/api/characters', (_req, res) => {
-  return res.status(405).json({ error: 'characters are source-managed; add them through seed data and migrations' })
-})
+app.post('/api/characters', asyncRoute(async (req, res) => {
+  const userId = typeof req.body?.userId === 'string' ? req.body.userId.trim() : ''
+  const name = typeof req.body?.name === 'string' ? req.body.name.trim().slice(0, 120) : ''
+  const document = typeof req.body?.systemPromptTemplate === 'string' ? req.body.systemPromptTemplate : ''
+  if (!userId) return res.status(400).json({ error: 'userId is required' })
+  if (!name) return res.status(400).json({ error: 'name is required' })
 
-app.put('/api/characters/:id', (_req, res) => {
-  return res.status(405).json({ error: 'characters are source-managed; update them through seed data and migrations' })
-})
+  let parsed
+  try {
+    parsed = parseCustomCharacterDocument(document)
+  } catch (error) {
+    return res.status(400).json({ error: error instanceof Error ? error.message : 'Invalid character document' })
+  }
+  const now = new Date().toISOString()
+  const character: Character = {
+    id: newId(),
+    name,
+    avatar: typeof req.body?.avatar === 'string' ? req.body.avatar.slice(0, 1_500_000) : undefined,
+    role: parsed.runtimeConfig.mode === 'practice' ? 'Custom practice character' : 'Custom companion',
+    personality: 'User-authored custom character',
+    language: parsed.languageSetting,
+    systemPromptTemplate: document,
+    runtimeConfig: parsed.runtimeConfig,
+    createdAt: now,
+    updatedAt: now,
+  }
+  const created = await createCharacter(userId, character)
+  return res.status(201).json({ character: created })
+}))
+
+app.put('/api/characters/:id', asyncRoute(async (req, res) => {
+  const userId = typeof req.body?.userId === 'string' ? req.body.userId.trim() : ''
+  const name = typeof req.body?.name === 'string' ? req.body.name.trim().slice(0, 120) : ''
+  const document = typeof req.body?.systemPromptTemplate === 'string' ? req.body.systemPromptTemplate : ''
+  if (!userId) return res.status(400).json({ error: 'userId is required' })
+  if (!name) return res.status(400).json({ error: 'name is required' })
+  const existing = await getCharacterForUser(userId, req.params.id)
+  if (!existing) return res.status(404).json({ error: 'character not found' })
+  if (!existing.ownerUserId) return res.status(403).json({ error: 'built-in characters are source-managed' })
+
+  let parsed
+  try {
+    parsed = parseCustomCharacterDocument(document)
+  } catch (error) {
+    return res.status(400).json({ error: error instanceof Error ? error.message : 'Invalid character document' })
+  }
+  const updated = await updateCharacter(userId, {
+    ...existing,
+    name,
+    avatar: typeof req.body?.avatar === 'string' ? req.body.avatar.slice(0, 1_500_000) : undefined,
+    role: parsed.runtimeConfig.mode === 'practice' ? 'Custom practice character' : 'Custom companion',
+    personality: 'User-authored custom character',
+    language: parsed.languageSetting,
+    systemPromptTemplate: document,
+    runtimeConfig: parsed.runtimeConfig,
+    updatedAt: new Date().toISOString(),
+  })
+  return res.json({ character: updated })
+}))
 
 app.get('/api/conversations', asyncRoute(async (req, res) => {
   const userId = String(req.query.userId || '')
@@ -319,7 +379,7 @@ app.get('/api/characters/:id/state', asyncRoute(async (req, res) => {
   const userId = String(req.query.userId || '')
   if (!userId) return res.status(400).json({ error: 'userId required' })
 
-  const character = await getCharacter(req.params.id)
+  const character = await getCharacterForUser(userId, req.params.id)
   if (!character) return res.status(404).json({ error: 'character not found' })
 
   const mode = resolveCharacterMode(character)
@@ -418,7 +478,7 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
     hasQuote: Boolean(quoteInput)
   })
 
-  const storedCharacter = await getCharacter(String(character.id))
+  const storedCharacter = await getCharacterForUser(normalizedUserId, String(character.id))
   if (!storedCharacter) return res.status(400).json({ error: 'character not found' })
   if (clientMessageId) {
     const existingClientMessage = await getOwnedMessage(normalizedUserId, clientMessageId)

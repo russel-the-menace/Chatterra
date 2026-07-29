@@ -116,7 +116,15 @@ export default function ContactsScreen() {
           <Text style={styles.title}>Chatterra</Text>
           <Text style={styles.subtitle}>Conversations</Text>
         </View>
-        {/* Characters are source-managed; keep the editor route for existing pages only. */}
+        <Pressable
+          onPress={() => router.push({ pathname: '/character/[characterId]', params: { characterId: 'new' } })}
+          accessibilityRole="button"
+          accessibilityLabel="Add character"
+          hitSlop={10}
+          style={({ pressed }) => [styles.iconButton, pressed && styles.iconButtonPressed]}
+        >
+          <Ionicons name="add" size={25} color={palette.text} />
+        </Pressable>
       </View>
 
       <View style={styles.searchBox}>

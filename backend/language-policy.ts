@@ -103,6 +103,10 @@ const instructionFor = (code: ResponseLanguageCode, setting: string, strict: boo
     return 'Output language contract: teach Argentine Spanish through short, natural Spanish examples and exercises, while giving grammar, vocabulary, correction, and learning guidance in clear English. Use English as the explanation language unless the user explicitly asks for another language.'
   }
 
+  if (code !== 'english' && /\benglish\b/iu.test(setting) && !strict) {
+    return `Output language contract: use natural ${code} for examples and ordinary conversation, while giving explanations and correction in clear English when the character document calls for them.`
+  }
+
   if (!strict) {
     return `Language preference: ${setting}. Follow this preference naturally and do not switch languages without a conversational reason.`
   }

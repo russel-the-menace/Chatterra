@@ -83,8 +83,10 @@ export const api = {
     return request<{ status: string; database: string }>('/api/health')
   },
 
-  async listCharacters() {
-    const result = await request<{ characters: Character[] }>('/api/characters')
+  async listCharacters(userId: string) {
+    const result = await request<{ characters: Character[] }>(
+      `/api/characters?userId=${encodeURIComponent(userId)}`
+    )
     return result.characters
   },
 
@@ -92,18 +94,18 @@ export const api = {
     return request<SyncSnapshot>(`/api/sync?userId=${encodeURIComponent(userId)}`)
   },
 
-  async createCharacter(character: Omit<Character, 'id'>) {
+  async createCharacter(userId: string, character: Omit<Character, 'id'>) {
     const result = await request<{ character: Character }>('/api/characters', {
       method: 'POST',
-      body: JSON.stringify(character),
+      body: JSON.stringify({ ...character, userId }),
     })
     return result.character
   },
 
-  async updateCharacter(character: Character) {
+  async updateCharacter(userId: string, character: Character) {
     const result = await request<{ character: Character }>(`/api/characters/${encodeURIComponent(character.id)}`, {
       method: 'PUT',
-      body: JSON.stringify(character),
+      body: JSON.stringify({ ...character, userId }),
     })
     return result.character
   },

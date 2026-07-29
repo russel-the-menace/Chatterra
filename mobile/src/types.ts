@@ -10,6 +10,18 @@ export type Character = {
   language?: string
   background?: string
   systemPromptTemplate?: string
+  ownerUserId?: string
+  runtimeConfig?: {
+    mode: 'companion' | 'practice'
+    language: string
+    explanationLanguage?: string
+    correction: 'never' | 'on_request' | 'selective' | 'always'
+    replyStyle: 'concise' | 'balanced' | 'expressive'
+    delivery: 'single' | 'flexible' | 'bursty'
+    initiative: 'off' | 'low' | 'normal' | 'high'
+    timezone?: string
+    starterMessage?: string
+  }
   createdAt?: string
   updatedAt?: string
 }

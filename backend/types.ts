@@ -24,9 +24,29 @@ export interface Character {
   language?: string
   background?: string
   systemPromptTemplate?: string
+  ownerUserId?: UUID
+  runtimeConfig?: CharacterRuntimeConfig
   currentVersion?: number
   createdAt: string
   updatedAt: string
+}
+
+export type CharacterMode = 'companion' | 'practice'
+export type CharacterCorrectionPolicy = 'never' | 'on_request' | 'selective' | 'always'
+export type CharacterReplyStyle = 'concise' | 'balanced' | 'expressive'
+export type CharacterDelivery = 'single' | 'flexible' | 'bursty'
+export type CharacterInitiative = 'off' | 'low' | 'normal' | 'high'
+
+export interface CharacterRuntimeConfig {
+  mode: CharacterMode
+  language: string
+  explanationLanguage?: string
+  correction: CharacterCorrectionPolicy
+  replyStyle: CharacterReplyStyle
+  delivery: CharacterDelivery
+  initiative: CharacterInitiative
+  timezone?: string
+  starterMessage?: string
 }
 
 export interface Conversation {

@@ -29,6 +29,10 @@ const mapCharacter = (row: any): Character => ({
   language: row.language ?? undefined,
   background: row.background ?? undefined,
   systemPromptTemplate: row.system_prompt_template ?? undefined,
+  ownerUserId: row.owner_user_id ?? undefined,
+  runtimeConfig: row.default_settings && Object.keys(row.default_settings).length > 0
+    ? row.default_settings
+    : undefined,
   currentVersion: Number(row.current_version || 1),
   createdAt: iso(row.created_at)!,
   updatedAt: iso(row.updated_at)!
@@ -133,7 +137,8 @@ const characterDefinition = (character: Character) => JSON.stringify({
   goal: character.goal || '',
   language: character.language || '',
   background: character.background || '',
-  systemPromptTemplate: character.systemPromptTemplate || ''
+  systemPromptTemplate: character.systemPromptTemplate || '',
+  runtimeConfig: character.runtimeConfig || {}
 })
 
 const insertCharacterVersion = async (
@@ -209,7 +214,10 @@ export const setCharacterPinned = async (
 ): Promise<boolean | undefined> => {
   return withTransaction(async client => {
     await ensureUser(client, userId)
-    const characterResult = await client.query('SELECT 1 FROM characters WHERE id = $1', [characterId])
+    const characterResult = await client.query(
+      'SELECT 1 FROM characters WHERE id = $1 AND (owner_user_id IS NULL OR owner_user_id = $2)',
+      [characterId, userId]
+    )
     if (!characterResult.rowCount) return undefined
 
     if (pinned) {
@@ -232,8 +240,15 @@ export const setCharacterPinned = async (
   })
 }
 
-export const listCharacters = async (): Promise<Character[]> => {
-  const result = await query('SELECT * FROM characters ORDER BY created_at, name')
+export const listCharacters = async (userId?: string): Promise<Character[]> => {
+  const result = userId
+    ? await query(
+      `SELECT * FROM characters
+       WHERE owner_user_id IS NULL OR owner_user_id = $1
+       ORDER BY created_at, name`,
+      [userId]
+    )
+    : await query('SELECT * FROM characters WHERE owner_user_id IS NULL ORDER BY created_at, name')
   return result.rows.map(mapCharacter)
 }
 
@@ -242,15 +257,25 @@ export const getCharacter = async (id: string): Promise<Character | undefined> =
   return result.rows[0] ? mapCharacter(result.rows[0]) : undefined
 }
 
-export const createCharacter = async (character: Character): Promise<Character> => {
+export const getCharacterForUser = async (userId: string, id: string): Promise<Character | undefined> => {
+  const result = await query(
+    `SELECT * FROM characters
+     WHERE id = $1 AND (owner_user_id IS NULL OR owner_user_id = $2)`,
+    [id, userId]
+  )
+  return result.rows[0] ? mapCharacter(result.rows[0]) : undefined
+}
+
+export const createCharacter = async (userId: string, character: Character): Promise<Character> => {
   return withTransaction(async client => {
+    await ensureUser(client, userId)
     const result = await client.query(
       `INSERT INTO characters (
          id, name, avatar, role, personality, company, scenario, goal, language,
          background, system_prompt_template, default_settings, current_version,
-         created_at, updated_at
+         owner_user_id, created_at, updated_at
        ) VALUES (
-         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, '{}'::jsonb, 1, $12, $13
+         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, 1, $13, $14, $15
        )
        RETURNING *`,
       [
@@ -265,6 +290,8 @@ export const createCharacter = async (character: Character): Promise<Character> 
         character.language ?? null,
         character.background ?? null,
         character.systemPromptTemplate ?? null,
+        JSON.stringify(character.runtimeConfig || {}),
+        userId,
         character.createdAt,
         character.updatedAt
       ]
@@ -275,11 +302,11 @@ export const createCharacter = async (character: Character): Promise<Character> 
   })
 }
 
-export const updateCharacter = async (character: Character): Promise<Character | undefined> => {
+export const updateCharacter = async (userId: string, character: Character): Promise<Character | undefined> => {
   return withTransaction(async client => {
     const currentResult = await client.query(
-      'SELECT current_version FROM characters WHERE id = $1 FOR UPDATE',
-      [character.id]
+      'SELECT current_version FROM characters WHERE id = $1 AND owner_user_id = $2 FOR UPDATE',
+      [character.id, userId]
     )
     if (!currentResult.rows[0]) return undefined
 
@@ -296,9 +323,10 @@ export const updateCharacter = async (character: Character): Promise<Character |
          language = $9,
          background = $10,
          system_prompt_template = $11,
-         current_version = $12,
-         updated_at = $13
-       WHERE id = $1
+         default_settings = $12::jsonb,
+         current_version = $13,
+         updated_at = $14
+       WHERE id = $1 AND owner_user_id = $15
        RETURNING *`,
       [
         character.id,
@@ -312,8 +340,10 @@ export const updateCharacter = async (character: Character): Promise<Character |
         character.language ?? null,
         character.background ?? null,
         character.systemPromptTemplate ?? null,
+        JSON.stringify(character.runtimeConfig || {}),
         nextVersion,
-        character.updatedAt
+        character.updatedAt,
+        userId
       ]
     )
     const updated = result.rows[0] ? mapCharacter(result.rows[0]) : undefined
@@ -325,6 +355,16 @@ export const updateCharacter = async (character: Character): Promise<Character |
          WHERE character_id = $1`,
         [updated.id, nextVersion, updated.updatedAt]
       )
+      if (updated.runtimeConfig?.timezone) {
+        await client.query(
+          `UPDATE simulation_cursors
+           SET local_timezone = $2, updated_at = NOW()
+           WHERE instance_id IN (
+             SELECT id FROM character_instances WHERE character_id = $1
+           )`,
+          [updated.id, updated.runtimeConfig.timezone]
+        )
+      }
     }
     return updated
   })
@@ -343,7 +383,12 @@ export const listConversations = async (userId: string): Promise<Conversation[]>
 export const getSyncSnapshot = async (userId: string): Promise<SyncSnapshot> => {
   return withTransaction(async client => {
     await ensureUser(client, userId)
-    const characterResult = await client.query('SELECT * FROM characters ORDER BY created_at, name')
+    const characterResult = await client.query(
+      `SELECT * FROM characters
+       WHERE owner_user_id IS NULL OR owner_user_id = $1
+       ORDER BY created_at, name`,
+      [userId]
+    )
     const conversationResult = await client.query(
       `SELECT
          conversations.*,

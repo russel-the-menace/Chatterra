@@ -10,6 +10,8 @@ export type Character = {
   language: string
   background?: string
   systemPromptTemplate?: string
+  ownerUserId?: string
+  runtimeConfig?: Record<string, unknown>
   createdAt?: string
   updatedAt?: string
 }

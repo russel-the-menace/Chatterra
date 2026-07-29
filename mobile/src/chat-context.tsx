@@ -64,7 +64,7 @@ type ChatContextValue = {
       (current: ComposerQuoteDraft | null) => ComposerQuoteDraft | null
     )
   ) => void
-  refreshCharacters: () => Promise<void>
+  refreshCharacters: (requestedUserId?: string) => Promise<void>
   saveCharacter: (character: Character | Omit<Character, 'id'>) => Promise<Character>
   markCharacterRead: (characterId: string) => void
   setActiveCharacter: (characterId: string | null) => void
@@ -179,9 +179,11 @@ export function ChatProvider({ children }: PropsWithChildren) {
     return () => subscription.remove()
   }, [scheduleQuoteDraftPersistence])
 
-  const refreshCharacters = useCallback(async () => {
+  const refreshCharacters = useCallback(async (requestedUserId?: string) => {
+    const id = requestedUserId || userId
+    if (!id) throw new Error('User is not ready.')
     try {
-      const nextCharacters = await api.listCharacters()
+      const nextCharacters = await api.listCharacters(id)
       setCharacters(nextCharacters)
       setConnectionError(null)
     } catch (error) {
@@ -189,7 +191,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
       setConnectionError(message)
       throw error
     }
-  }, [])
+  }, [userId])
 
   useEffect(() => {
     let cancelled = false
@@ -205,7 +207,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         setQuoteDrafts(storedQuoteDrafts)
         const [pinnedIds] = await Promise.all([
           api.listPinnedCharacterIds(storedUserId),
-          refreshCharacters(),
+          refreshCharacters(storedUserId),
         ])
         if (!cancelled) {
           setPinnedCharacterIds(new Set(pinnedIds))
@@ -427,9 +429,10 @@ export function ChatProvider({ children }: PropsWithChildren) {
   }, [scheduleQuoteDraftPersistence])
 
   const saveCharacter = useCallback(async (character: Character | Omit<Character, 'id'>) => {
+    if (!userId) throw new Error('User is not ready.')
     const saved = 'id' in character && character.id
-      ? await api.updateCharacter(character as Character)
-      : await api.createCharacter(character as Omit<Character, 'id'>)
+      ? await api.updateCharacter(userId, character as Character)
+      : await api.createCharacter(userId, character as Omit<Character, 'id'>)
     setCharacters(current => {
       const exists = current.some(item => item.id === saved.id)
       return exists
@@ -437,7 +440,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         : [...current, saved]
     })
     return saved
-  }, [])
+  }, [userId])
 
   const markCharacterRead = useCallback((characterId: string) => {
     setUnreadCharacterIds(current => {

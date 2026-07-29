@@ -137,15 +137,25 @@ const editableFields: Array<{
   multiline?: boolean
 }> = [
   { key: 'name', label: 'Name' },
-  { key: 'role', label: 'Role' },
-  { key: 'company', label: 'Company' },
-  { key: 'scenario', label: 'Scenario' },
-  { key: 'goal', label: 'Goal' },
-  { key: 'language', label: 'Language' },
-  { key: 'personality', label: 'Personality', multiline: true },
-  { key: 'background', label: 'Background', multiline: true },
-  { key: 'systemPromptTemplate', label: 'System Prompt Template', multiline: true }
+  { key: 'systemPromptTemplate', label: 'Character document', multiline: true }
 ]
+
+const customCharacterDocumentTemplate = `---
+mode: companion
+language: English
+correction: selective
+reply_style: balanced
+delivery: flexible
+initiative: off
+timezone: Asia/Shanghai
+---
+
+# Identity
+You are a thoughtful conversation partner with a distinct point of view.
+
+# Conversation style
+Keep replies natural, direct, and suited to a chat app.
+`
 
 const createCharacterDraft = (): Character => ({
   id: '',
@@ -158,7 +168,7 @@ const createCharacterDraft = (): Character => ({
   language: 'English only',
   personality: '',
   background: '',
-  systemPromptTemplate: ''
+  systemPromptTemplate: customCharacterDocumentTemplate
 })
 
 export default function ChatPage(): JSX.Element{
@@ -460,7 +470,7 @@ export default function ChatPage(): JSX.Element{
     }
     const loadCharacters = async () => {
       try {
-        const res = await fetch(apiUrl('/api/characters'))
+        const res = await fetch(apiUrl(`/api/characters?userId=${encodeURIComponent(uid)}`))
         if (res.ok) {
           const data = await res.json()
           if (Array.isArray(data.characters) && data.characters.length > 0) {
@@ -975,6 +985,11 @@ export default function ChatPage(): JSX.Element{
     const endpoint = isNewCharacter
       ? apiUrl('/api/characters')
       : apiUrl(`/api/characters/${editingCharacter.id}`)
+    const ownerUserId = userId || localStorage.getItem('chatterra_userId')
+    if (!ownerUserId) {
+      setCharacterEditorError('User is not ready.')
+      return
+    }
 
     setIsSavingCharacter(true)
     setCharacterEditorError('')
@@ -983,7 +998,7 @@ export default function ChatPage(): JSX.Element{
       const res = await fetch(endpoint, {
         method: isNewCharacter ? 'POST' : 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editingCharacter)
+        body: JSON.stringify({ ...editingCharacter, userId: ownerUserId })
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data.error || 'Failed to save character')
@@ -1150,7 +1165,15 @@ export default function ChatPage(): JSX.Element{
             />
           </label>
 
-          {/* Characters are source-managed; the editor remains available for existing routes. */}
+          <button
+            type="button"
+            className="wechat-add-button"
+            onClick={openNewCharacterEditor}
+            aria-label="Add character"
+            title="Add character"
+          >
+            <span className="plus">+</span>
+          </button>
         </div>
 
         <div className="contacts-list">

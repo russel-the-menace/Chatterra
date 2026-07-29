@@ -163,6 +163,7 @@ const activityForHour = (hour: number, character: Character) => {
 }
 
 export const timeZoneForCharacter = (character: Character) => {
+  if (character.runtimeConfig?.timezone) return character.runtimeConfig.timezone
   const authored = `${character.company || ''} ${character.scenario || ''} ${character.background || ''}`.toLowerCase()
   if (/\b(?:new york|nyc)\b/.test(authored)) return 'America/New_York'
   if (/\b(?:india|bengaluru|bangalore|mumbai|delhi)\b/.test(authored)) return 'Asia/Kolkata'
@@ -171,6 +172,7 @@ export const timeZoneForCharacter = (character: Character) => {
 }
 
 export const resolveCharacterMode = (character: Character): InteractionMode => {
+  if (character.runtimeConfig?.mode) return character.runtimeConfig.mode
   const authoredRole = (character.role || '').toLowerCase()
   const authoredPolicy = [
     character.role,

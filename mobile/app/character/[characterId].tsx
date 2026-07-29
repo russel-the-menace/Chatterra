@@ -22,36 +22,28 @@ import { useChat } from '@/src/chat-context'
 import { layout, palette } from '@/src/theme'
 import { Character } from '@/src/types'
 
-type EditableField = Exclude<keyof Character, 'id' | 'avatar' | 'createdAt' | 'updatedAt'>
+const customCharacterDocumentTemplate = `---
+mode: companion
+language: English
+correction: selective
+reply_style: balanced
+delivery: flexible
+initiative: off
+timezone: Asia/Shanghai
+---
 
-const fields: {
-  key: EditableField
-  label: string
-  multiline?: boolean
-}[] = [
-  { key: 'name', label: 'Name' },
-  { key: 'role', label: 'Role' },
-  { key: 'company', label: 'Company' },
-  { key: 'scenario', label: 'Scenario' },
-  { key: 'goal', label: 'Goal' },
-  { key: 'language', label: 'Language' },
-  { key: 'personality', label: 'Personality', multiline: true },
-  { key: 'background', label: 'Background', multiline: true },
-  { key: 'systemPromptTemplate', label: 'System Prompt Template', multiline: true },
-]
+# Identity
+You are a thoughtful conversation partner with a distinct point of view.
+
+# Conversation style
+Keep replies natural, direct, and suited to a chat app.
+`
 
 const createCharacterDraft = (): Character => ({
   id: '',
   name: '',
   avatar: '',
-  role: '',
-  company: '',
-  scenario: '',
-  goal: '',
-  language: 'English only',
-  personality: '',
-  background: '',
-  systemPromptTemplate: '',
+  systemPromptTemplate: customCharacterDocumentTemplate,
 })
 
 export default function CharacterEditorScreen() {
@@ -73,10 +65,6 @@ export default function CharacterEditorScreen() {
       setDraft({ ...existingCharacter })
     }
   }, [draft.id, existingCharacter])
-
-  const updateField = (key: EditableField, value: string) => {
-    setDraft(current => ({ ...current, [key]: value }))
-  }
 
   const pickAvatar = async () => {
     try {
@@ -211,19 +199,28 @@ export default function CharacterEditorScreen() {
             </View>
           )}
 
-          {fields.map(field => (
-            <View key={field.key} style={styles.field}>
-              <Text style={styles.label}>{field.label}</Text>
-              <TextInput
-                value={String(draft[field.key] || '')}
-                onChangeText={value => updateField(field.key, value)}
-                multiline={field.multiline}
-                textAlignVertical={field.multiline ? 'top' : 'center'}
-                autoCapitalize={field.key === 'systemPromptTemplate' ? 'sentences' : 'words'}
-                style={[styles.input, field.multiline && styles.multilineInput]}
-              />
-            </View>
-          ))}
+          <View style={styles.field}>
+            <Text style={styles.label}>Name</Text>
+            <TextInput
+              value={draft.name}
+              onChangeText={name => setDraft(current => ({ ...current, name }))}
+              autoCapitalize="words"
+              style={styles.input}
+            />
+          </View>
+
+          <View style={styles.field}>
+            <Text style={styles.label}>Character document</Text>
+            <TextInput
+              value={draft.systemPromptTemplate || ''}
+              onChangeText={systemPromptTemplate => setDraft(current => ({ ...current, systemPromptTemplate }))}
+              multiline
+              textAlignVertical="top"
+              autoCapitalize="sentences"
+              autoCorrect={false}
+              style={[styles.input, styles.documentInput]}
+            />
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -322,8 +319,11 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 21,
   },
-  multilineInput: {
-    minHeight: 112,
+  documentInput: {
+    minHeight: 420,
+    fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }),
+    fontSize: 13,
+    lineHeight: 19,
   },
   errorBanner: {
     minHeight: 42,

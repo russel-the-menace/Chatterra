@@ -23,6 +23,7 @@ import {
   ResponseLanguagePolicy
 } from './language-policy'
 import { DIALOGUE_ONLY_INSTRUCTION, normalizeAssistantSpeech } from './response-format'
+import { promptBodyForCharacter } from './custom-character'
 import {
   messageAndQuoteForRouting,
   messageAndQuoteForResponseStyle,
@@ -52,7 +53,7 @@ export type ResponseStyle = {
   targetWords: number
   messageCadence: MessageCadence
   turnPriority: 'emotional_support' | 'language_help' | 'conversation'
-  correctionPolicy: 'defer' | 'after_empathy_if_requested' | 'requested' | 'selective' | 'none'
+  correctionPolicy: 'defer' | 'after_empathy_if_requested' | 'requested' | 'selective' | 'always' | 'none'
   lengthReasonCodes: string[]
 }
 
@@ -308,7 +309,11 @@ const distressSignal = (text: string) => phraseSignal(text, [
 
 const explicitCorrectionSignal = (text: string) => phraseSignal(text, [
   'correct my english', 'correct my grammar', 'is this sentence correct',
-  'how should i say', 'what is the right way to say', 'grammar check'
+  'how should i say', 'what is the right way to say', 'grammar check',
+  '直して', '添削', '自然に言う', 'この文', '修正して',
+  '고쳐', '첨삭', '자연스럽게', '문장', '틀렸',
+  '帮我改', '幫我改', '纠正', '糾正', '更自然',
+  'corrige', 'más natural', 'mas natural'
 ])
 
 const narrativeSignal = (text: string) => phraseSignal(text, [
@@ -324,6 +329,9 @@ const conflictSignal = (text: string) => phraseSignal(text, [
 ])
 
 const personalityTalkativeness = (character: Character) => {
+  if (character.runtimeConfig?.replyStyle === 'concise') return 0.25
+  if (character.runtimeConfig?.replyStyle === 'expressive') return 0.75
+  if (character.runtimeConfig?.replyStyle === 'balanced') return 0.5
   const text = `${character.personality || ''} ${character.background || ''}`
   const expressive = phraseSignal(text, [
     'extroverted', 'talkative', 'expressive', 'enthusiastic', 'chatty', 'storyteller',
@@ -360,6 +368,16 @@ const inferMessageCadence = (
       preferredCount,
       maxCount: 3,
       reasonCodes: ['maya_sentence_bubble_delivery']
+    }
+  }
+
+  if (character.runtimeConfig?.delivery) {
+    const delivery = character.runtimeConfig.delivery
+    return {
+      pattern: delivery === 'single' ? 'single' : delivery,
+      preferredCount: delivery === 'bursty' && targetWords >= 48 ? 2 : 1,
+      maxCount: delivery === 'single' ? 1 : delivery === 'bursty' ? 3 : 2,
+      reasonCodes: ['custom_runtime_delivery']
     }
   }
 
@@ -438,10 +456,19 @@ export const inferResponseStyle = (
     : mode === 'practice' && correctionRequested
       ? 'language_help'
       : 'conversation'
+  const configuredCorrection = character.runtimeConfig?.correction
   const correctionPolicy: ResponseStyle['correctionPolicy'] = emotionalPriority
     ? correctionRequested
       ? 'after_empathy_if_requested'
       : 'defer'
+    : configuredCorrection === 'never'
+      ? 'none'
+      : configuredCorrection === 'on_request'
+        ? correctionRequested ? 'requested' : 'none'
+        : configuredCorrection === 'always'
+          ? 'always'
+          : configuredCorrection === 'selective'
+            ? 'selective'
     : mode === 'practice'
       ? correctionRequested
         ? 'requested'
@@ -671,7 +698,7 @@ const interpolatePrompt = (template: string, character: Character) => {
 
 const personaPrompt = (character: Character) => {
   if (character.systemPromptTemplate?.trim()) {
-    return interpolatePrompt(character.systemPromptTemplate, character)
+    return interpolatePrompt(promptBodyForCharacter(character), character)
   }
   return [
     `You are ${character.name}.`,
@@ -801,6 +828,8 @@ const assembleSystemPrompt = ({
         ? 'The user explicitly requested language help. Correct selectively, explain briefly, and continue the conversation.'
         : style.correctionPolicy === 'selective'
           ? 'Correct only a useful mistake when doing so will not interrupt the social meaning of the turn.'
+          : style.correctionPolicy === 'always'
+            ? 'Offer a concise correction before continuing, except where the empathy-first override applies.'
           : languageFeedbackFriend
             ? 'Language-friend feedback: in an otherwise normal conversation, when the user attempts this character\'s language and there is one high-value naturalness improvement, reply to their meaning first and then offer one concise, optional suggestion. Do not correct every turn or interrupt emotional content.'
           : 'Do not introduce language correction.',
