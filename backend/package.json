@@ -12,6 +12,7 @@
     "test:language": "ts-node --transpile-only language-policy.test.ts",
     "test:response-style": "ts-node --transpile-only response-style.test.ts",
     "test:model-gateway": "ts-node --transpile-only model-gateway.test.ts",
+    "test:message-page-merge": "ts-node --transpile-only message-page-merge.test.ts",
     "test:translation": "ts-node --transpile-only translation-service.test.ts",
     "test:assistant-voice": "ts-node --transpile-only assistant-voice.test.ts",
     "test:push": "ts-node --transpile-only push-notifications.test.ts",
