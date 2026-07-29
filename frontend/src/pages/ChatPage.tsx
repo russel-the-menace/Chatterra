@@ -1,7 +1,7 @@
 import React, {useState, useEffect, useMemo, useRef} from 'react'
 import ChatWindow from '../components/ChatWindow'
 import InputBox from '../components/InputBox'
-import { ChatMessage } from '../components/MessageBubble'
+import { AssistantVoiceMessage, ChatMessage } from '../components/MessageBubble'
 import seedCharacter, {characters as seedCharacters, Character} from '../data/character'
 import { VoiceTranscriptMetadata } from '../voice/types'
 import { starterMessageForCharacter } from '../languagePolicy'
@@ -27,6 +27,30 @@ const hasSameTimestamps = (
   && Object.entries(left).every(([characterId, timestamp]) => right[characterId] === timestamp)
 )
 const isImageAvatar = (avatar?: string) => Boolean(avatar && /^(data:image\/|blob:|https?:\/\/|\/)/.test(avatar))
+const mediaUrl = (value: string) => /^https?:\/\//i.test(value) ? value : apiUrl(value)
+const parseAssistantVoiceMessage = (value: unknown): AssistantVoiceMessage | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const voice = value as Record<string, unknown>
+  if (voice.provider !== 'qwen3-tts' || voice.voiceId !== 'maya') return undefined
+  if (voice.status !== 'pending' && voice.status !== 'ready' && voice.status !== 'failed') return undefined
+  if (!Number.isInteger(voice.segmentIndex) || Number(voice.segmentIndex) < 0) return undefined
+  if (typeof voice.style !== 'string' || !voice.style.trim()) return undefined
+  if (voice.audioUrl != null && typeof voice.audioUrl !== 'string') return undefined
+  if (voice.durationSeconds != null && (
+    typeof voice.durationSeconds !== 'number' || !Number.isFinite(voice.durationSeconds)
+  )) return undefined
+  return {
+    provider: 'qwen3-tts',
+    status: voice.status,
+    segmentIndex: Number(voice.segmentIndex),
+    voiceId: 'maya',
+    style: voice.style,
+    audioUrl: typeof voice.audioUrl === 'string' ? mediaUrl(voice.audioUrl) : undefined,
+    durationSeconds: typeof voice.durationSeconds === 'number' ? voice.durationSeconds : undefined,
+    mimeType: voice.mimeType === 'audio/wav' ? 'audio/wav' : undefined,
+    generatedAt: typeof voice.generatedAt === 'string' ? voice.generatedAt : undefined,
+  }
+}
 const deliverySegments = (message: any): string[] => {
   const stored = message?.contentJson?.deliverySegments
   if (message?.senderRole === 'assistant' && Array.isArray(stored)) {
@@ -40,6 +64,7 @@ const deliverySegments = (message: any): string[] => {
 const mapServerMessages = (items: any[]): ChatMessage[] => items.flatMap((message: any) => {
   const segments = deliverySegments(message)
   const englishTranslations = message?.contentJson?.translations?.en
+  const voice = parseAssistantVoiceMessage(message?.contentJson?.voice)
   return segments.map((text, index) => ({
     id: segments.length === 1 ? String(message.id) : `${String(message.id)}:segment:${index}`,
     sender: message.senderRole === 'user' ? 'user' as const : 'ai' as const,
@@ -49,7 +74,8 @@ const mapServerMessages = (items: any[]): ChatMessage[] => items.flatMap((messag
     translation: typeof englishTranslations?.[String(index)] === 'string'
       ? englishTranslations[String(index)]
       : undefined,
-    translationVisible: typeof englishTranslations?.[String(index)] === 'string'
+    translationVisible: typeof englishTranslations?.[String(index)] === 'string',
+    voice: voice?.segmentIndex === index ? voice : undefined
   }))
 })
 
@@ -63,12 +89,14 @@ const responseMessages = (data: any): ChatMessage[] => {
     ? segments
     : typeof data.reply === 'string' ? [data.reply] : []
   const baseId = typeof data.messageId === 'string' ? data.messageId : makeMessageId()
+  const voice = parseAssistantVoiceMessage(data.voice)
   return usable.map((text, index) => ({
     id: usable.length === 1 ? baseId : `${baseId}:segment:${index}`,
     sender: 'ai',
     text,
     sourceMessageId: typeof data.messageId === 'string' ? data.messageId : undefined,
-    segmentIndex: index
+    segmentIndex: index,
+    voice: voice?.segmentIndex === index ? voice : undefined
   }))
 }
 
@@ -86,7 +114,8 @@ const mergeMessageUiState = (current: ChatMessage[], incoming: ChatMessage[]) =>
         ? existing.translationVisible
         : message.translationVisible,
       translationLoading: existing.translationLoading,
-      translationError: existing.translationError
+      translationError: existing.translationError,
+      voiceTranscriptVisible: existing.voiceTranscriptVisible && Boolean(message.voice)
     }
   })
 }
@@ -705,6 +734,9 @@ export default function ChatPage(): JSX.Element{
               && message.text === mergedMessages[index]?.text
               && message.translation === mergedMessages[index]?.translation
               && message.translationVisible === mergedMessages[index]?.translationVisible
+              && message.voice?.status === mergedMessages[index]?.voice?.status
+              && message.voice?.audioUrl === mergedMessages[index]?.voice?.audioUrl
+              && message.voiceTranscriptVisible === mergedMessages[index]?.voiceTranscriptVisible
             ))
           return unchanged ? current : mergedMessages
         })
@@ -909,6 +941,15 @@ export default function ChatPage(): JSX.Element{
           : item))
       }
     })()
+  }
+
+  const toggleVoiceTranscript = (message: ChatMessage) => {
+    if (message.voice?.status !== 'ready') return
+    updateMessagesForCharacter(selectedCharacter.id, current => current.map(item => (
+      item.id === message.id
+        ? { ...item, voiceTranscriptVisible: !item.voiceTranscriptVisible }
+        : item
+    )))
   }
 
   const handleDraftChange = (draft: string) => {
@@ -1252,6 +1293,7 @@ export default function ChatPage(): JSX.Element{
           onEditCharacter={() => openCharacterEditor(selectedCharacter)}
           scrollToEndRequest={scrollToEndRequest}
           onToggleTranslation={toggleMessageTranslation}
+          onToggleVoiceTranscript={toggleVoiceTranscript}
         />
         <InputBox
           key={selectedCharacter.id}

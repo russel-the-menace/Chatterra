@@ -13,6 +13,7 @@ import {
 import { createInferenceTrace, InferenceDiagnostics } from './inference-logger'
 import { generateModelResponse, ModelGatewayError } from './model-gateway'
 import { newId } from './repository'
+import { sendProactivePushNotification } from './push-notifications'
 
 const REJECTED_OUTPUT_LOG_LIMIT = 4000
 
@@ -20,6 +21,7 @@ export type ProactiveDelivery = {
   messageId: string
   conversationId: string
   characterId: string
+  characterName: string
   content: string
   replySegments: string[]
   createdAt: string
@@ -209,6 +211,7 @@ const processClaim = async (claim: ProactiveActionClaim): Promise<ProactiveDeliv
     messageId,
     conversationId: claim.conversationId,
     characterId: claim.character.id,
+    characterName: claim.character.name,
     content: reply,
     replySegments,
     createdAt: createdAt.toISOString()
@@ -231,7 +234,19 @@ export const processDueProactiveActions = async ({
     if (!claim) break
     try {
       const delivery = await processClaim(claim)
-      if (delivery) deliveries.push(delivery)
+      if (delivery) {
+        deliveries.push(delivery)
+        void sendProactivePushNotification({
+          userId: claim.userId,
+          characterId: delivery.characterId,
+          characterName: delivery.characterName,
+          conversationId: delivery.conversationId,
+          messageId: delivery.messageId,
+          content: delivery.content,
+        }).catch(error => {
+          console.error('Could not send proactive push notification', error)
+        })
+      }
     } catch (error) {
       console.error('Proactive action failed unexpectedly', error)
       await rescheduleProactiveAction({ claim }).catch(rescheduleError => {

@@ -2,12 +2,20 @@ import { Stack } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import 'react-native-reanimated'
 
-import { ChatProvider } from '@/src/chat-context'
+import { ChatProvider, useChat } from '@/src/chat-context'
+import { usePushNotifications } from '@/src/push-notifications'
 import { palette } from '@/src/theme'
+
+function PushNotificationRegistration() {
+  const { userId } = useChat()
+  usePushNotifications(userId)
+  return null
+}
 
 export default function RootLayout() {
   return (
     <ChatProvider>
+      <PushNotificationRegistration />
       <Stack
         screenOptions={{
           headerShown: false,

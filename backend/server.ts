@@ -26,6 +26,7 @@ import {
 import { resolveResponseLanguagePolicy, starterMessageForPolicy } from './language-policy'
 import { createInferenceTrace } from './inference-logger'
 import { processDueProactiveActions } from './proactive-service'
+import { isExpoPushToken } from './push-notifications'
 import { translateToEnglish, TranslationServiceError } from './translation-service'
 import {
   clearChatHistory,
@@ -44,9 +45,17 @@ import {
   newId,
   setCharacterPinned,
   setUserMemoryConsent,
+  listRecentMessages,
+  upsertExpoPushDevice,
+  updateAssistantMessageVoice,
   upsertMessageTranslation,
   updateCharacter
 } from './repository'
+import {
+  planMayaVoiceMessage,
+  synthesizeMayaVoiceMessage,
+  voiceMediaDirectory,
+} from './assistant-voice'
 import {
   Character,
   Conversation,
@@ -62,6 +71,10 @@ const REJECTED_OUTPUT_LOG_LIMIT = 4000
 const SYNC_PROTOCOL_VERSION = 1
 app.use(cors())
 app.use(express.json({ limit: '2mb' }))
+app.use('/media/voice', express.static(voiceMediaDirectory, {
+  immutable: true,
+  maxAge: '30d',
+}))
 
 const asyncRoute = (
   handler: (req: Request, res: Response, next: NextFunction) => Promise<any>
@@ -382,6 +395,24 @@ app.post('/api/proactive/poll', asyncRoute(async (req, res) => {
   if (!userId) return res.status(400).json({ error: 'userId required' })
   const deliveries = await processDueProactiveActions({ userId, limit: 2 })
   return res.json({ deliveries })
+}))
+
+app.put('/api/push-devices/expo', asyncRoute(async (req, res) => {
+  const userId = typeof req.body?.userId === 'string' ? req.body.userId.trim() : ''
+  const expoPushToken = typeof req.body?.expoPushToken === 'string'
+    ? req.body.expoPushToken.trim()
+    : ''
+  const platform = req.body?.platform
+  if (!userId) return res.status(400).json({ error: 'userId is required' })
+  if (!isExpoPushToken(expoPushToken)) {
+    return res.status(400).json({ error: 'expoPushToken is invalid' })
+  }
+  if (platform !== 'ios' && platform !== 'android') {
+    return res.status(400).json({ error: 'platform must be ios or android' })
+  }
+
+  await upsertExpoPushDevice({ userId, expoPushToken, platform })
+  return res.status(204).end()
 }))
 
 app.delete('/api/chat-history', asyncRoute(async (req, res) => {
@@ -781,13 +812,25 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
   }
   const reply = processedReply
   const replySegments = deliverySegments.length > 0 ? deliverySegments : [reply]
+  const assistantMessageId = newId()
+  const recentMessages = await listRecentMessages(conversation.id, 8)
+  const voice = planMayaVoiceMessage({
+    characterId: storedCharacter.id,
+    messageId: assistantMessageId,
+    replySegments,
+    recentMessages,
+    userMessage: String(message),
+  })
   const assistantMessage: Message = {
-    id: newId(),
+    id: assistantMessageId,
     conversationId: conversation.id,
     senderRole: 'assistant',
     senderId: storedCharacter.id,
     content: reply,
-    contentJson: { deliverySegments: replySegments },
+    contentJson: {
+      deliverySegments: replySegments,
+      ...(voice ? { voice } : {}),
+    },
     createdAt: new Date().toISOString()
   }
   trace.mark('response_ready_for_persistence', 'completed', {
@@ -820,10 +863,29 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
     throw error
   }
 
+  if (voice) {
+    void synthesizeMayaVoiceMessage({
+      messageId: assistantMessage.id,
+      text: replySegments[voice.segmentIndex],
+      voice,
+    })
+      .then(readyVoice => updateAssistantMessageVoice(assistantMessage.id, readyVoice))
+      .catch(async error => {
+        console.error('Could not synthesize Maya voice message', error)
+        await updateAssistantMessageVoice(assistantMessage.id, {
+          ...voice,
+          status: 'failed',
+        }).catch(updateError => {
+          console.error('Could not mark Maya voice message as failed', updateError)
+        })
+      })
+  }
+
   return res.json({
     reply,
     replySegments,
     messageId: assistantMessage.id,
+    voice,
     userMessageId: userMessage.id,
     conversationId: conversation.id,
     behavior: {

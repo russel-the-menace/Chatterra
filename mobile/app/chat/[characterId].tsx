@@ -44,6 +44,7 @@ import Reanimated, {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { Avatar } from '@/components/avatar'
+import { VoiceMessageBubble } from '@/components/voice-message-bubble'
 import { api, ApiError } from '@/src/api'
 import { useChat } from '@/src/chat-context'
 import { starterMessageForCharacter } from '@/src/starter-message'
@@ -52,6 +53,7 @@ import { useVoiceInput } from '@/src/voice-input'
 import {
   ChatMessage,
   ChatResponse,
+  AssistantVoiceMessage,
   MessageHistoryCursor,
   MessageQuote,
   ServerMessage,
@@ -66,7 +68,7 @@ const OUTGOING_DELIVERY_INDICATOR_DELAY_MS = 1_000
 const OUTGOING_DELIVERY_TIMEOUT_MS = 60_000
 const MESSAGE_ROW_GAP = 14
 const LATEST_MESSAGE_COMPOSER_GAP = 15
-const MESSAGE_ACTION_MENU_MAX_WIDTH = 240
+const MESSAGE_ACTION_MENU_MAX_WIDTH = 308
 const MESSAGE_ACTION_MENU_HEIGHT = 66
 const MESSAGE_ACTION_ARROW_SIZE = 8
 const MESSAGE_ACTION_GAP = 4
@@ -282,6 +284,30 @@ const deliverySegments = (message: ServerMessage): string[] => {
   return [message.content]
 }
 
+const parseAssistantVoiceMessage = (value: unknown): AssistantVoiceMessage | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const voice = value as Record<string, unknown>
+  if (voice.provider !== 'qwen3-tts' || voice.voiceId !== 'maya') return undefined
+  if (voice.status !== 'pending' && voice.status !== 'ready' && voice.status !== 'failed') return undefined
+  if (!Number.isInteger(voice.segmentIndex) || Number(voice.segmentIndex) < 0) return undefined
+  if (typeof voice.style !== 'string' || !voice.style.trim()) return undefined
+  if (voice.audioUrl != null && typeof voice.audioUrl !== 'string') return undefined
+  if (voice.durationSeconds != null && (
+    typeof voice.durationSeconds !== 'number' || !Number.isFinite(voice.durationSeconds)
+  )) return undefined
+  return {
+    provider: 'qwen3-tts',
+    status: voice.status,
+    segmentIndex: Number(voice.segmentIndex),
+    voiceId: 'maya',
+    style: voice.style,
+    audioUrl: typeof voice.audioUrl === 'string' ? voice.audioUrl : undefined,
+    durationSeconds: typeof voice.durationSeconds === 'number' ? voice.durationSeconds : undefined,
+    mimeType: voice.mimeType === 'audio/wav' ? 'audio/wav' : undefined,
+    generatedAt: typeof voice.generatedAt === 'string' ? voice.generatedAt : undefined,
+  }
+}
+
 const mapMessages = (messages: ServerMessage[]): ChatMessage[] => messages
   .filter(message => message.senderRole !== 'system')
   .flatMap(message => {
@@ -291,6 +317,7 @@ const mapMessages = (messages: ServerMessage[]): ChatMessage[] => messages
     const englishTranslations = translations && typeof translations === 'object'
       ? (translations as Record<string, unknown>).en
       : undefined
+    const voice = parseAssistantVoiceMessage(message.contentJson?.voice)
     return segments.map((text, index) => ({
       id: segments.length === 1 ? message.id : `${message.id}:segment:${index}`,
       sourceMessageId: message.id,
@@ -306,6 +333,7 @@ const mapMessages = (messages: ServerMessage[]): ChatMessage[] => messages
         englishTranslations && typeof englishTranslations === 'object'
           && typeof (englishTranslations as Record<string, unknown>)[String(index)] === 'string'
       ),
+      voice: voice?.segmentIndex === index ? voice : undefined,
       groupIndex: index,
       groupSize: segments.length,
       createdAt: message.createdAt,
@@ -328,6 +356,7 @@ const mergeMessageUiState = (current: ChatMessage[], incoming: ChatMessage[]) =>
         : message.translationVisible,
       translationLoading: existing.translationLoading,
       translationError: existing.translationError,
+      voiceTranscriptVisible: existing.voiceTranscriptVisible && Boolean(message.voice),
     }
   })
 }
@@ -368,6 +397,7 @@ const responseMessages = (response: ChatResponse): ChatMessage[] => {
     groupSize: segments.length,
     animateEntry: true,
     animationDelayMs: 0,
+    voice: response.voice?.segmentIndex === index ? response.voice : undefined,
   }))
 }
 
@@ -477,6 +507,7 @@ function MessageDeliveryIndicator({
 function MessageBubbleContent({
   message,
   isUser,
+  onVoiceLongPress,
   selecting,
   selection,
   selectionAdjusting,
@@ -489,6 +520,7 @@ function MessageBubbleContent({
 }: {
   message: ChatMessage
   isUser: boolean
+  onVoiceLongPress: () => void
   selecting: boolean
   selection?: MessageSelectionRange
   selectionAdjusting: boolean
@@ -500,6 +532,9 @@ function MessageBubbleContent({
   onSelectionTouchEnd: () => void
 }) {
   const isLoading = Boolean(message.loading)
+  const readyVoice = !isUser
+    && message.voice?.status === 'ready'
+    && Boolean(message.voice.audioUrl)
   const revealProgress = useRef(new RNAnimated.Value(isLoading ? 0 : 1)).current
   const wasLoadingRef = useRef(isLoading)
   const [showTypingIndicator, setShowTypingIndicator] = useState(isLoading)
@@ -587,13 +622,17 @@ function MessageBubbleContent({
       style={styles.bubbleContent}
       onStartShouldSetResponderCapture={event => (
         selecting
+        && !readyVoice
         && dismissSelectionFromUnselectedText(
           event.nativeEvent.locationX,
           event.nativeEvent.locationY
         )
       )}
     >
-      {!isLoading && !selecting && (
+      {readyVoice && !selecting && message.voice && (
+        <VoiceMessageBubble voice={message.voice} onLongPress={onVoiceLongPress} />
+      )}
+      {!isLoading && !selecting && !readyVoice && (
         <RNAnimated.Text
           style={[
             styles.messageText,
@@ -615,7 +654,7 @@ function MessageBubbleContent({
           {message.text}
         </RNAnimated.Text>
       )}
-      {!isLoading && selecting && (
+      {!isLoading && selecting && !readyVoice && (
         <Text
           accessibilityElementsHidden
           importantForAccessibility="no-hide-descendants"
@@ -629,7 +668,7 @@ function MessageBubbleContent({
           {message.text}
         </Text>
       )}
-      {selecting && (
+      {selecting && !readyVoice && (
         <TextInput
           autoFocus
           multiline
@@ -788,6 +827,7 @@ function MessageRow({
               <MessageBubbleContent
                 message={message}
                 isUser={isUser}
+                onVoiceLongPress={handleLongPress}
                 selecting={selecting}
                 selection={selection}
                 selectionAdjusting={selectionAdjusting}
@@ -803,7 +843,7 @@ function MessageRow({
         </View>
         {isUser && <Avatar name="Me" avatar="Me" size={34} muted />}
       </View>
-      {(message.quote || (
+      {(message.quote || message.voiceTranscriptVisible || (
         message.translationVisible
         && (message.translationLoading || message.translation || message.translationError)
       )) && (
@@ -817,6 +857,12 @@ function MessageRow({
                 <Text style={styles.sentQuoteAuthor}>{message.quote.senderName}: </Text>
                 {message.quote.text}
               </Text>
+            </View>
+          )}
+          {message.voiceTranscriptVisible && message.voice?.status === 'ready' && (
+            <View style={styles.voiceTranscriptBox}>
+              <Text style={styles.voiceTranscriptLabel}>Voice message</Text>
+              <Text style={styles.voiceTranscriptText}>{message.text}</Text>
             </View>
           )}
           {message.translationVisible && (message.translationLoading || message.translation || message.translationError) && (
@@ -1698,9 +1744,10 @@ export default function ChatScreen() {
 
   useEffect(() => {
     if (!conversationId) return
-    const interval = setInterval(() => void syncMessages(), 15_000)
+    const hasPendingVoice = messages.some(message => message.voice?.status === 'pending')
+    const interval = setInterval(() => void syncMessages(), hasPendingVoice ? 3_000 : 15_000)
     return () => clearInterval(interval)
-  }, [conversationId, syncMessages])
+  }, [conversationId, messages, syncMessages])
 
   const loadOlderHistory = useCallback(async () => {
     if (!conversationId
@@ -1881,6 +1928,16 @@ export default function ChatScreen() {
           : item
       )))
     }
+  }
+
+  const toggleVoiceTranscript = (message: ChatMessage) => {
+    closeMessageActionMenu()
+    if (message.voice?.status !== 'ready') return
+    setMessages(current => current.map(item => (
+      item.id === message.id
+        ? { ...item, voiceTranscriptVisible: !item.voiceTranscriptVisible }
+        : item
+    )))
   }
 
   const copyMessage = async (message: ChatMessage) => {
@@ -2733,6 +2790,26 @@ export default function ChatScreen() {
                 {messageActionMessage.translationVisible ? 'Hide' : 'Translate'}
               </Text>
             </Pressable>
+            {messageActionMessage.voice?.status === 'ready' && (
+              <>
+                <View style={styles.messageActionDivider} />
+                <Pressable
+                  onPressIn={() => {
+                    messageActionPressRef.current = true
+                  }}
+                  onPressOut={() => {
+                    messageActionPressRef.current = false
+                  }}
+                  onPress={() => toggleVoiceTranscript(messageActionMessage)}
+                  style={({ pressed }) => [styles.messageAction, pressed && styles.messageActionPressed]}
+                >
+                  <Ionicons name="document-text-outline" size={18} color="#FFFFFF" />
+                  <Text style={styles.messageActionLabel}>
+                    {messageActionMessage.voiceTranscriptVisible ? 'Hide text' : 'Show text'}
+                  </Text>
+                </Pressable>
+              </>
+            )}
           </RNAnimated.View>
         </View>
       )}
@@ -2973,6 +3050,26 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: '#D5DAE1',
     backgroundColor: '#E9ECEF',
+  },
+  voiceTranscriptBox: {
+    width: '100%',
+    paddingHorizontal: 11,
+    paddingVertical: 9,
+    borderRadius: 7,
+    backgroundColor: '#FFFFFF',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#E3E8EF',
+  },
+  voiceTranscriptLabel: {
+    marginBottom: 3,
+    color: palette.textMuted,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  voiceTranscriptText: {
+    color: palette.text,
+    fontSize: 15,
+    lineHeight: 21,
   },
   translationLoadingRow: {
     minHeight: 20,

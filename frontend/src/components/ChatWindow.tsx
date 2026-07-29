@@ -13,13 +13,15 @@ export default function ChatWindow({
   character,
   onEditCharacter,
   scrollToEndRequest,
-  onToggleTranslation
+  onToggleTranslation,
+  onToggleVoiceTranscript
 }:{
   messages: ChatMessage[]
   character: Character
   onEditCharacter: () => void
   scrollToEndRequest: number
   onToggleTranslation: (message: ChatMessage) => void
+  onToggleVoiceTranscript: (message: ChatMessage) => void
 }): JSX.Element{
   const ref = useRef<HTMLDivElement | null>(null)
   const scrollPositionsRef = useRef<Record<string, ScrollPosition>>({})
@@ -106,7 +108,7 @@ export default function ChatWindow({
   const openMessageMenu = (event: React.MouseEvent<HTMLDivElement>, message: ChatMessage) => {
     if (message.loading) return
     event.preventDefault()
-    const menuWidth = 190
+    const menuWidth = message.voice?.status === 'ready' ? 282 : 190
     const menuHeight = 48
     setMessageMenu({
       message,
@@ -179,6 +181,19 @@ export default function ChatWindow({
             >
               {messageMenu.message.translationVisible ? 'Stop Translate' : 'Translate'}
             </button>
+            {messageMenu.message.voice?.status === 'ready' && (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  const message = messageMenu.message
+                  setMessageMenu(null)
+                  onToggleVoiceTranscript(message)
+                }}
+              >
+                {messageMenu.message.voiceTranscriptVisible ? 'Hide text' : 'Show text'}
+              </button>
+            )}
           </div>
         </div>,
         document.body

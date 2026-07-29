@@ -33,6 +33,18 @@ export type VoiceTranscriptMetadata = {
   audioAvailable?: boolean
 }
 
+export type AssistantVoiceMessage = {
+  provider: 'qwen3-tts'
+  status: 'pending' | 'ready' | 'failed'
+  segmentIndex: number
+  voiceId: 'maya'
+  style: string
+  audioUrl?: string
+  durationSeconds?: number
+  mimeType?: 'audio/wav'
+  generatedAt?: string
+}
+
 export type Conversation = {
   id: string
   userId: string
@@ -104,6 +116,8 @@ export type ChatMessage = {
   translationVisible?: boolean
   translationLoading?: boolean
   translationError?: string
+  voice?: AssistantVoiceMessage
+  voiceTranscriptVisible?: boolean
   loading?: boolean
   groupIndex?: number
   groupSize?: number
@@ -134,6 +148,7 @@ export type ChatResponse = {
   replySegments?: string[]
   messageId?: string
   userMessageId?: string
+  voice?: AssistantVoiceMessage
   conversationId: string
   behavior?: {
     emotion?: string

@@ -104,6 +104,31 @@ The future adapter should preserve the same session events: `started`, `partial`
 `final`, `interrupted`, `completed`, and `failed`. Provider-specific confidence and
 language fields belong in the adapter result, not in the chat component.
 
+## Deferred Product Roadmap
+
+These are product candidates, not active implementation work.
+
+### Paid Realtime Calls
+
+Consider full-duplex, interruptible live voice calls only after users demonstrate a
+willingness to pay for the feature. A production version requires authenticated,
+short-lived realtime sessions, explicit usage quotas, per-call cost telemetry, and
+mobile call audio handling. It must not place a provider API key in the client.
+
+### Assistant Voice Messages
+
+Evaluate optional WeChat-style assistant voice bubbles before realtime calls. The
+assistant text remains the canonical message; after it is persisted, a background TTS
+job may create a short, cached audio clip that the user explicitly taps to play.
+
+- Keep clips short and always retain the text fallback.
+- Store audio outside `messages.content_json` and save only bounded media metadata,
+  such as the object URL, duration, MIME type, voice identifier, and generation version.
+- Bind each fictional character to a configured synthetic voice. Do not clone an
+  identifiable person's voice without documented authorization and a separate review.
+- Add a user preference for whether voice bubbles are enabled and a clear disclosure
+  that the audio is AI-generated.
+
 ## Privacy and Failure Rules
 
 - A microphone permission prompt is initiated only by a user gesture.

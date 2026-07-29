@@ -471,6 +471,82 @@ export const getOwnedMessage = async (
   return result.rows[0] ? mapMessage(result.rows[0]) : undefined
 }
 
+export const updateAssistantMessageVoice = async (
+  messageId: string,
+  voice: Record<string, unknown>
+): Promise<Message | undefined> => {
+  return withTransaction(async client => {
+    const result = await client.query(
+      `UPDATE messages
+       SET content_json = jsonb_set(
+         COALESCE(content_json, '{}'::jsonb),
+         '{voice}',
+         $2::jsonb,
+         TRUE
+       )
+       WHERE id = $1 AND sender_role = 'assistant'
+       RETURNING *`,
+      [messageId, JSON.stringify(voice)]
+    )
+    if (!result.rows[0]) return undefined
+    await client.query(
+      `UPDATE conversations
+       SET updated_at = NOW()
+       WHERE id = $1`,
+      [result.rows[0].conversation_id]
+    )
+    return mapMessage(result.rows[0])
+  })
+}
+
+export const upsertExpoPushDevice = async ({
+  userId,
+  expoPushToken,
+  platform,
+}: {
+  userId: string
+  expoPushToken: string
+  platform: 'ios' | 'android'
+}) => {
+  return withTransaction(async client => {
+    await ensureUser(client, userId)
+    await client.query(
+      `INSERT INTO expo_push_devices (
+         expo_push_token, user_id, platform, enabled, last_seen_at, created_at, updated_at
+       ) VALUES ($1, $2, $3, TRUE, NOW(), NOW(), NOW())
+       ON CONFLICT (expo_push_token)
+       DO UPDATE SET
+         user_id = EXCLUDED.user_id,
+         platform = EXCLUDED.platform,
+         enabled = TRUE,
+         last_seen_at = NOW(),
+         updated_at = NOW()`,
+      [expoPushToken, userId, platform]
+    )
+  })
+}
+
+export const listEnabledExpoPushTokens = async (userId: string): Promise<string[]> => {
+  const result = await query(
+    `SELECT expo_push_token
+     FROM expo_push_devices
+     WHERE user_id = $1 AND enabled = TRUE
+     ORDER BY updated_at DESC`,
+    [userId]
+  )
+  return result.rows.map(row => String(row.expo_push_token))
+}
+
+export const disableExpoPushDevice = async (expoPushToken: string | undefined) => {
+  if (!expoPushToken) return
+  await query(
+    `UPDATE expo_push_devices
+     SET enabled = FALSE, updated_at = NOW()
+     WHERE expo_push_token = $1`,
+    [expoPushToken]
+  )
+}
+
 export const getMessageTranslation = async (
   messageId: string,
   segmentIndex: number,

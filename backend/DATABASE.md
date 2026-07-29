@@ -107,14 +107,16 @@ They do not append domain events.
 ## Current Delivery Boundary
 
 The current implementation includes the synchronous behavioral core, durable outbox,
-and proactive companion initiation. Character-derived initiative is scheduled through
-`character_instances.next_action_at`; due work is leased before model inference, then
-persisted as ordinary assistant messages plus proactive decision/event/inference audits.
-The frontend periodically synchronizes persisted messages. External queue publication,
-delayed replies to a specific user turn, operating-system push notifications, media
-object storage, and embedding-based retrieval remain separate delivery slices. They
-should build on the existing event and instance IDs rather than change the chat contract
-again.
+proactive companion initiation, and Expo push delivery for proactive messages.
+Character-derived initiative is scheduled through `character_instances.next_action_at`;
+due work is leased before model inference, then persisted as ordinary assistant messages
+plus proactive decision/event/inference audits. `expo_push_devices` stores the current
+user-scoped Expo token and platform. After a proactive message commits, the backend sends
+an asynchronous push carrying its character, conversation, and message IDs; an immediate
+`DeviceNotRegistered` response disables that token. The frontend still synchronizes
+persisted messages, so a failed push never loses the conversation update. External queue
+publication, delayed replies to a specific user turn, media object storage, and
+embedding-based retrieval remain separate delivery slices.
 
 Durable personal memory defaults to enabled for new users and for legacy users whose
 preference has never been set. The chat UI does not expose a memory switch. The

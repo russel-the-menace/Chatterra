@@ -29,6 +29,10 @@ export const API_BASE_URL = normalizeBaseUrl(
   configuredUrl || (metroHost() ? `http://${metroHost()}:3000` : 'http://localhost:3000')
 )
 
+export const mediaUrl = (value: string) => (
+  /^https?:\/\//i.test(value) ? value : `${API_BASE_URL}${value.startsWith('/') ? value : `/${value}`}`
+)
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -205,5 +209,16 @@ export const api = {
       body: JSON.stringify({ userId }),
     })
     return result.deliveries
+  },
+
+  async registerExpoPushDevice(input: {
+    userId: string
+    expoPushToken: string
+    platform: 'ios' | 'android'
+  }) {
+    await request<void>('/api/push-devices/expo', {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    })
   },
 }

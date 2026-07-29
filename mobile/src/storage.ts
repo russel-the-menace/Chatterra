@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 
 import {
   ChatMessage,
+  AssistantVoiceMessage,
   ComposerQuoteDraft,
   ConversationHistoryCache,
   MessageHistoryCursor,
@@ -96,6 +97,28 @@ const optionalNonNegativeNumber = (value: unknown) => (
   typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
 )
 
+const parseAssistantVoiceMessage = (value: unknown): AssistantVoiceMessage | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const voice = value as Record<string, unknown>
+  if (voice.provider !== 'qwen3-tts' || voice.voiceId !== 'maya') return undefined
+  if (voice.status !== 'pending' && voice.status !== 'ready' && voice.status !== 'failed') return undefined
+  if (!Number.isInteger(voice.segmentIndex) || Number(voice.segmentIndex) < 0) return undefined
+  if (typeof voice.style !== 'string' || !voice.style.trim()) return undefined
+  if (voice.audioUrl != null && typeof voice.audioUrl !== 'string') return undefined
+  if (voice.durationSeconds != null && !optionalNonNegativeNumber(voice.durationSeconds)) return undefined
+  return {
+    provider: 'qwen3-tts',
+    status: voice.status,
+    segmentIndex: Number(voice.segmentIndex),
+    voiceId: 'maya',
+    style: voice.style,
+    audioUrl: optionalString(voice.audioUrl),
+    durationSeconds: optionalNonNegativeNumber(voice.durationSeconds),
+    mimeType: voice.mimeType === 'audio/wav' ? 'audio/wav' : undefined,
+    generatedAt: optionalString(voice.generatedAt),
+  }
+}
+
 const parseChatMessage = (value: unknown): ChatMessage | undefined => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const message = value as Record<string, unknown>
@@ -104,6 +127,7 @@ const parseChatMessage = (value: unknown): ChatMessage | undefined => {
   if (typeof message.text !== 'string') return undefined
 
   const quote = parseMessageQuote(message.quote)
+  const voice = parseAssistantVoiceMessage(message.voice)
   return {
     id: message.id,
     renderKey: optionalString(message.renderKey),
@@ -114,6 +138,8 @@ const parseChatMessage = (value: unknown): ChatMessage | undefined => {
     quote,
     translation: optionalString(message.translation),
     translationVisible: optionalBoolean(message.translationVisible),
+    voice,
+    voiceTranscriptVisible: optionalBoolean(message.voiceTranscriptVisible),
     groupIndex: optionalNonNegativeInteger(message.groupIndex),
     groupSize: optionalNonNegativeInteger(message.groupSize),
     createdAt: optionalString(message.createdAt),

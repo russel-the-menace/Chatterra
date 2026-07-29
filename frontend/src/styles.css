@@ -424,6 +424,26 @@ body.modal-open{overflow:hidden}
 }
 .bubble.ai{background:#ffffff;border-bottom-left-radius:4px;color:#111827}
 .bubble.user{background:#1aad19;color:#fff;border-bottom-right-radius:4px}
+.voice-note{
+  min-width:132px;
+  min-height:42px;
+  display:flex;
+  align-items:center;
+  gap:9px;
+  border:0;
+  background:transparent;
+  color:#171b22;
+  cursor:pointer;
+}
+.voice-note-icon{font-size:21px;font-weight:800;letter-spacing:-4px;transform:rotate(-7deg)}
+.voice-note-wave{flex:1;height:22px;display:flex;align-items:center;justify-content:flex-end;gap:2px}
+.voice-note-wave i{display:block;width:2px;height:7px;border-radius:2px;background:#a3abb6}
+.voice-note-wave i:nth-child(2){height:12px}.voice-note-wave i:nth-child(3){height:17px}.voice-note-wave i:nth-child(4){height:10px}
+.voice-note.playing .voice-note-wave i{background:#1aad19;animation:voice-wave .68s ease-in-out infinite alternate}
+.voice-note.playing .voice-note-wave i:nth-child(2){animation-delay:.12s}.voice-note.playing .voice-note-wave i:nth-child(3){animation-delay:.24s}.voice-note.playing .voice-note-wave i:nth-child(4){animation-delay:.36s}
+.voice-note-duration{font-variant-numeric:tabular-nums;font-size:17px}
+.voice-transcript{max-width:min(72ch,100%);margin-top:5px;padding:9px 11px;border:1px solid #d7dce2;border-radius:7px;background:#fff;color:#29313c;font-size:14px;line-height:1.45;white-space:pre-wrap;word-break:break-word}
+.voice-transcript span{display:block;margin-bottom:3px;color:#78808b;font-size:11px}
 .message-translation{
   width:100%;
   margin-top:5px;
@@ -550,6 +570,7 @@ body.modal-open{overflow:hidden}
 .message-context-menu button + button{border-left:1px solid rgba(255,255,255,0.14)}
 .message-context-menu button:hover:not(:disabled){background:rgba(255,255,255,0.1)}
 .message-context-menu button:disabled{cursor:wait;color:rgba(255,255,255,0.55)}
+@keyframes voice-wave{from{transform:scaleY(.58)}to{transform:scaleY(1)}}
 
 .input-box{
   display:block;

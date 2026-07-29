@@ -50,9 +50,45 @@ This shared-ID bridge is intended for the current single-user deployment. It is
 not authentication; a multi-user release needs account login and server-issued
 sessions before exposing another user's data.
 
+## Mobile Push Notifications
+
+The native app requests notification permission on a real device and registers an
+Expo push token with the backend. When a character sends a proactive message, the
+backend sends a system notification with the character name and message preview; tapping
+it opens that character's chat. Set `EXPO_PUBLIC_EAS_PROJECT_ID` in `mobile/.env` after
+running `eas init`, configure APNs credentials for `com.chatterra.mobile`, and install a
+new native iOS build. See [`mobile/README.md`](mobile/README.md) for the full setup.
+
 Database design and migration details are documented in
 [`backend/DATABASE.md`](backend/DATABASE.md). The target behavioral
 design, including the implemented Inference Orchestrator, is documented in
 [`AI_COMPANION_ARCHITECTURE.md`](AI_COMPANION_ARCHITECTURE.md).
 Voice dictation boundaries and the browser/realtime migration path are documented in
 [`VOICE_INPUT_ARCHITECTURE.md`](VOICE_INPUT_ARCHITECTURE.md).
+
+## Maya Voice Messages
+
+Maya can optionally attach occasional, tap-to-play AI-generated voice messages to short
+replies. Text remains the durable message source; the audio is a cached attachment and
+can be revealed from the message action menu.
+
+The initial provider is self-hosted Qwen3-TTS, not a bundled mobile model. It requires
+an NVIDIA CUDA host and is disabled by default. Start the service with:
+
+```bash
+docker compose --profile voice up --build tts
+```
+
+Then set `MAYA_VOICE_MESSAGES_ENABLED=true` and `QWEN_TTS_URL=http://localhost:8001`
+in `backend/.env`. See [`tts-service/README.md`](tts-service/README.md) for deployment
+details. The first request downloads the model weights; normal text chat continues to
+work if the service is unavailable.
+
+## Mobile Push Notifications
+
+The React Native client can receive system notifications when a character proactively
+starts a new message. It registers an Expo Push token after the user grants permission;
+the backend stores the token and sends only after the message has been persisted. Apply
+database migration `015_add_expo_push_devices.sql`, initialize an EAS project, set
+`EXPO_PUBLIC_EAS_PROJECT_ID` for the mobile build, and build a new iOS app with Apple
+Push Notification credentials. Full setup is in [`mobile/README.md`](mobile/README.md).

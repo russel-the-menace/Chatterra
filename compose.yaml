@@ -15,5 +15,27 @@ services:
       timeout: 5s
       retries: 10
 
+  tts:
+    profiles: ["voice"]
+    build: ./tts-service
+    environment:
+      QWEN_TTS_MODEL: Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign
+      QWEN_TTS_DEVICE: cuda:0
+      QWEN_TTS_ATTENTION: sdpa
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    ports:
+      - "8001:8001"
+    volumes:
+      - chatterra-qwen-cache:/root/.cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
 volumes:
   chatterra-postgres:
+  chatterra-qwen-cache:
