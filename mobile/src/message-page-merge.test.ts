@@ -1,6 +1,14 @@
-import assert from 'node:assert/strict'
-import { mergeMessagePage } from '../mobile/src/message-page-merge'
-import { ChatMessage } from '../mobile/src/types'
+import { mergeMessagePage } from './message-page-merge'
+import { ChatMessage } from './types'
+
+const expect = (condition: unknown, message: string) => {
+  if (!condition) throw new Error(message)
+}
+
+const sameIds = (messages: ChatMessage[], expected: string[]) => (
+  messages.length === expected.length
+  && messages.every((message, index) => message.id === expected[index])
+)
 
 const serverStarter: ChatMessage = {
   id: 'server-starter',
@@ -32,33 +40,26 @@ const localStarter: ChatMessage = {
 
 const run = () => {
   const incoming = [serverStarter, userMessage, reply]
+  const expectedIds = ['server-starter', 'server-user', 'server-reply']
   const firstSync = mergeMessagePage([localStarter, userMessage, reply], incoming, 'append')
-  assert.deepEqual(firstSync.map(message => message.id), [
-    'server-starter',
-    'server-user',
-    'server-reply',
-  ])
-  assert.equal(firstSync[0].sourceMessageId, 'server-starter')
+  expect(sameIds(firstSync, expectedIds), 'first sync should replace the local starter in place')
+  expect(firstSync[0].sourceMessageId === 'server-starter', 'starter should use its server ID')
 
   const cachedDuplicate = mergeMessagePage(
     [localStarter, userMessage, reply, serverStarter],
     incoming,
     'append'
   )
-  assert.deepEqual(cachedDuplicate.map(message => message.id), [
-    'server-starter',
-    'server-user',
-    'server-reply',
-  ])
+  expect(sameIds(cachedDuplicate, expectedIds), 'cached duplicate starter should be removed')
 
-  const older = [{
+  const older: ChatMessage[] = [{
     id: 'older-message',
     sourceMessageId: 'older-message',
-    sender: 'assistant' as const,
+    sender: 'assistant',
     text: 'Older message',
   }]
   const prepended = mergeMessagePage([userMessage], older, 'prepend')
-  assert.deepEqual(prepended.map(message => message.id), ['older-message', 'server-user'])
+  expect(sameIds(prepended, ['older-message', 'server-user']), 'older history should prepend')
   console.log('message page merge checks passed')
 }
 
