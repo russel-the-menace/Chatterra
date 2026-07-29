@@ -50,6 +50,8 @@ type ChatContextValue = {
   conversationVersions: Record<string, number>
   conversationIdsByCharacter: Record<string, string | null>
   pinnedCharacterIds: Set<string>
+  pinnedCharacterOrder: string[]
+  lastMessageAtByCharacter: Record<string, string>
   getDraft: (characterId: string) => string
   setDraft: (
     characterId: string,
@@ -67,6 +69,7 @@ type ChatContextValue = {
   markCharacterRead: (characterId: string) => void
   setActiveCharacter: (characterId: string | null) => void
   setCharacterPinned: (characterId: string, pinned: boolean) => Promise<void>
+  markConversationActive: (characterId: string, timestamp?: string) => void
   getConversationCache: (characterId: string) => ConversationCacheEntry | undefined
   hydrateConversationCache: (characterId: string) => Promise<ConversationCacheEntry | undefined>
   setConversationCache: (characterId: string, entry: ConversationCacheEntry) => void
@@ -130,6 +133,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const [conversationVersions, setConversationVersions] = useState<Record<string, number>>({})
   const [conversationIdsByCharacter, setConversationIdsByCharacter] = useState<Record<string, string | null>>({})
   const [pinnedCharacterIds, setPinnedCharacterIds] = useState<Set<string>>(() => new Set())
+  const [pinnedCharacterOrder, setPinnedCharacterOrder] = useState<string[]>([])
+  const [lastMessageAtByCharacter, setLastMessageAtByCharacter] = useState<Record<string, string>>({})
   const activeCharacterRef = useRef<string | null>(null)
   const conversationCacheRef = useRef<Map<string, ConversationCacheEntry>>(new Map())
   const conversationViewCacheRef = useRef<Map<string, ConversationViewCache>>(new Map())
@@ -202,7 +207,10 @@ export function ChatProvider({ children }: PropsWithChildren) {
           api.listPinnedCharacterIds(storedUserId),
           refreshCharacters(),
         ])
-        if (!cancelled) setPinnedCharacterIds(new Set(pinnedIds))
+        if (!cancelled) {
+          setPinnedCharacterIds(new Set(pinnedIds))
+          setPinnedCharacterOrder(pinnedIds)
+        }
       } catch {
         // The contacts screen exposes the connection error and retry action.
       } finally {
@@ -222,6 +230,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
       const snapshot = await api.getSyncSnapshot(userId)
       setCharacters(snapshot.characters)
       setPinnedCharacterIds(new Set(snapshot.pinnedCharacterIds))
+      setPinnedCharacterOrder(snapshot.pinnedCharacterIds)
       setConnectionError(null)
 
       const newestConversationByCharacter = new Map<string, typeof snapshot.conversations[number]>()
@@ -235,6 +244,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
       const nextMetadata = new Map<string, string>()
       const changedCharacterIds = new Set<string>()
       const nextPreviews: Record<string, string> = {}
+      const nextLastMessageAtByCharacter: Record<string, string> = {}
 
       snapshot.characters.forEach(character => {
         const conversation = newestConversationByCharacter.get(character.id)
@@ -242,6 +252,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
         if (conversation?.latestMessage?.content) {
           nextPreviews[character.id] = conversation.latestMessage.content
         }
+        const lastMessageAt = conversation?.lastMessageAt || conversation?.latestMessage?.createdAt
+        if (lastMessageAt) nextLastMessageAtByCharacter[character.id] = lastMessageAt
         if (!conversation) return
         const version = [
           conversation.id,
@@ -260,6 +272,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
       conversationMetadataRef.current = nextMetadata
       setConversationIdsByCharacter(nextConversationIds)
       setProactivePreviews(nextPreviews)
+      setLastMessageAtByCharacter(nextLastMessageAtByCharacter)
 
       if (hasWorkspaceSnapshotRef.current && changedCharacterIds.size > 0) {
         changedCharacterIds.forEach(characterId => {
@@ -319,6 +332,17 @@ export function ChatProvider({ children }: PropsWithChildren) {
         deliveries.forEach(delivery => {
           if (delivery.characterId && delivery.content) {
             next[delivery.characterId] = delivery.content
+          }
+        })
+        return next
+      })
+      setLastMessageAtByCharacter(current => {
+        const next = { ...current }
+        deliveries.forEach(delivery => {
+          if (!delivery.characterId) return
+          const timestamp = delivery.createdAt || new Date().toISOString()
+          if ((next[delivery.characterId] || '') < timestamp) {
+            next[delivery.characterId] = timestamp
           }
         })
         return next
@@ -429,15 +453,28 @@ export function ChatProvider({ children }: PropsWithChildren) {
     if (characterId) markCharacterRead(characterId)
   }, [markCharacterRead])
 
+  const markConversationActive = useCallback((characterId: string, timestamp = new Date().toISOString()) => {
+    setLastMessageAtByCharacter(current => {
+      if ((current[characterId] || '') >= timestamp) return current
+      return { ...current, [characterId]: timestamp }
+    })
+  }, [])
+
   const setCharacterPinned = useCallback(async (characterId: string, pinned: boolean) => {
     if (!userId) throw new Error('User is not ready.')
     const previous = pinnedCharacterIds.has(characterId)
+    const previousPinnedOrder = pinnedCharacterOrder
     setPinnedCharacterIds(current => {
       const next = new Set(current)
       if (pinned) next.add(characterId)
       else next.delete(characterId)
       return next
     })
+    setPinnedCharacterOrder(current => (
+      pinned
+        ? [characterId, ...current.filter(id => id !== characterId)]
+        : current.filter(id => id !== characterId)
+    ))
     try {
       await api.setCharacterPinned(userId, characterId, pinned)
     } catch (error) {
@@ -447,9 +484,10 @@ export function ChatProvider({ children }: PropsWithChildren) {
         else next.delete(characterId)
         return next
       })
+      setPinnedCharacterOrder(previousPinnedOrder)
       throw error
     }
-  }, [pinnedCharacterIds, userId])
+  }, [pinnedCharacterIds, pinnedCharacterOrder, userId])
 
   const flushConversationCache = useCallback(async (characterId: string) => {
     const timer = conversationCacheTimerRef.current.get(characterId)
@@ -583,6 +621,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
     conversationVersions,
     conversationIdsByCharacter,
     pinnedCharacterIds,
+    pinnedCharacterOrder,
+    lastMessageAtByCharacter,
     getDraft,
     setDraft,
     getQuoteDraft,
@@ -592,6 +632,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     markCharacterRead,
     setActiveCharacter,
     setCharacterPinned,
+    markConversationActive,
     getConversationCache,
     hydrateConversationCache,
     setConversationCache,
@@ -612,11 +653,14 @@ export function ChatProvider({ children }: PropsWithChildren) {
     markCharacterRead,
     proactivePreviews,
     pinnedCharacterIds,
+    pinnedCharacterOrder,
+    lastMessageAtByCharacter,
     ready,
     refreshCharacters,
     saveCharacter,
     setActiveCharacter,
     setCharacterPinned,
+    markConversationActive,
     setConversationCache,
     setConversationViewCache,
     setDraft,

@@ -16,6 +16,16 @@ type ConversationCacheEntry = {
 }
 
 const makeMessageId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`
+const hasSameOrder = (left: string[], right: string[]) => (
+  left.length === right.length && left.every((value, index) => value === right[index])
+)
+const hasSameTimestamps = (
+  left: Record<string, string>,
+  right: Record<string, string>
+) => (
+  Object.keys(left).length === Object.keys(right).length
+  && Object.entries(left).every(([characterId, timestamp]) => right[characterId] === timestamp)
+)
 const isImageAvatar = (avatar?: string) => Boolean(avatar && /^(data:image\/|blob:|https?:\/\/|\/)/.test(avatar))
 const deliverySegments = (message: any): string[] => {
   const stored = message?.contentJson?.deliverySegments
@@ -135,6 +145,8 @@ export default function ChatPage(): JSX.Element{
   const [proactivePreviews, setProactivePreviews] = useState<Record<string, string>>({})
   const [unreadCharacterIds, setUnreadCharacterIds] = useState<Set<string>>(() => new Set())
   const [pinnedCharacterIds, setPinnedCharacterIds] = useState<Set<string>>(() => new Set())
+  const [pinnedCharacterOrder, setPinnedCharacterOrder] = useState<string[]>([])
+  const [lastMessageAtByCharacter, setLastMessageAtByCharacter] = useState<Record<string, string>>({})
   const [showAddDrawer, setShowAddDrawer] = useState(false)
   const [showConversationMenu, setShowConversationMenu] = useState(false)
   const [showCharacterEditor, setShowCharacterEditor] = useState(false)
@@ -170,10 +182,23 @@ export default function ChatPage(): JSX.Element{
         const leftPinned = pinnedCharacterIds.has(left.character.id)
         const rightPinned = pinnedCharacterIds.has(right.character.id)
         if (leftPinned !== rightPinned) return rightPinned ? 1 : -1
+        if (leftPinned && rightPinned) {
+          return pinnedCharacterOrder.indexOf(left.character.id) - pinnedCharacterOrder.indexOf(right.character.id)
+        }
+        const lastMessageComparison = (lastMessageAtByCharacter[right.character.id] || '')
+          .localeCompare(lastMessageAtByCharacter[left.character.id] || '')
+        if (lastMessageComparison !== 0) return lastMessageComparison
         return left.index - right.index
       })
       .map(({ character }) => character)
-  }, [characters, pinnedCharacterIds, searchText])
+  }, [characters, lastMessageAtByCharacter, pinnedCharacterIds, pinnedCharacterOrder, searchText])
+
+  const markCharacterActive = (characterId: string, timestamp = new Date().toISOString()) => {
+    setLastMessageAtByCharacter(current => {
+      if ((current[characterId] || '') >= timestamp) return current
+      return { ...current, [characterId]: timestamp }
+    })
+  }
 
   const loadHistoryForCharacter = async (uid: string, nextCharacter: Character) => {
     const requestId = historyRequestRef.current + 1
@@ -396,7 +421,9 @@ export default function ChatPage(): JSX.Element{
         if (!response.ok) return
         const data = await response.json()
         if (Array.isArray(data.pinnedCharacterIds)) {
-          setPinnedCharacterIds(new Set(data.pinnedCharacterIds.map(String)))
+          const pinnedIds = data.pinnedCharacterIds.map(String)
+          setPinnedCharacterIds(new Set(pinnedIds))
+          setPinnedCharacterOrder(pinnedIds)
         }
       } catch {
         // Contact ordering remains usable while the preference endpoint is unavailable.
@@ -474,6 +501,9 @@ export default function ChatPage(): JSX.Element{
           if (current.size === next.size && [...current].every(id => next.has(id))) return current
           return next
         })
+        setPinnedCharacterOrder(current => (
+          hasSameOrder(current, snapshot.pinnedCharacterIds) ? current : snapshot.pinnedCharacterIds
+        ))
 
         const newestConversationByCharacter = new Map<string, typeof snapshot.conversations[number]>()
         snapshot.conversations.forEach(conversation => {
@@ -484,6 +514,7 @@ export default function ChatPage(): JSX.Element{
 
         const nextMetadata: Record<string, string> = {}
         const nextPreviews: Record<string, string> = {}
+        const nextLastMessageAtByCharacter: Record<string, string> = {}
         const changedCharacterIds = new Set<string>()
         newestConversationByCharacter.forEach((conversation, characterId) => {
           const version = [
@@ -495,6 +526,8 @@ export default function ChatPage(): JSX.Element{
           if (conversation.latestMessage?.content) {
             nextPreviews[characterId] = conversation.latestMessage.content
           }
+          const lastMessageAt = conversation.lastMessageAt || conversation.latestMessage?.createdAt
+          if (lastMessageAt) nextLastMessageAtByCharacter[characterId] = lastMessageAt
           if (conversationMetadataRef.current[characterId] !== version) {
             changedCharacterIds.add(characterId)
           }
@@ -523,6 +556,11 @@ export default function ChatPage(): JSX.Element{
 
         conversationMetadataRef.current = nextMetadata
         setProactivePreviews(nextPreviews)
+        setLastMessageAtByCharacter(current => (
+          hasSameTimestamps(current, nextLastMessageAtByCharacter)
+            ? current
+            : nextLastMessageAtByCharacter
+        ))
         hasWorkspaceSnapshotRef.current = true
 
         if (!activeCharacter) return
@@ -605,6 +643,13 @@ export default function ChatPage(): JSX.Element{
             }
           })
           return next
+        })
+        data.deliveries.forEach((delivery: any) => {
+          if (typeof delivery.characterId === 'string') {
+            markCharacterActive(delivery.characterId, typeof delivery.createdAt === 'string'
+              ? delivery.createdAt
+              : new Date().toISOString())
+          }
         })
         setUnreadCharacterIds(current => {
           const next = new Set(current)
@@ -762,6 +807,7 @@ export default function ChatPage(): JSX.Element{
     if (!uid) return
     const characterId = selectedCharacter.id
     const nextPinned = !pinnedCharacterIds.has(characterId)
+    const previousPinnedOrder = pinnedCharacterOrder
     setShowConversationMenu(false)
     setPinnedCharacterIds(current => {
       const next = new Set(current)
@@ -769,6 +815,11 @@ export default function ChatPage(): JSX.Element{
       else next.delete(characterId)
       return next
     })
+    setPinnedCharacterOrder(current => (
+      nextPinned
+        ? [characterId, ...current.filter(id => id !== characterId)]
+        : current.filter(id => id !== characterId)
+    ))
 
     try {
       const response = await fetch(
@@ -787,6 +838,7 @@ export default function ChatPage(): JSX.Element{
         else next.add(characterId)
         return next
       })
+      setPinnedCharacterOrder(previousPinnedOrder)
     }
   }
 
@@ -972,6 +1024,7 @@ export default function ChatPage(): JSX.Element{
     const targetCharacter = selectedCharacter
     const targetCharacterId = targetCharacter.id
     const targetConversationId = conversationId
+    markCharacterActive(targetCharacterId)
     setScrollToEndRequest(current => current + 1)
     const userMsg: ChatMessage = { id: makeMessageId(), sender: 'user', text, segmentIndex: 0 }
     const loadingId = makeMessageId()
@@ -1002,6 +1055,7 @@ export default function ChatPage(): JSX.Element{
         })
         const data = await res.json().catch(() => ({}))
         if (!res.ok) throw new Error(data.error || 'Chat request failed')
+        markCharacterActive(targetCharacterId)
         if (typeof data.conversationId === 'string') {
           updateConversationForCharacter(targetCharacterId, data.conversationId)
         }

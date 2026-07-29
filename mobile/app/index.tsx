@@ -65,6 +65,8 @@ export default function ContactsScreen() {
     characters,
     connectionError,
     pinnedCharacterIds,
+    pinnedCharacterOrder,
+    lastMessageAtByCharacter,
     refreshCharacters,
   } = useChat()
   const [search, setSearch] = useState('')
@@ -79,10 +81,22 @@ export default function ContactsScreen() {
         .toLocaleLowerCase()
         .includes(query)
     )) : characters
-    return [...filtered].sort((left, right) => (
-      Number(pinnedCharacterIds.has(right.id)) - Number(pinnedCharacterIds.has(left.id))
-    ))
-  }, [characters, pinnedCharacterIds, search])
+    return [...filtered]
+      .map((character, index) => ({ character, index }))
+      .sort((left, right) => {
+        const leftPinned = pinnedCharacterIds.has(left.character.id)
+        const rightPinned = pinnedCharacterIds.has(right.character.id)
+        if (leftPinned !== rightPinned) return rightPinned ? 1 : -1
+        if (leftPinned && rightPinned) {
+          return pinnedCharacterOrder.indexOf(left.character.id) - pinnedCharacterOrder.indexOf(right.character.id)
+        }
+        const lastMessageComparison = (lastMessageAtByCharacter[right.character.id] || '')
+          .localeCompare(lastMessageAtByCharacter[left.character.id] || '')
+        if (lastMessageComparison !== 0) return lastMessageComparison
+        return left.index - right.index
+      })
+      .map(({ character }) => character)
+  }, [characters, lastMessageAtByCharacter, pinnedCharacterIds, pinnedCharacterOrder, search])
 
   const refresh = async () => {
     setRefreshing(true)

@@ -858,6 +858,7 @@ export default function ChatScreen() {
     setActiveCharacter,
     pinnedCharacterIds,
     setCharacterPinned,
+    markConversationActive,
     getConversationCache,
     getConversationViewCache,
     hydrateConversationCache,
@@ -2086,6 +2087,7 @@ export default function ChatScreen() {
       setQuoteDraft(character.id, null)
     }
     closeMessageActionMenu()
+    markConversationActive(character.id)
     setMessages(current => {
       const hasExistingUserMessage = current.some(message => message.id === userMessage.id)
       return [
@@ -2147,6 +2149,7 @@ export default function ChatScreen() {
       if (response.userMessageId) {
         confirmUserMessage(response.userMessageId)
       }
+      markConversationActive(character.id)
       setConversationId(response.conversationId)
       if (response.behavior?.activity) setActivity(formatActivity(response.behavior.activity))
 
