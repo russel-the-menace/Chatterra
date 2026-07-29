@@ -48,12 +48,14 @@ import { api, ApiError } from '@/src/api'
 import { useChat } from '@/src/chat-context'
 import { starterMessageForCharacter } from '@/src/starter-message'
 import { palette } from '@/src/theme'
+import { useVoiceInput, VoiceInputStatus } from '@/src/voice-input'
 import {
   ChatMessage,
   ChatResponse,
   MessageHistoryCursor,
   MessageQuote,
   ServerMessage,
+  VoiceTranscriptMetadata,
 } from '@/src/types'
 
 const createLocalId = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -84,6 +86,13 @@ const MESSAGE_BUBBLE_LAYOUT = LinearTransition
   .duration(MESSAGE_REVEAL_DURATION_MS)
   .easing(ReanimatedEasing.out(ReanimatedEasing.cubic))
 const AnimatedPressable = Reanimated.createAnimatedComponent(Pressable)
+
+const voiceStatusLabel = (status: VoiceInputStatus, error?: string) => {
+  if (status === 'recording') return 'Listening...'
+  if (status === 'processing') return 'Converting speech...'
+  if (status === 'error') return error || 'Voice input failed.'
+  return ''
+}
 
 type MessageAnchor = {
   x: number
@@ -904,6 +913,7 @@ export default function ChatScreen() {
   const [activity, setActivity] = useState('Online')
   const [loadingHistory, setLoadingHistory] = useState(!initialCacheRef.current)
   const [sending, setSending] = useState(false)
+  const [voiceMetadata, setVoiceMetadata] = useState<VoiceTranscriptMetadata | undefined>()
   const [error, setError] = useState<string | null>(null)
   const [showScrollToLatest, setShowScrollToLatest] = useState(false)
   const [unseenLatestCount, setUnseenLatestCount] = useState(0)
@@ -979,6 +989,14 @@ export default function ChatScreen() {
     }
   })
   const stagedDeliveryTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set())
+  const voiceInput = useVoiceInput({
+    language: character?.language,
+    onTranscriptChange: (text, metadata) => {
+      if (!character) return
+      setDraft(character.id, text)
+      setVoiceMetadata(metadata)
+    },
+  })
 
   const closeMessageActionMenu = useCallback(() => {
     const session = messageActionSessionRef.current
@@ -1968,6 +1986,13 @@ export default function ChatScreen() {
     setError(null)
     let quoteDraftForSend = messageToRetry ? null : quotedMessage
     let textForSend = composerText
+    const voice = !messageToRetry && voiceMetadata?.originalText
+      ? {
+          ...voiceMetadata,
+          correctedText: voiceMetadata.correctedText
+            || (composerText !== voiceMetadata.originalText ? composerText : undefined),
+        }
+      : undefined
     let userMessageId = messageToRetry?.sourceMessageId || messageToRetry?.id || createLocalId()
     let conversationIdForSend = conversationId || undefined
     let retryingPendingDelivery = false
@@ -2085,6 +2110,8 @@ export default function ChatScreen() {
         quoteDraftRevisionRef.current = quoteClearRevision
       }
       setQuoteDraft(character.id, null)
+      setVoiceMetadata(undefined)
+      voiceInput.reset()
     }
     closeMessageActionMenu()
     markConversationActive(character.id)
@@ -2144,6 +2171,7 @@ export default function ChatScreen() {
         userId,
         character,
         quote,
+        voice,
       })
       if (!isCurrentDelivery()) return
       if (response.userMessageId) {
@@ -2260,6 +2288,26 @@ export default function ChatScreen() {
         scrollToExactLatest()
       }
     }
+  }
+
+  const handleComposerTextChange = (text: string) => {
+    if (!character) return
+    setDraft(character.id, text)
+    if (voiceMetadata && voiceInput.status !== 'recording') {
+      setVoiceMetadata(previous => previous
+        ? {
+            ...previous,
+            correctedText: text.trim() && text.trim() !== previous.originalText
+              ? text.trim()
+              : undefined,
+          }
+        : previous)
+    }
+  }
+
+  const handleVoicePress = () => {
+    if (voiceInput.status !== 'recording') setVoiceMetadata(undefined)
+    voiceInput.toggle(draft)
   }
 
   const messageActionMessage = messageActionSession
@@ -2475,7 +2523,7 @@ export default function ChatScreen() {
                   <TextInput
                     ref={composerInputRef}
                     value={draft}
-                    onChangeText={text => setDraft(character.id, text)}
+                    onChangeText={handleComposerTextChange}
                     placeholder="Type your message..."
                     placeholderTextColor="#8A94A3"
                     multiline
@@ -2486,14 +2534,45 @@ export default function ChatScreen() {
                     onBlur={handleComposerBlur}
                   />
                   <Pressable
+                    onPress={handleVoicePress}
+                    disabled={voiceInput.status === 'processing'}
+                    accessibilityRole="button"
+                    accessibilityLabel={voiceInput.status === 'recording' ? 'Stop voice input' : 'Start voice input'}
+                    accessibilityState={{
+                      busy: voiceInput.status === 'processing',
+                      selected: voiceInput.status === 'recording',
+                    }}
+                    style={({ pressed }) => [
+                      styles.voiceButton,
+                      voiceInput.status === 'recording' && styles.voiceButtonRecording,
+                      voiceInput.status === 'error' && styles.voiceButtonError,
+                      voiceInput.status === 'processing' && styles.voiceButtonDisabled,
+                      pressed && voiceInput.status !== 'processing' && styles.voiceButtonPressed,
+                    ]}
+                  >
+                    {voiceInput.status === 'processing'
+                      ? <ActivityIndicator size="small" color={palette.accent} />
+                      : <Ionicons
+                          name={voiceInput.status === 'recording' ? 'stop' : 'mic-outline'}
+                          size={21}
+                          color={voiceInput.status === 'error' ? palette.danger : palette.accent}
+                        />}
+                  </Pressable>
+                  <Pressable
                     onPress={() => void sendMessage()}
-                    disabled={!draft.trim() || sending}
+                    disabled={
+                      !draft.trim()
+                      || sending
+                      || voiceInput.status === 'recording'
+                      || voiceInput.status === 'processing'
+                    }
                     accessibilityRole="button"
                     accessibilityLabel="Send message"
                     style={({ pressed }) => [
                       styles.sendButton,
-                      (!draft.trim() || sending) && styles.sendButtonDisabled,
-                      pressed && draft.trim() && !sending && styles.sendButtonPressed,
+                      (!draft.trim() || sending || voiceInput.status === 'recording' || voiceInput.status === 'processing')
+                        && styles.sendButtonDisabled,
+                      pressed && draft.trim() && !sending && voiceInput.status === 'idle' && styles.sendButtonPressed,
                     ]}
                   >
                     {sending
@@ -2501,6 +2580,21 @@ export default function ChatScreen() {
                       : <Ionicons name="arrow-up" size={22} color="#FFFFFF" />}
                   </Pressable>
                 </View>
+                {voiceStatusLabel(voiceInput.status, voiceInput.error) && (
+                  <View style={styles.voiceStatus} accessibilityLiveRegion="polite">
+                    <Ionicons
+                      name={voiceInput.status === 'error' ? 'alert-circle-outline' : 'mic-outline'}
+                      size={15}
+                      color={voiceInput.status === 'error' ? palette.danger : palette.textMuted}
+                    />
+                    <Text style={[
+                      styles.voiceStatusText,
+                      voiceInput.status === 'error' && styles.voiceStatusError,
+                    ]}>
+                      {voiceStatusLabel(voiceInput.status, voiceInput.error)}
+                    </Text>
+                  </View>
+                )}
                 {quotedMessage && (
                   <View style={styles.composerQuote}>
                     <Text style={styles.composerQuoteText} numberOfLines={2}>
@@ -3020,11 +3114,50 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: palette.accent,
   },
+  voiceButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#C9D1DC',
+    backgroundColor: '#FFFFFF',
+  },
+  voiceButtonRecording: {
+    borderColor: '#F97066',
+    backgroundColor: '#FEF3F2',
+  },
+  voiceButtonError: {
+    borderColor: '#FDA29B',
+    backgroundColor: '#FFF3F1',
+  },
+  voiceButtonDisabled: {
+    opacity: 0.72,
+  },
+  voiceButtonPressed: {
+    backgroundColor: '#F2F4F7',
+  },
   sendButtonDisabled: {
     backgroundColor: '#9BD49D',
   },
   sendButtonPressed: {
     backgroundColor: palette.accentPressed,
+  },
+  voiceStatus: {
+    minHeight: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 2,
+  },
+  voiceStatusText: {
+    color: palette.textMuted,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  voiceStatusError: {
+    color: palette.danger,
   },
   composerQuote: {
     minHeight: 42,

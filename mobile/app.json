@@ -54,6 +54,13 @@
         }
       ],
       [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Allow Chatterra to use the microphone for voice messages.",
+          "speechRecognitionPermission": "Allow Chatterra to transcribe your speech."
+        }
+      ],
+      [
         "expo-build-properties",
         {
           "ios": {

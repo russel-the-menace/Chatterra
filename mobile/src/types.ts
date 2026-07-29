@@ -14,6 +14,25 @@ export type Character = {
   updatedAt?: string
 }
 
+export type DetectedLanguage =
+  | 'English'
+  | 'Cantonese'
+  | 'Chinese'
+  | 'Japanese'
+  | 'Korean'
+  | 'Arabic'
+  | 'Russian'
+  | 'Mixed'
+  | 'Unknown'
+
+export type VoiceTranscriptMetadata = {
+  originalText: string
+  correctedText?: string
+  detectedLanguage: DetectedLanguage
+  confidence?: number
+  audioAvailable?: boolean
+}
+
 export type Conversation = {
   id: string
   userId: string

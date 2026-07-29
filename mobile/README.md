@@ -104,14 +104,15 @@ authentication and secure device linking.
 - Character creation and editing
 - Tap-to-select avatar with native 1:1 crop and 512px compression
 - Backend-derived activity state
+- Native speech-to-text dictation in the chat composer
 
 ## Voice Boundary
 
-The web client uses the browser Web Speech API. Expo Go does not provide an
-equivalent speech-to-text API, and native speech-recognition libraries that are
-not bundled into Expo Go require a development build. Mobile dictation should
-therefore be added through either a backend streaming transcription service or
-an Expo development build with a native recognition module.
+The chat composer uses `expo-speech-recognition`, which maps to Apple's
+`SFSpeechRecognizer` on iOS and the platform speech recognizer on Android.
+It is a native module and therefore requires a development build; it does not
+run in Expo Go. Build and install the iOS client with `npm run ios` after
+pulling changes that affect the native configuration.
 
 ## Chat Scroll Invariants
 

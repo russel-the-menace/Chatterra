@@ -11,6 +11,7 @@ import {
   PublicCharacterState,
   MessageTranslationResponse,
   SyncSnapshot,
+  VoiceTranscriptMetadata,
 } from './types'
 
 const normalizeBaseUrl = (value: string) => value.trim().replace(/\/+$/, '')
@@ -183,6 +184,7 @@ export const api = {
     userId: string
     character: Character
     quote?: MessageQuote
+    voice?: VoiceTranscriptMetadata
   }) {
     return request<ChatResponse>('/api/chat', {
       method: 'POST',
