@@ -29,6 +29,34 @@ const run = async () => {
     assert.equal(requestBody.top_p, 1)
     assert.equal(requestBody.stream, false)
     assert.match(requestBody.messages[1].content, /你而家喺屋企做緊咩/)
+
+    const retryRequestBodies: any[] = []
+    globalThis.fetch = (async (_input, init) => {
+      retryRequestBodies.push(JSON.parse(String(init?.body || '{}')))
+      const response = retryRequestBodies.length === 1
+        ? {
+            choices: [{
+              finish_reason: 'length',
+              message: { content: '' }
+            }]
+          }
+        : {
+            choices: [{
+              finish_reason: 'stop',
+              message: { content: [{ type: 'text', text: 'Hello, how are you?' }] }
+            }]
+          }
+      return new Response(JSON.stringify(response), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      })
+    }) as typeof fetch
+
+    const retried = await translateToEnglish('Hola, ¿cómo estás?')
+    assert.equal(retried.text, 'Hello, how are you?')
+    assert.equal(retryRequestBodies.length, 2)
+    assert.equal(retryRequestBodies[0].max_tokens, 256)
+    assert.equal(retryRequestBodies[1].max_tokens, 1024)
     console.log('translation service checks passed')
   } finally {
     globalThis.fetch = originalFetch
