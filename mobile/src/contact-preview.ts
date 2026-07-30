@@ -40,7 +40,7 @@ export const contactPreviewForServerMessage = (
   if (!message) return undefined
   const segments = message.contentJson?.deliverySegments
   if (Array.isArray(segments)) {
-    const latestSegment = segments.findLast(segment => (
+    const latestSegment = [...segments].reverse().find(segment => (
       typeof segment === 'string' && Boolean(segment.trim())
     ))
     if (typeof latestSegment === 'string') return latestSegment.trim()
