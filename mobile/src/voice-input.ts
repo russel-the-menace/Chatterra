@@ -76,6 +76,34 @@ const recognitionLanguageHint = (preferredLanguage?: string) => {
   return locale
 }
 
+const recognitionLanguageCandidates = (preferredLanguage?: string) => {
+  const primary = recognitionLanguageHint(preferredLanguage)
+  if (primary === 'es-AR') return ['es-AR', 'es-ES', 'es-MX', 'es-US']
+  return [primary]
+}
+
+const supportedRecognitionLanguage = async (preferredLanguage?: string) => {
+  const candidates = recognitionLanguageCandidates(preferredLanguage)
+  try {
+    const supported = await ExpoSpeechRecognitionModule.getSupportedLocales({})
+    const supportedByNormalizedLocale = new Map(
+      supported.locales.map(locale => [locale.toLowerCase(), locale])
+    )
+    const exact = candidates.find(locale => supportedByNormalizedLocale.has(locale.toLowerCase()))
+    if (exact) return supportedByNormalizedLocale.get(exact.toLowerCase()) || exact
+
+    const language = candidates[0]?.split('-')[0]?.toLowerCase()
+    const regionalFallback = supported.locales.find(locale => (
+      locale.toLowerCase().startsWith(`${language}-`)
+    ))
+    if (regionalFallback) return regionalFallback
+  } catch {
+    // The platform may not expose its supported locale list. Let the native service
+    // handle the requested locale in that case.
+  }
+  return candidates[0] || 'en-US'
+}
+
 const supportsContinuousRecognition = () => {
   if (Platform.OS !== 'ios') return false
   const version = Number.parseFloat(String(Platform.Version))
@@ -179,8 +207,10 @@ export const useVoiceInput = ({ language, onTranscriptChange }: VoiceInputOption
         updateSnapshot({ status: 'error', error: 'Microphone or speech recognition permission was denied.' })
         return
       }
+      const recognitionLanguage = await supportedRecognitionLanguage(language)
+      if (sessionRef.current !== session || !mountedRef.current) return
       ExpoSpeechRecognitionModule.start({
-        lang: recognitionLanguageHint(language),
+        lang: recognitionLanguage,
         interimResults: true,
         // iOS 16 has the same Speech APIs, but its long-running recognition sessions
         // are less reliable. Keep it to one short utterance there.
