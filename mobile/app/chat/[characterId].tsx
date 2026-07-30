@@ -2173,29 +2173,17 @@ export default function ChatScreen() {
     }
   }
 
-  const discardVoiceMessageText = async (message: ChatMessage) => {
+  const discardVoiceMessageText = (message: ChatMessage) => {
     if (!userId || !message.sourceMessageId || !isUserVoiceMessage(message)) return
     closeMessageActionMenu()
-    try {
-      const result = await api.discardVoiceMessageText(userId, message.sourceMessageId)
-      const mapped = mapMessages([result.message])[0]
-      if (!mapped) throw new Error('The voice message could not be updated.')
-      setMessages(current => current.map(item => (
-        item.id === message.id
-          ? {
-              ...item,
-              ...mapped,
-              renderKey: item.renderKey || mapped.renderKey,
-              voiceTranscriptVisible: false,
-              voiceTranscriptionLoading: false,
-            }
-          : item
-      )))
-    } catch (discardError) {
-      setError(discardError instanceof Error
-        ? discardError.message
-        : 'Could not discard the converted text.')
-    }
+    console.info('[voice] voice_transcript_hidden', {
+      messageId: message.sourceMessageId,
+    })
+    setMessages(current => current.map(item => (
+      item.id === message.id
+        ? { ...item, voiceTranscriptVisible: false, voiceTranscriptionLoading: false }
+        : item
+    )))
   }
 
   const toggleVoiceTranscript = (message: ChatMessage) => {
@@ -3263,7 +3251,7 @@ export default function ChatScreen() {
                 }}
                 onPress={() => {
                   if (messageActionCanDiscardVoiceTranscript) {
-                    void discardVoiceMessageText(messageActionMessage)
+                    discardVoiceMessageText(messageActionMessage)
                     return
                   }
                   void convertVoiceMessageToText(messageActionMessage)
