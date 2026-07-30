@@ -1611,9 +1611,12 @@ export default function ChatScreen() {
     const { contentHeight, offsetY, viewportHeight } = scrollMetricsRef.current
     const latestMessageKey = latestMessage?.renderKey || latestMessage?.id
     if (!latestMessageKey || contentHeight <= 0 || viewportHeight <= 0) return
+    const exactBottomOffset = Math.max(0, contentHeight - viewportHeight)
     setConversationListViewState(characterId, {
       contentHeight,
-      offsetY: Math.max(0, offsetY),
+      offsetY: followLatestRef.current && withinImmersiveRangeRef.current
+        ? exactBottomOffset
+        : Math.max(0, offsetY),
       messageCount: messagesRef.current.length,
       latestMessageKey,
       followLatest: followLatestRef.current,
