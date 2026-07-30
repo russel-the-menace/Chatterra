@@ -1,67 +1,69 @@
 # Chatterra
 
-<p align="center">
-  <img src="mobile/assets/images/chatterra-mark.png" width="88" alt="Chatterra" />
-</p>
+> **I wanted to practice languages without feeling like I had opened a homework app.**
+> So I made a chat app. Then I kept adding people. This is how it got out of hand.
 
-<p align="center"><strong>Language practice in the shape of a real conversation.</strong></p>
+I began with a very normal plan: improve my English.
 
-Chatterra began with a small frustration: language-learning products are very good at
-giving exercises, but they rarely give you someone you would actually want to text.
-I did not want another chat window that happened to translate things. I wanted an
-inbox full of people with different voices, routines, opinions, languages, and reasons
-to answer.
+That plan lasted about twelve minutes.
 
-That idea slowly became a mobile app built around characters rather than lessons. The
-characters correct you when correction helps, but they are still allowed to simply talk
-to you.
+Because most language apps make you feel like you have been assigned a worksheet by a
+very polite robot. “Choose the correct preposition.” Great. Love that for me. But I did
+not need another screen that knew the difference between *in* and *on*. I needed someone
+I could actually text when I was bored, confused, practicing, procrastinating, or all
+four at once.
+
+So Chatterra became a language-practice app shaped like a real inbox: people with their
+own voices, their own contexts, their own ways of replying, and occasionally their own
+reason to message first.
 
 <p align="center">
   <img src="docs/assets/conversation-list.png" width="300" alt="Chatterra conversation list" />
 </p>
 
-## The first reason it existed: learn English without leaving a conversation
+## It started with one English teacher. Naturally, it became a cast.
 
-The first contact was **Emma Carter**, an English teacher. Her job is deliberately
-modest: have a normal conversation, notice the few mistakes worth correcting, explain
-them clearly, and then keep the thread moving. A correction should feel like a good
-friend saying "this is how I would put it," not a red pen taking over the chat.
+The first character was **Emma Carter**, an English teacher. Not a grammar cop. Not a
+walking red underline. Her job is to have a normal conversation, catch the one or two
+mistakes that actually matter, explain them in plain English, and then move on before
+the conversation turns into a courtroom deposition.
 
 <p align="center">
   <img src="docs/assets/english-teacher-corrections.png" width="300" alt="Emma Carter correcting English in a conversation" />
 </p>
 
-From there, the contact list grew in directions a generic "AI tutor" could not cover:
+Then I thought: okay, what else do people need to practice?
 
-- **David**, the interviewer, is there for pressure, follow-up questions, and the
-  particular rhythm of speaking when an answer matters.
-- **Arjun Mehta**, the client, is a different kind of practice: professional context,
-  requirements, trade-offs, and the need to make yourself understood.
-- **Mala Lo** is my Cantonese-speaking contact. I love Cantonese and its very direct,
-  funny, sometimes profane everyday texture, so I wanted a person who felt like a real
-  Hong Kong speaker: Cantonese mixed with English, able to understand Mandarin-typed
-  Cantonese, and never sanitized into textbook dialogue.
+Apparently, a lot:
+
+- **David**, the interviewer, asks the annoying but useful follow-up question. He is
+  there for interview pressure, not comforting lies.
+- **Arjun Mehta**, the client, makes practice feel like work in the best way: explain a
+  decision, handle a vague request, be understood before the meeting turns into smoke.
+- **麻辣佬 (Mala Lo)** exists because I love Cantonese, including its speed, attitude,
+  English code-switching, and, yes, the occasional rude word. He understands
+  Mandarin-typed Cantonese and talks like a Hong Kong person, not a phrasebook wearing a
+  trench coat.
 
 <p align="center">
   <img src="docs/assets/cantonese-code-switching.png" width="300" alt="A Cantonese conversation that naturally mixes English" />
 </p>
 
-## Then came the question: what makes a character feel like a person?
+At that point I was no longer making “an English tutor.” I was quietly building a very
+specific contact list.
 
-At first, a character was mostly a role and a prompt. That was not enough. It produced
-answers, but not someone with a recognisable way of being. The final design treats a
-character as a versioned document with a runtime life around it:
+## The part where “just write a prompt” stopped working
 
-- a full character document describes voice, boundaries, language, background, and
-  conversational priorities;
-- structured front matter derives runtime policy such as mode, time zone, and initiative
-  behaviour instead of scattering those attributes across UI fields;
-- each user gets a private character instance with its own relationship state, memories,
-  event history, and next-action time;
-- the inference layer composes relevant memories, summaries, local time, and recent
-  messages before it asks the model to respond;
-- replies are validated and saved as delivery segments so an answer can arrive as
-  believable separate bubbles instead of one assistant-shaped paragraph.
+A role plus a prompt can produce a reply. It cannot reliably produce a person.
+
+I learned that the hard way. You tell a model “be warm and funny,” and ten minutes later
+it is warm, funny, and somehow explaining its own personality like it is applying for a
+bank loan. So the character system grew up.
+
+Every character is a versioned document. It holds the full prompt, voice, boundaries,
+language, background, and conversational priorities. Structured front matter derives
+runtime policy such as mode, time zone, and proactive behaviour. The app is free to
+change the editing experience; the character remains one coherent piece of writing.
 
 <table>
   <tr>
@@ -74,45 +76,55 @@ character as a versioned document with a runtime life around it:
   </tr>
 </table>
 
-This is why Maya is more than "a girlfriend prompt." She is a young adult pre-med
-student in New York with a particular texting style, realistic boundaries, emoji use,
-and her own reasons to reach out. She can proactively start a conversation from her
-state and recent context, but the policy explicitly rules out pressure, guilt, demands,
-or manufactured dependency. She was designed because language environments often miss
-the way young people actually write: fragments, lowercase, small reactions, slang, and
-emojis that carry tone rather than decorate a sentence.
+The rest of the trick is refusing to treat every reply as a fresh amnesia event:
+
+- each user gets a private character instance with its own relationship state, memories,
+  causal event history, and next-action time;
+- the inference layer composes relevant memories, summaries, local time, and recent
+  messages before a reply is generated;
+- replies are validated and saved as delivery segments, so one answer can arrive as
+  believable separate chat bubbles instead of one suspiciously polished AI paragraph;
+- custom characters use the same character-document path, not a pile of mysterious
+  fields that all claim to be “vibe.”
+
+That architecture is why **Maya** is more than “a girlfriend prompt.” She is an adult
+pre-med student in New York with a particular texting style, realistic boundaries, emoji
+habits, and a life that does not stop because the chat window is closed. She can
+proactively start a conversation from her state and recent context. She cannot guilt,
+pressure, threaten, demand exclusivity, or create a fake dependency loop. We wanted her
+to sound young and real, not like an assistant who found lowercase letters last Tuesday.
 
 <p align="center">
   <img src="docs/assets/maya-proactive-messages.png" width="300" alt="Maya sending natural multi-bubble messages" />
 </p>
 
-The same principle shaped the language friends:
+The language friends follow the same rule: teach only when it helps the conversation.
 
-- **Sofia Alvarez** is an Argentine Spanish tutor and friend for a true beginner working
-  toward B2. She uses Rioplatense Spanish, teaches from zero in deliberate steps, and
-  explains Spanish in English by default. That matters for a question such as "what does
-  gracias mean?" when the rest of the sentence is English.
-- **Minji** and **Yui** are Korean and Japanese university friends, not grammar robots.
-  They understand English, answer naturally in their own language, and offer a brief,
-  high-value phrasing suggestion only when it genuinely makes the learner sound more
-  natural. For example, Yui can gently turn `日本語言える？` into `日本語話せる？` without
-  turning every message into class.
+- **Sofía Alvarez** is an Argentine Spanish tutor and friend for someone starting at
+  absolute zero and aiming for B2. She uses Rioplatense Spanish, teaches in deliberate
+  steps, and explains Spanish in English by default. “What does *gracias* mean?” is a
+  completely valid question here, even if the rest of the sentence is English.
+- **Minji** and **Yui** are Korean and Japanese university friends, not grammar machines
+  with faces. They understand English, reply naturally in their language, and give a
+  brief phrasing upgrade only when it has real value. Yui can turn
+  `日本語言える？` into `日本語話せる？` without putting the whole chat in detention.
 
 <p align="center">
   <img src="docs/assets/japanese-translation.png" width="300" alt="Japanese chat with optional English translation" />
 </p>
 
-## Voice was not meant to be a novelty button
+## The subway test: voice has to look normal
 
-Text is useful, but a conversation feels fundamentally different when you can send a
-voice note. Chatterra keeps two distinct flows: dictation that turns speech into an
-editable draft, and hold-to-talk voice messages that remain audio in the conversation.
-The latter can be played, paused, resumed, converted to text later, and replied to like
-any other message.
+Voice was never meant to be a shiny “look, AI!” button.
 
-**The point was to be able to send a voice message to a character on the subway without
-anyone nearby thinking I was doing something strange.** It should look and behave like
-sending a normal voice note, not like talking to an AI demo.
+There are two separate flows: dictation turns speech into an editable draft; hold-to-talk
+sends a voice message that stays audio in the chat. That audio can play, pause, resume,
+convert to text later, and get a normal reply. In other words, it should behave like a
+voice note, because it is one.
+
+**The real goal was to be able to send a voice message to a character on the subway
+without anyone nearby thinking I was doing something strange.** No giant assistant mode.
+No “please speak now” theatre. Just a normal-looking voice note to a contact.
 
 <table>
   <tr>
@@ -125,53 +137,64 @@ sending a normal voice note, not like talking to an AI demo.
   </tr>
 </table>
 
-When the app starts, the backend checks whether its Mihomo proxy listener is alive,
-verifies a usable node, and makes an authenticated Groq connectivity probe. When that
-path is healthy, short recordings go through Groq's `whisper-large-v3-turbo`, with a
-character-aware prompt that helps mixed English + Spanish, Korean, Japanese, or
-Cantonese speech. If that route is unavailable, the client falls back to iPhone's native
-live speech recognition rather than pretending the microphone is broken. Audio-message
-transcripts are stored with the existing message, so "Convert to Text" reuses the same
-result instead of paying for the same transcription repeatedly.
+That simple experience has an unreasonable amount of plumbing underneath it:
 
-There is also a documented route toward full realtime, call-like conversation. It is not
-enabled by default: a realtime model has a recurring cost profile that this project does
-not want to hide behind a shiny button.
+- at startup, the backend checks Mihomo's proxy listener, verifies a usable node, and
+  makes an authenticated Groq connectivity probe;
+- when that path is healthy, short recordings go to Groq's
+  `whisper-large-v3-turbo`, with a character-aware prompt for mixed English + Spanish,
+  Korean, Japanese, or Cantonese speech;
+- when the cloud route is unavailable, the client falls back to iPhone's native live
+  speech recognition. The microphone is not “broken”; the route just changed;
+- voice-message transcripts live with the durable message. “Convert to Text” reuses that
+  result instead of asking the network to remember the same sentence again;
+- optional assistant voice for Maya uses self-hosted Qwen3-TTS. Text remains the source
+  of truth; audio is a cached attachment, because an audio file should not become your
+  database philosopher.
 
-## The parts that almost broke me
+There is also a documented route toward call-like realtime conversation. It is not
+enabled by default, because realtime models have a recurring cost profile and I refuse
+to sneak a subscription-shaped surprise behind a pretty microphone icon.
 
-The UI looks deliberately quiet, close to the visual language of a familiar messaging
-app. It took far more work than it appears to make it feel that way.
+## The parts that made me stare at the screen for a long time
 
-- Voice bubbles have their own playback state, duration-based width, animated reception
-  mark, long-press actions, and transcript state. The tiny concentric voice mark was
-  redrawn repeatedly until its three layers, spacing, and circular arcs matched the
-  intended WeChat-like rhythm.
-- The chat timeline uses an inverted **FlashList**, not a `FlatList` plus hopeful
-  `scrollToEnd()` calls. Dynamic text, translations, voice bubbles, and segmented AI
-  replies all have different heights. `maintainVisibleContentPosition`, measured item
-  layout, and near-latest detection keep the latest message visible without throwing a
-  reader back to the bottom when they are browsing history.
-- Older history loads upward while preserving what was on screen. Cached conversations,
-  contact previews, delivery state, and authentication live locally first; server sync
-  adds newer messages without deleting this device's local history unless the user
-  explicitly clears it here.
-- AI replies are stored before the client stages their individual bubbles. The UI gives
-  each segment a human-sized wait (bounded rather than arbitrary), so several messages do
-  not arrive as one abrupt block.
+The UI is intentionally quiet. That was the theory. In practice, “quiet” is apparently
+a very demanding design brief.
 
-Underneath the iOS-first interface is Expo/React Native, an Express API, PostgreSQL,
-per-user session storage, and a small inference orchestration layer for character state,
-memory retrieval, event history, proactive scheduling, response segmentation, and voice
-metadata. The relevant design notes live in
+The voice bubble alone needed duration-based width, play/pause state, an animated
+three-layer reception mark, long-press actions, cached transcripts, and a custom
+geometry exercise because the tiny WeChat-like voice mark kept looking wrong. It was
+small. It was ridiculous. It mattered.
+
+The conversation list was its own adventure. Dynamic text, translations, voice bubbles,
+and multi-bubble AI replies do not have a fixed height, so `FlatList` plus
+`scrollToEnd()` became a reliable way to make the chat land *almost* where it should.
+Almost is how UI bugs move into your house.
+
+Chatterra now uses an inverted **FlashList** with measured layout,
+`maintainVisibleContentPosition`, near-latest detection, and a “new messages” affordance.
+It follows a reply only when the reader is already near the newest message; otherwise it
+lets them read in peace. Older history loads upward without kicking the visible message
+across the screen.
+
+The app is local-first where it matters. Conversation caches, contact previews, delivery
+state, and authentication persist locally. Server sync adds newer messages without
+deleting this device's history unless the user explicitly clears it here. The contact
+list opens like a contact list, not like a tiny loading spinner apologizing for its
+existence.
+
+Under the iOS-first interface: Expo/React Native, an Express API, PostgreSQL, durable
+per-user sessions, and a small inference orchestration layer for character state, memory
+retrieval, event history, proactive scheduling, response segmentation, and voice
+metadata. The deeper notes are in
 [AI companion architecture](AI_COMPANION_ARCHITECTURE.md),
 [voice input architecture](VOICE_INPUT_ARCHITECTURE.md), and
 [database design](backend/DATABASE.md).
 
-## Running it locally
+## Run it locally
 
-The project contains a Vite web client, an Expo mobile client, and an Express/PostgreSQL
-backend. The mobile app is the main experience.
+The repository contains a Vite web client, an Expo mobile client, and an
+Express/PostgreSQL backend. The mobile app is the main thing.
 
 ```bash
 docker compose up -d postgres
@@ -184,11 +207,11 @@ In another terminal:
 cd mobile && npm install && npx expo start
 ```
 
-For an iPhone build and the available voice fallbacks, see
-[mobile/README.md](mobile/README.md). Backend configuration and operational details are
-in [backend/README.md](backend/README.md). Secrets belong only in local environment
-files; none are part of this repository.
+For a physical iPhone build and the available voice fallbacks, read
+[mobile/README.md](mobile/README.md). Backend configuration lives in
+[backend/README.md](backend/README.md). Secrets belong in local environment files, where
+they can remain mysterious and uncommitted.
 
-Anyway, I am still unusually happy with this little app. It is a language-learning
-project, but more importantly it became a place where practicing can feel like keeping
-in touch. 🎉
+I am still unusually happy with this app. It started as language practice and became a
+place where practicing can feel like keeping in touch. That is a much better ending than
+“correct answer: B.” 🎉
