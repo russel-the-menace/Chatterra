@@ -38,6 +38,9 @@ Environment variables:
   a bounded audio request without persisting the audio file.
 - `GROQ_TRANSCRIPTION_MODEL`: optional Groq transcription model, default
   `whisper-large-v3-turbo`.
+- `GROQ_PROXY_URL`: optional HTTP proxy for a single retry after Groq direct access has
+  a network failure, returns `403`, or returns a `5xx` status. It is intended for a
+  server-local Mihomo instance and is not used for any other API request.
 - `PROACTIVE_SCHEDULER_ENABLED`: set to `false` to disable background character
   initiation; enabled by default.
 - `PROACTIVE_SCHEDULER_INTERVAL_MS`: scheduler scan interval, default `30000`.
