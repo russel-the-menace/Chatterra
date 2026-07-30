@@ -74,9 +74,11 @@ const MESSAGE_ROW_GAP = 14
 const LATEST_MESSAGE_COMPOSER_GAP = 15
 const MESSAGE_ACTION_MENU_MAX_WIDTH = 308
 const MESSAGE_ACTION_MENU_HEIGHT = 66
-const MESSAGE_ACTION_ARROW_SIZE = 8
+const MESSAGE_ACTION_ARROW_SIZE = 5.6
 const MESSAGE_ACTION_GAP = 4
 const MESSAGE_ACTION_EDGE_GAP = 8
+const MESSAGE_ACTION_ITEM_WIDTH = 96
+const MESSAGE_ACTION_MENU_HORIZONTAL_PADDING = 4
 const MESSAGE_SELECTION_HIT_PADDING = 28
 const MESSAGE_SELECTION_HANDLE_HIT_PADDING = 22
 const MESSAGE_ACTION_FADE_OUT_MS = 65
@@ -220,6 +222,7 @@ const getMessageActionLayout = ({
   safeRight,
   safeTop,
   safeBottom,
+  itemCount,
   usableBottom,
 }: {
   anchor: MessageAnchor
@@ -229,13 +232,19 @@ const getMessageActionLayout = ({
   safeRight: number
   safeTop: number
   safeBottom: number
+  itemCount: number
   usableBottom?: number
 }) => {
   const availableWidth = Math.max(
     1,
     viewportWidth - safeLeft - safeRight - MESSAGE_ACTION_EDGE_GAP * 2
   )
-  const width = Math.min(MESSAGE_ACTION_MENU_MAX_WIDTH, availableWidth)
+  const contentWidth = (
+    MESSAGE_ACTION_ITEM_WIDTH * itemCount
+    + StyleSheet.hairlineWidth * Math.max(0, itemCount - 1)
+    + MESSAGE_ACTION_MENU_HORIZONTAL_PADDING * 2
+  )
+  const width = Math.min(MESSAGE_ACTION_MENU_MAX_WIDTH, availableWidth, contentWidth)
   const anchorCenterX = anchor.x + anchor.width / 2
   const minimumLeft = safeLeft + MESSAGE_ACTION_EDGE_GAP
   const maximumLeft = viewportWidth - safeRight - width - MESSAGE_ACTION_EDGE_GAP
@@ -2566,6 +2575,9 @@ export default function ChatScreen() {
       ))
     : undefined
   const messageActionIsVoice = Boolean(messageActionMessage?.voice)
+  const messageActionItemCount = messageActionMessage
+    ? (isUserVoiceMessage(messageActionMessage) ? 2 : 3)
+    : 0
   const messageActionLayout = messageActionSession && messageActionMessage
     ? getMessageActionLayout({
         anchor: messageActionSession.anchor,
@@ -2575,6 +2587,7 @@ export default function ChatScreen() {
         safeRight: insets.right,
         safeTop: insets.top,
         safeBottom: insets.bottom,
+        itemCount: messageActionItemCount,
         usableBottom: messageActionSession.usableBottom,
       })
     : null
@@ -3118,13 +3131,14 @@ export default function ChatScreen() {
                   pressed && styles.messageActionPressed,
                 ]}
               >
-                <Ionicons
-                  name={messageActionMessage.voice?.transcriptStatus === 'ready'
-                    ? 'trash-outline'
-                    : 'document-text-outline'}
-                  size={18}
-                  color="#FFFFFF"
-                />
+                {messageActionMessage.voice?.transcriptStatus === 'ready' ? (
+                  <View style={styles.messageActionDocumentDiscardIcon}>
+                    <Ionicons name="document-text-outline" size={18} color="#FFFFFF" />
+                    <View style={styles.messageActionDocumentDiscardMark}>
+                      <Ionicons name="close" size={7} color="#FFFFFF" />
+                    </View>
+                  </View>
+                ) : <Ionicons name="document-text-outline" size={18} color="#FFFFFF" />}
                 <Text style={styles.messageActionLabel}>
                   {messageActionMessage.voiceTranscriptionLoading
                     ? 'Converting'
@@ -3724,7 +3738,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     zIndex: 2,
     height: MESSAGE_ACTION_MENU_HEIGHT,
-    paddingHorizontal: 4,
+    paddingHorizontal: MESSAGE_ACTION_MENU_HORIZONTAL_PADDING,
     borderRadius: 7,
     flexDirection: 'row',
     alignItems: 'center',
@@ -3755,7 +3769,8 @@ const styles = StyleSheet.create({
     borderTopColor: '#2B2D30',
   },
   messageAction: {
-    flex: 1,
+    width: MESSAGE_ACTION_ITEM_WIDTH,
+    flexShrink: 0,
     height: 56,
     alignItems: 'center',
     justifyContent: 'center',
@@ -3771,6 +3786,22 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 11,
     lineHeight: 14,
+    textAlign: 'center',
+  },
+  messageActionDocumentDiscardIcon: {
+    width: 18,
+    height: 18,
+  },
+  messageActionDocumentDiscardMark: {
+    position: 'absolute',
+    right: -2,
+    bottom: -2,
+    width: 9,
+    height: 9,
+    borderRadius: 4.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#2B2D30',
   },
   messageActionDivider: {
     width: StyleSheet.hairlineWidth,
