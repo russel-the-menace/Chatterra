@@ -9,7 +9,7 @@ import { palette } from '@/src/theme'
 
 const displayDuration = (duration?: number) => `${Math.max(1, Math.round(duration || 1))}\"`
 const VOICE_WAVE_HEIGHT = 24
-const VOICE_WAVE_WIDTH = 30.6
+const VOICE_WAVE_WIDTH = 31.518
 
 function WeChatVoiceWave({
   color,
@@ -19,21 +19,21 @@ function WeChatVoiceWave({
   level: number
 }) {
   return (
-    <Svg width={VOICE_WAVE_WIDTH} height={VOICE_WAVE_HEIGHT} viewBox="0 0 30.6 24">
+    <Svg width={VOICE_WAVE_WIDTH} height={VOICE_WAVE_HEIGHT} viewBox="0 0 31.518 24">
       <G>
         <Path
-          d="M6 12 L9.27 8.36 A4.455 4.455 0 0 1 9.27 15.64 Z"
+          d="M6 12 L9.47913 8.94773 A4.62825 4.62825 0 0 1 9.47913 15.05227 Z"
           fill={color}
         />
         {level >= 2 && (
           <Path
-            d="M12.87 5.33 A9.3675 9.3675 0 0 1 12.87 18.67 L10.72 16.68 A6.435 6.435 0 0 0 10.72 7.32 Z"
+            d="M13.26783 5.62386 A9.668325 9.668325 0 0 1 13.26783 18.37614 L10.99729 16.38417 A6.64785 6.64785 0 0 0 10.99729 7.61583 Z"
             fill={color}
           />
         )}
         {level >= 3 && (
           <Path
-            d="M16.48 2.3 A14.28 14.28 0 0 1 16.48 21.7 L14.33 19.71 A11.3475 11.3475 0 0 0 14.33 4.29 Z"
+            d="M17.05654 2.3 A14.7084 14.7084 0 0 1 17.05654 21.7 L14.786 19.70804 A11.687925 11.687925 0 0 0 14.786 4.29196 Z"
             fill={color}
           />
         )}
