@@ -76,7 +76,7 @@ const OUTGOING_DELIVERY_STATUS_POLL_INTERVAL_MS = 500
 const MESSAGE_ROW_GAP = 14
 const LATEST_MESSAGE_COMPOSER_GAP = 15
 const MESSAGE_ACTION_MENU_MAX_WIDTH = 308
-const MESSAGE_ACTION_MENU_HEIGHT = 72
+const MESSAGE_ACTION_MENU_HEIGHT = 86
 const MESSAGE_ACTION_ARROW_SIZE = 6.44
 const MESSAGE_ACTION_GAP = 4
 const MESSAGE_ACTION_EDGE_GAP = 8
@@ -1154,8 +1154,20 @@ export default function ChatScreen() {
       const assistant = result.response
         ? responseMessages({ ...result.response, conversationId: result.conversationId })
         : []
-      setMessages(current => mergeMessagePage(current, [...incoming, ...assistant], 'append'))
-      requestAnimationFrame(() => startLatestScroll(true))
+      const loadingId = assistant.length > 0 ? createLocalId() : undefined
+      setMessages(current => mergeMessagePage(current, [
+        ...incoming,
+        ...(loadingId ? [{
+          id: loadingId,
+          sender: 'assistant' as const,
+          text: '',
+          loading: true,
+        }] : []),
+      ], 'append'))
+      requestAnimationFrame(() => {
+        if (loadingId) stageAssistantMessages(loadingId, assistant, 0)
+        startLatestScroll(true)
+      })
     },
   })
 
@@ -3879,11 +3891,11 @@ const styles = StyleSheet.create({
   messageAction: {
     width: MESSAGE_ACTION_ITEM_WIDTH,
     flexShrink: 0,
-    height: 62,
+    height: 76,
     alignItems: 'center',
     justifyContent: 'flex-start',
-    paddingTop: 8,
-    paddingBottom: 3,
+    paddingTop: 15,
+    paddingBottom: 10,
     gap: 3,
   },
   messageActionPressed: {
