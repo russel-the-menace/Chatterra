@@ -1018,6 +1018,9 @@ export default function ChatScreen() {
   const [initialPositionReady, setInitialPositionReady] = useState(false)
   const [activity, setActivity] = useState('Online')
   const [loadingHistory, setLoadingHistory] = useState(!initialCacheRef.current)
+  // AsyncStorage is checked after the route mounts. Do not present that short
+  // local read as a remote-history load.
+  const [historyCacheResolved, setHistoryCacheResolved] = useState(Boolean(initialCacheRef.current))
   const [sending, setSending] = useState(false)
   const [voiceMetadata, setVoiceMetadata] = useState<VoiceTranscriptMetadata | undefined>()
   const [composerMode, setComposerMode] = useState<'text' | 'voice'>('text')
@@ -1722,6 +1725,7 @@ export default function ChatScreen() {
 
     void (async () => {
       const inMemoryHistory = getConversationCache(hydratedCharacterId)
+      setHistoryCacheResolved(Boolean(inMemoryHistory))
       resetInitialScroll()
       const cachedHistory = inMemoryHistory
         || await hydrateConversationCache(hydratedCharacterId)
@@ -1732,6 +1736,7 @@ export default function ChatScreen() {
       ) return
 
       if (!cachedHistory) {
+        setHistoryCacheResolved(true)
         void loadConversationRef.current(false)
       } else {
         messagesRef.current = cachedHistory.messages
@@ -2818,11 +2823,6 @@ export default function ChatScreen() {
               onContentSizeChange={handleContentSizeChange}
               scrollEventThrottle={16}
             />
-            {!initialPositionReady && messages.length > 0 && (
-              <View pointerEvents="none" style={styles.initialHistoryPositioning}>
-                <ActivityIndicator size="small" color={palette.accent} />
-              </View>
-            )}
           </Reanimated.View>
 
           <Reanimated.View style={composerKeyboardAnimatedStyle}>
@@ -3053,7 +3053,7 @@ export default function ChatScreen() {
               </View>
             </View>
           </Reanimated.View>
-          {loadingHistory && messages.length === 0 && (
+          {loadingHistory && historyCacheResolved && messages.length === 0 && (
             <View style={styles.conversationLoadingOverlay}>
               <ActivityIndicator color={palette.accent} />
             </View>
@@ -3358,12 +3358,6 @@ const styles = StyleSheet.create({
   },
   messageListPositioning: {
     opacity: 0,
-  },
-  initialHistoryPositioning: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: palette.background,
   },
   messageListContent: {
     paddingHorizontal: 12,
