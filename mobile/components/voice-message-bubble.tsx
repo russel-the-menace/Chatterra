@@ -1,7 +1,7 @@
-import Ionicons from '@expo/vector-icons/Ionicons'
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons'
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from 'expo-audio'
-import { useCallback, useEffect, useRef } from 'react'
-import { Animated as RNAnimated, Pressable, StyleSheet, Text } from 'react-native'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Pressable, StyleSheet, Text, View } from 'react-native'
 
 import { mediaUrl } from '@/src/api'
 import { MessageVoice } from '@/src/types'
@@ -9,6 +9,11 @@ import { palette } from '@/src/theme'
 
 const displayDuration = (duration?: number) => `${Math.max(1, Math.round(duration || 1))}\"`
 const VOICE_WAVE_ICON_SIZE = 18
+const VOICE_WAVE_ICON_NAMES = [
+  'wifi-strength-1',
+  'wifi-strength-2',
+  'wifi-strength-3',
+] as const
 
 export function VoiceMessageBubble({
   voice,
@@ -26,7 +31,7 @@ export function VoiceMessageBubble({
   const status = useAudioPlayerStatus(player)
   const playWhenLoadedRef = useRef(false)
   const suppressPlaybackUntilRef = useRef(0)
-  const waveOpacity = useRef(new RNAnimated.Value(1)).current
+  const [waveLevel, setWaveLevel] = useState(3)
 
   useEffect(() => {
     if (!status.didJustFinish) return
@@ -35,25 +40,17 @@ export function VoiceMessageBubble({
 
   useEffect(() => {
     if (!status.playing) {
-      waveOpacity.stopAnimation()
-      waveOpacity.setValue(1)
+      setWaveLevel(3)
       return
     }
-    const animation = RNAnimated.loop(RNAnimated.sequence([
-      RNAnimated.timing(waveOpacity, {
-        toValue: 0.42,
-        duration: 220,
-        useNativeDriver: true,
-      }),
-      RNAnimated.timing(waveOpacity, {
-        toValue: 1,
-        duration: 220,
-        useNativeDriver: true,
-      }),
-    ]))
-    animation.start()
-    return () => animation.stop()
-  }, [status.playing, waveOpacity])
+    let nextLevel = 1
+    setWaveLevel(nextLevel)
+    const timer = setInterval(() => {
+      nextLevel = nextLevel === 3 ? 1 : nextLevel + 1
+      setWaveLevel(nextLevel)
+    }, 220)
+    return () => clearInterval(timer)
+  }, [status.playing])
 
   const startPlayback = useCallback(async () => {
     if (status.didJustFinish) await player.seekTo(0)
@@ -115,15 +112,18 @@ export function VoiceMessageBubble({
         pressed && styles.voiceMessagePressed,
       ]}
     >
-      <RNAnimated.View
+      <View
         style={[
           styles.soundWaves,
           isUser ? styles.soundWavesUser : styles.soundWavesAssistant,
-          { opacity: waveOpacity },
         ]}
       >
-        <Ionicons name="wifi" size={VOICE_WAVE_ICON_SIZE} color={isUser ? '#FFFFFF' : palette.text} />
-      </RNAnimated.View>
+        <MaterialCommunityIcons
+          name={VOICE_WAVE_ICON_NAMES[waveLevel - 1]}
+          size={VOICE_WAVE_ICON_SIZE}
+          color={isUser ? '#FFFFFF' : palette.text}
+        />
+      </View>
       <Text style={[styles.duration, isUser && styles.durationUser]}>{displayDuration(voice.durationSeconds)}</Text>
     </Pressable>
   )
