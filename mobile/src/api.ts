@@ -44,6 +44,16 @@ export class ApiError extends Error {
   }
 }
 
+export type VoiceCapability = {
+  mode: 'cloud' | 'local'
+  checkedAt: string
+  checks: {
+    mihomo: 'ready' | 'failed' | 'not_configured'
+    node: 'ready' | 'failed' | 'not_configured'
+    groq: 'ready' | 'failed' | 'not_configured'
+  }
+}
+
 const request = async <T>(path: string, init?: RequestInit, timeoutMs = 20_000): Promise<T> => {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
@@ -81,6 +91,11 @@ const request = async <T>(path: string, init?: RequestInit, timeoutMs = 20_000):
 export const api = {
   async health() {
     return request<{ status: string; database: string }>('/api/health')
+  },
+
+  async getVoiceCapability() {
+    const result = await request<{ capability: VoiceCapability }>('/api/voice/capability', undefined, 30_000)
+    return result.capability
   },
 
   async listCharacters(userId: string) {

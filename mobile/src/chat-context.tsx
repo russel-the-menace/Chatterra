@@ -45,6 +45,7 @@ type ChatContextValue = {
   userId: string | null
   characters: Character[]
   connectionError: string | null
+  voiceInputMode: 'cloud' | 'local'
   proactivePreviews: Record<string, string>
   unreadCharacterIds: Set<string>
   conversationVersions: Record<string, number>
@@ -76,6 +77,7 @@ type ChatContextValue = {
   getConversationViewCache: (characterId: string) => ConversationViewCache | undefined
   setConversationViewCache: (characterId: string, entry: ConversationViewCache) => void
   clearConversationCache: (characterId: string) => void
+  markCloudVoiceUnavailable: () => void
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null)
@@ -126,6 +128,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const [userId, setUserId] = useState<string | null>(null)
   const [characters, setCharacters] = useState<Character[]>([])
   const [connectionError, setConnectionError] = useState<string | null>(null)
+  const [voiceInputMode, setVoiceInputMode] = useState<'cloud' | 'local'>('local')
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [quoteDrafts, setQuoteDrafts] = useState<Record<string, ComposerQuoteDraft>>({})
   const [proactivePreviews, setProactivePreviews] = useState<Record<string, string>>({})
@@ -149,6 +152,23 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const quoteDraftsRef = useRef<Record<string, ComposerQuoteDraft>>({})
   const quoteDraftWriteRef = useRef<Promise<void>>(Promise.resolve())
   const quoteDraftDirtyRef = useRef<Record<string, ComposerQuoteDraft> | null>(null)
+
+  const refreshVoiceInputCapability = useCallback(async () => {
+    try {
+      const capability = await api.getVoiceCapability()
+      setVoiceInputMode(capability.mode)
+    } catch {
+      setVoiceInputMode('local')
+    }
+  }, [])
+
+  const markCloudVoiceUnavailable = useCallback(() => {
+    setVoiceInputMode('local')
+  }, [])
+
+  useEffect(() => {
+    void refreshVoiceInputCapability()
+  }, [refreshVoiceInputCapability])
 
   const flushQuoteDraftPersistence = useCallback(async () => {
     const pending = quoteDraftDirtyRef.current
@@ -619,6 +639,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     userId,
     characters,
     connectionError,
+    voiceInputMode,
     proactivePreviews,
     unreadCharacterIds,
     conversationVersions,
@@ -642,12 +663,15 @@ export function ChatProvider({ children }: PropsWithChildren) {
     getConversationViewCache,
     setConversationViewCache,
     clearConversationCache,
+    markCloudVoiceUnavailable,
   }), [
     characters,
     connectionError,
+    voiceInputMode,
     conversationVersions,
     conversationIdsByCharacter,
     clearConversationCache,
+    markCloudVoiceUnavailable,
     getDraft,
     getQuoteDraft,
     getConversationCache,

@@ -1,6 +1,6 @@
 # Chatterra Voice Input Architecture
 
-Status: mobile Groq transcription adapter implemented
+Status: cloud Groq transcription with native iPhone fallback implemented
 
 ## Boundary
 
@@ -9,9 +9,13 @@ request remains the authority for sending a message:
 
 ```mermaid
 flowchart LR
+    Launch[App Launch] --> Probe[Mihomo / Node / Groq Probe]
+    Probe -->|all checks pass| Cloud[Groq Transcription Adapter]
+    Probe -->|any check fails| Local[iPhone Speech Adapter]
     Mic[Microphone Button] --> Controller[Voice Input Controller]
     Controller --> Capture[Audio Capture Layer]
-    Controller --> Speech[Speech Recognition Adapter]
+    Controller --> Cloud
+    Controller --> Local
     Speech --> Transcript[Transcript Processor]
     Capture --> Transcript
     Transcript --> Draft[Editable Chat Draft]
@@ -21,10 +25,14 @@ flowchart LR
     Chat --> Metadata[Message.content_json.voice]
 ```
 
-`mobile/src/voice-input.ts` owns recording, transcription events, audio lifetime,
-interruption recovery, language labeling, and voice state. `InputBox` only renders the
-state and copies transcript updates into its controlled draft. `ChatPage` passes the
-final metadata through the existing `/api/chat` request.
+At app startup, `GET /api/voice/capability` verifies the server's Mihomo listener,
+selected/available route, and an authenticated Groq request in that order. The mobile
+client defaults to the iPhone speech adapter while this runs and uses the cloud adapter
+only after all three checks pass. `mobile/src/voice-input.ts` owns recording,
+transcription events, audio lifetime, interruption recovery, language labeling, and
+voice state. `InputBox` only renders the state and copies transcript updates into its
+controlled draft. `ChatPage` passes the final metadata through the existing `/api/chat`
+request.
 
 ## State Machine
 
@@ -71,17 +79,20 @@ the message contract.
 
 ## Recognition and Language Policy
 
-The mobile adapter uses Groq Whisper transcription without a forced language parameter,
-so the provider can recognize the language mix in each short recording. The transcript
-processor emits a final editable result and derives a script-based language label for
-message metadata.
+The cloud adapter uses Groq Whisper transcription without a forced language parameter,
+so the provider can recognize the language mix in each short recording. When cloud
+capability checks fail, the native adapter uses the character's language with a
+supported-locale fallback on the iPhone. Both adapters emit an editable result and derive
+a script-based language label for message metadata.
 
 ## Audio Capture
 
-The recorder requests microphone permission only after the user presses the button. It
-limits recordings to 30 seconds. Raw audio is never attached to a chat message, persisted
-by Chatterra, or written to the backend filesystem. Permission denial, network failures,
-provider failures, and no-speech results have separate error paths.
+The cloud recorder requests microphone permission only after the user presses the button.
+It limits recordings to 30 seconds. Raw audio is never attached to a chat message,
+persisted by Chatterra, or written to the backend filesystem. The native fallback uses
+the iPhone speech-recognition capability directly and does not upload an audio file.
+Permission denial, network failures, provider failures, and no-speech results have
+separate error paths.
 
 ## Future Adapters
 

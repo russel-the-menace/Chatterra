@@ -860,6 +860,8 @@ export default function ChatScreen() {
   const {
     ready,
     userId,
+    voiceInputMode,
+    markCloudVoiceUnavailable,
     characters,
     conversationVersions,
     conversationIdsByCharacter,
@@ -994,7 +996,10 @@ export default function ChatScreen() {
   const stagedDeliveryTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set())
   const lastVoiceErrorRef = useRef<string | null>(null)
   const voiceInput = useVoiceInput({
+    mode: voiceInputMode,
     userId: userId || undefined,
+    language: character?.language,
+    onCloudUnavailable: markCloudVoiceUnavailable,
     onTranscriptChange: (text, metadata) => {
       if (!character) return
       setDraft(character.id, text)

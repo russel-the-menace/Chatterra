@@ -41,6 +41,11 @@ Environment variables:
 - `GROQ_PROXY_URL`: optional HTTP proxy for a single retry after Groq direct access has
   a network failure, returns `403`, or returns a `5xx` status. It is intended for a
   server-local Mihomo instance and is not used for any other API request.
+- `MIHOMO_PROXY_URL`, `MIHOMO_CONTROLLER_URL`, `MIHOMO_CONTROLLER_SECRET`, and
+  `MIHOMO_PROXY_GROUP`: configure the startup voice-capability probe. It verifies the
+  proxy listener, its selected node, and an authenticated Groq request before mobile
+  clients select cloud transcription. Bind the controller to a private Docker bridge
+  address and set a secret; do not expose it publicly.
 - `PROACTIVE_SCHEDULER_ENABLED`: set to `false` to disable background character
   initiation; enabled by default.
 - `PROACTIVE_SCHEDULER_INTERVAL_MS`: scheduler scan interval, default `30000`.

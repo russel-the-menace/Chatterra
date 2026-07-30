@@ -34,6 +34,7 @@ import {
   MAX_TRANSCRIPTION_AUDIO_BYTES,
   transcribeWithGroq,
 } from './groq-transcription'
+import { getVoiceCapability } from './voice-capability'
 import { parseCustomCharacterDocument } from './custom-character'
 import {
   clearChatHistory,
@@ -332,6 +333,11 @@ app.post('/api/translations', asyncRoute(async (req, res) => {
       cached: false
     }
   })
+}))
+
+app.get('/api/voice/capability', asyncRoute(async (_req, res) => {
+  res.set('Cache-Control', 'no-store')
+  return res.json({ capability: await getVoiceCapability() })
 }))
 
 app.post(
