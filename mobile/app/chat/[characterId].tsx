@@ -92,6 +92,13 @@ const MESSAGE_BUBBLE_LAYOUT = LinearTransition
   .duration(MESSAGE_REVEAL_DURATION_MS)
   .easing(ReanimatedEasing.out(ReanimatedEasing.cubic))
 const AnimatedPressable = Reanimated.createAnimatedComponent(Pressable)
+const CLOUD_WAVEFORM_SAMPLE_COUNT = 30
+
+const cloudWaveformHeight = (metering?: number) => {
+  const decibels = Number.isFinite(metering) ? Number(metering) : -58
+  const normalized = Math.max(0, Math.min(1, (decibels + 54) / 42))
+  return Math.round(4 + 25 * Math.pow(normalized, 0.62))
+}
 
 type MessageAnchor = {
   x: number
@@ -456,6 +463,43 @@ function TypingIndicator() {
           />
         )
       })}
+    </View>
+  )
+}
+
+function CloudDictationWaveform({
+  metering,
+  recording,
+  tick,
+}: {
+  metering?: number
+  recording: boolean
+  tick: number
+}) {
+  const [samples, setSamples] = useState<number[]>(() => (
+    Array.from({ length: CLOUD_WAVEFORM_SAMPLE_COUNT }, () => 4)
+  ))
+
+  useEffect(() => {
+    if (!recording) {
+      setSamples(Array.from({ length: CLOUD_WAVEFORM_SAMPLE_COUNT }, () => 4))
+      return
+    }
+    const next = cloudWaveformHeight(metering)
+    setSamples(current => [...current.slice(1), next])
+  }, [metering, recording, tick])
+
+  return (
+    <View pointerEvents="none" style={styles.cloudDictationWave}>
+      {samples.map((height, index) => (
+        <View
+          key={index}
+          style={[
+            styles.cloudDictationWaveBar,
+            { height, opacity: height <= 4 ? 0.32 : 1 },
+          ]}
+        />
+      ))}
     </View>
   )
 }
@@ -2747,13 +2791,11 @@ export default function ChatScreen() {
                     >
                       {voiceInput.status === 'processing' ? (
                         <ActivityIndicator size="small" color="#C9D1DC" />
-                      ) : (
-                        <View style={styles.cloudDictationWave}>
-                          {[10, 18, 12, 28, 18, 36, 22, 14, 30, 18, 26, 12, 20].map((height, index) => (
-                            <View key={index} style={[styles.cloudDictationWaveBar, { height }]} />
-                          ))}
-                        </View>
-                      )}
+                      ) : <CloudDictationWaveform
+                        metering={voiceInput.metering}
+                        recording={voiceInput.status === 'recording'}
+                        tick={voiceInput.recordingDurationMilliseconds}
+                      />}
                     </View>
                     <Pressable
                       onPress={voiceInput.reset}
@@ -3293,7 +3335,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   voiceBubble: {
-    minHeight: 38,
+    minHeight: 40,
     paddingHorizontal: 0,
     paddingVertical: 0,
   },
@@ -3571,19 +3613,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 8,
-    backgroundColor: '#202225',
+    borderWidth: 1,
+    borderColor: '#C9D1DC',
+    backgroundColor: '#FFFFFF',
   },
   cloudDictationWave: {
     width: '100%',
-    height: 38,
+    height: 34,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    overflow: 'hidden',
   },
   cloudDictationWaveBar: {
     width: 3,
     borderRadius: 2,
-    backgroundColor: '#98A2B3',
+    backgroundColor: '#667085',
   },
   cloudDictationAction: {
     width: 44,

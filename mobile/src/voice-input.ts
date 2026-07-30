@@ -4,6 +4,7 @@ import {
   requestRecordingPermissionsAsync,
   setAudioModeAsync,
   useAudioRecorder,
+  useAudioRecorderState,
 } from 'expo-audio'
 import {
   ExpoSpeechRecognitionModule,
@@ -38,6 +39,10 @@ type VoiceSnapshot = {
 
 const MAX_RECORDING_DURATION_MS = 30_000
 const initialSnapshot: VoiceSnapshot = { status: 'idle' }
+const cloudRecordingOptions = {
+  ...RecordingPresets.LOW_QUALITY,
+  isMeteringEnabled: true,
+}
 
 const combineDraft = (prefix: string, spoken: string) => {
   if (!prefix) return spoken.trim()
@@ -166,7 +171,8 @@ export const useVoiceInput = ({
   userId,
 }: VoiceInputOptions = {}) => {
   const [snapshot, setSnapshot] = useState<VoiceSnapshot>(initialSnapshot)
-  const recorder = useAudioRecorder(RecordingPresets.LOW_QUALITY)
+  const recorder = useAudioRecorder(cloudRecordingOptions)
+  const recorderState = useAudioRecorderState(recorder, 80)
   const mountedRef = useRef(true)
   const statusRef = useRef<VoiceInputStatus>('idle')
   const sessionRef = useRef(0)
@@ -459,6 +465,8 @@ export const useVoiceInput = ({
 
   return {
     ...snapshot,
+    metering: recorderState.metering,
+    recordingDurationMilliseconds: recorderState.durationMillis,
     start,
     stop,
     toggle,

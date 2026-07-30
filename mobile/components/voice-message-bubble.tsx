@@ -1,7 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons'
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from 'expo-audio'
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Pressable, StyleSheet, Text, View } from 'react-native'
+import { useCallback, useEffect, useRef } from 'react'
+import { Animated as RNAnimated, Pressable, StyleSheet, Text, View } from 'react-native'
 
 import { mediaUrl } from '@/src/api'
 import { MessageVoice } from '@/src/types'
@@ -23,9 +23,13 @@ export function VoiceMessageBubble({
     updateInterval: 150,
   })
   const status = useAudioPlayerStatus(player)
-  const [waveCount, setWaveCount] = useState(3)
   const playWhenLoadedRef = useRef(false)
   const suppressPlaybackUntilRef = useRef(0)
+  const waveOpacities = useRef([
+    new RNAnimated.Value(1),
+    new RNAnimated.Value(1),
+    new RNAnimated.Value(1),
+  ]).current
 
   useEffect(() => {
     if (!status.didJustFinish) return
@@ -34,12 +38,22 @@ export function VoiceMessageBubble({
 
   useEffect(() => {
     if (!status.playing) return
-    setWaveCount(1)
-    const interval = setInterval(() => {
-      setWaveCount(current => current === 3 ? 1 : current + 1)
-    }, 230)
-    return () => clearInterval(interval)
-  }, [status.playing])
+    const frame = (visible: number) => RNAnimated.parallel(
+      waveOpacities.map((opacity, index) => RNAnimated.timing(opacity, {
+        toValue: index < visible ? 1 : 0.22,
+        duration: 170,
+        useNativeDriver: true,
+      }))
+    )
+    const animation = RNAnimated.loop(RNAnimated.sequence([
+      frame(1),
+      frame(2),
+      frame(3),
+      frame(1),
+    ]))
+    animation.start()
+    return () => animation.stop()
+  }, [status.playing, waveOpacities])
 
   const startPlayback = useCallback(async () => {
     if (status.didJustFinish) await player.seekTo(0)
@@ -102,12 +116,25 @@ export function VoiceMessageBubble({
     >
       <View style={styles.speakerIcon}>
         <Ionicons
-          name="volume-low-outline"
+          name="volume-mute-outline"
           size={21}
           color={isUser ? '#FFFFFF' : palette.text}
         />
       </View>
-      <Text style={[styles.soundWaves, isUser && styles.soundWavesUser]}>{')'.repeat(waveCount)}</Text>
+      <View style={styles.soundWaves}>
+        {waveOpacities.map((opacity, index) => (
+          <RNAnimated.View
+            key={index}
+            style={[
+              styles.soundWaveArc,
+              index === 0 && styles.soundWaveArcSmall,
+              index === 1 && styles.soundWaveArcMedium,
+              index === 2 && styles.soundWaveArcLarge,
+              { borderColor: isUser ? '#FFFFFF' : palette.text, opacity },
+            ]}
+          />
+        ))}
+      </View>
       <Text style={[styles.duration, isUser && styles.durationUser]}>{displayDuration(voice.durationSeconds)}</Text>
     </Pressable>
   )
@@ -115,7 +142,7 @@ export function VoiceMessageBubble({
 
 const styles = StyleSheet.create({
   voiceMessage: {
-    minHeight: 38,
+    minHeight: 40,
     paddingHorizontal: 8,
     flexDirection: 'row',
     alignItems: 'center',
@@ -129,14 +156,40 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   soundWaves: {
-    minWidth: 11,
-    color: palette.text,
-    fontSize: 14,
-    fontWeight: '700',
-    lineHeight: 18,
+    width: 16,
+    height: 20,
+    position: 'relative',
   },
-  soundWavesUser: {
-    color: '#FFFFFF',
+  soundWaveArc: {
+    position: 'absolute',
+    borderLeftWidth: 0,
+    borderRightWidth: 1.8,
+    borderTopWidth: 1.8,
+    borderBottomWidth: 1.8,
+  },
+  soundWaveArcSmall: {
+    width: 4,
+    height: 8,
+    top: 6,
+    left: 0,
+    borderTopRightRadius: 5,
+    borderBottomRightRadius: 5,
+  },
+  soundWaveArcMedium: {
+    width: 5,
+    height: 13,
+    top: 3.5,
+    left: 5,
+    borderTopRightRadius: 7,
+    borderBottomRightRadius: 7,
+  },
+  soundWaveArcLarge: {
+    width: 5,
+    height: 18,
+    top: 1,
+    left: 11,
+    borderTopRightRadius: 10,
+    borderBottomRightRadius: 10,
   },
   duration: {
     color: palette.text,
