@@ -22,13 +22,9 @@ function WeChatVoiceWave({
   return (
     <Svg width={VOICE_WAVE_ICON_SIZE} height={VOICE_WAVE_ICON_SIZE} viewBox="0 0 24 24">
       <G transform={mirrored ? 'translate(24 0) scale(-1 1)' : undefined}>
-        <Path
-          d="M3.2 9.4 C5.8 10 7.1 10.9 7.4 12 C7.1 13.1 5.8 14 3.2 14.6 Z"
-          fill={color}
-        />
         {level >= 2 && (
           <Path
-            d="M8.3 8 C11.5 10.2 11.5 13.8 8.3 16"
+            d="M8.3 8 C11.5 8 11.5 16 8.3 16"
             fill="none"
             stroke={color}
             strokeLinecap="butt"
@@ -37,7 +33,7 @@ function WeChatVoiceWave({
         )}
         {level >= 3 && (
           <Path
-            d="M12.4 3.5 C18.9 8.25 18.9 15.75 12.4 20.5"
+            d="M12.4 3.5 C19.2 3.5 19.2 20.5 12.4 20.5"
             fill="none"
             stroke={color}
             strokeLinecap="butt"
@@ -45,6 +41,11 @@ function WeChatVoiceWave({
           />
         )}
       </G>
+      <Path
+        d="M3.2 9.4 C5.8 10 7.1 10.9 7.4 12 C7.1 13.1 5.8 14 3.2 14.6 Z"
+        fill={color}
+        transform={mirrored ? 'translate(13.4 0)' : undefined}
+      />
     </Svg>
   )
 }
