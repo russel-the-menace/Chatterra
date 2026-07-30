@@ -16,4 +16,5 @@ yarn-debug.log*
 yarn-error.log*
 *.log
 backend/data/voice/
+/.private/
 __pycache__/
