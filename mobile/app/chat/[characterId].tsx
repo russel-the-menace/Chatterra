@@ -3848,7 +3848,7 @@ const styles = StyleSheet.create({
     height: 56,
     alignItems: 'center',
     justifyContent: 'flex-start',
-    paddingTop: 3,
+    paddingTop: 5,
     gap: 3,
   },
   messageActionPressed: {
