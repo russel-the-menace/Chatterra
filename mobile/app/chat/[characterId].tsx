@@ -949,7 +949,6 @@ function MessageRow({
           )}
           {message.voiceTranscriptVisible && message.voice?.status === 'ready' && (
             <View style={styles.voiceTranscriptBox}>
-              <Text style={styles.voiceTranscriptLabel}>Voice message</Text>
               <Text style={styles.voiceTranscriptText}>{message.text}</Text>
             </View>
           )}
@@ -2084,7 +2083,12 @@ export default function ChatScreen() {
     if (!userId || !message.sourceMessageId || !isUserVoiceMessage(message)) return
     closeMessageActionMenu()
     if (message.voiceTranscriptionLoading) return
+    const conversionStartedAt = Date.now()
     if (message.text.trim()) {
+      console.info('[voice] voice_transcript_revealed_from_message', {
+        messageId: message.sourceMessageId,
+        transcriptStatus: message.voice.transcriptStatus,
+      })
       setMessages(current => current.map(item => {
         if (item.id !== message.id || item.voice?.provider !== 'user-recording') return item
         return {
@@ -2118,6 +2122,10 @@ export default function ChatScreen() {
         })
       return
     }
+    console.info('[voice] voice_transcript_cloud_conversion_started', {
+      messageId: message.sourceMessageId,
+      transcriptStatus: message.voice.transcriptStatus,
+    })
     setMessages(current => current.map(item => (
       item.id === message.id
         ? { ...item, voiceTranscriptionLoading: true }
@@ -2127,6 +2135,10 @@ export default function ChatScreen() {
       const result = await api.convertVoiceMessageToText(userId, message.sourceMessageId)
       const mapped = mapMessages([result.message])[0]
       if (!mapped) throw new Error('The converted voice message could not be displayed.')
+      console.info('[voice] voice_transcript_cloud_conversion_completed', {
+        elapsedMs: Date.now() - conversionStartedAt,
+        messageId: message.sourceMessageId,
+      })
       setMessages(current => current.map(item => (
         item.id === message.id
           ? {
@@ -3561,12 +3573,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: '#E3E8EF',
-  },
-  voiceTranscriptLabel: {
-    marginBottom: 3,
-    color: palette.textMuted,
-    fontSize: 11,
-    lineHeight: 15,
   },
   voiceTranscriptText: {
     color: palette.text,
