@@ -212,6 +212,13 @@ For a physical iPhone build and the available voice fallbacks, read
 [backend/README.md](backend/README.md). Secrets belong in local environment files, where
 they can remain mysterious and uncommitted.
 
+## One small unfinished thing
+
+AI-generated voice and proper phone-call conversation are mostly implemented with
+OpenAI models. The missing ingredient is not enthusiasm; it is the recurring cost. For
+now, those features are waiting politely offstage. When my financial situation is a bit
+less dramatic, I will turn them on properly.
+
 I am still unusually happy with this app. It started as language practice and became a
 place where practicing can feel like keeping in touch. That is a much better ending than
 “correct answer: B.” 🎉
