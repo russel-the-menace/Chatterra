@@ -2,7 +2,7 @@ import Svg, { G, Path } from 'react-native-svg'
 
 const WAVE_HEIGHT = 21.576895536
 const WAVE_WIDTH = 31.83318
-const WAVE_CENTER_OFFSET_X = 4.993525546
+const WAVE_CENTER_OFFSET_X = 1.653658709
 
 export function WeChatVoiceWave({
   color,
