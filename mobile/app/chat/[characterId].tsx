@@ -87,7 +87,7 @@ const MESSAGE_ACTION_FADE_OUT_MS = 65
 const MESSAGE_ACTION_FADE_IN_MS = 90
 const MESSAGE_ACTION_REAPPEAR_DELAY_MS = 120
 const MESSAGE_SELECTION_INITIALIZE_MS = 180
-const HISTORY_PAGE_SIZE = 50
+const HISTORY_PAGE_SIZE = 20
 const OLDER_HISTORY_TRIGGER_OFFSET = 80
 const LOCAL_HISTORY_REFRESH_MS = 2 * 60_000
 // The final row margin and list padding together form the visible composer gap.
@@ -1015,7 +1015,7 @@ export default function ChatScreen() {
   const [oldestMessageCursor, setOldestMessageCursor] = useState<MessageHistoryCursor | undefined>(
     () => initialCacheRef.current?.oldestMessageCursor
   )
-  const [initialPositionReady, setInitialPositionReady] = useState(false)
+  const [initialPositionReady, setInitialPositionReady] = useState(Boolean(initialCacheRef.current))
   const [activity, setActivity] = useState('Online')
   const [loadingHistory, setLoadingHistory] = useState(!initialCacheRef.current)
   // AsyncStorage is checked after the route mounts. Do not present that short
@@ -1726,7 +1726,7 @@ export default function ChatScreen() {
     void (async () => {
       const inMemoryHistory = getConversationCache(hydratedCharacterId)
       setHistoryCacheResolved(Boolean(inMemoryHistory))
-      resetInitialScroll()
+      if (!inMemoryHistory) resetInitialScroll()
       const cachedHistory = inMemoryHistory
         || await hydrateConversationCache(hydratedCharacterId)
       if (
@@ -1739,6 +1739,9 @@ export default function ChatScreen() {
         setHistoryCacheResolved(true)
         void loadConversationRef.current(false)
       } else {
+        // Cached history can be painted immediately; exact bottom alignment
+        // continues through the normal layout callbacks without a blank frame.
+        setInitialPositionReady(true)
         messagesRef.current = cachedHistory.messages
         setMessages(cachedHistory.messages)
         setConversationId(cachedHistory.conversationId)

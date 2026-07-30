@@ -38,7 +38,7 @@ import { buildContactPreviewState } from './contact-preview'
 
 type ConversationCacheEntry = ConversationHistoryCache
 
-const MAX_PERSISTED_CONVERSATION_MESSAGES = 1_000
+const MAX_CACHED_CONVERSATION_MESSAGES = 20
 
 type ChatContextValue = {
   apiBaseUrl: string
@@ -120,7 +120,7 @@ const cursorForMessage = (message: ChatMessage) => (
 
 const persistentConversationEntry = (entry: ConversationCacheEntry): ConversationCacheEntry => {
   const messages = entry.messages
-    .slice(-MAX_PERSISTED_CONVERSATION_MESSAGES)
+    .slice(-MAX_CACHED_CONVERSATION_MESSAGES)
     .map(({ voiceTranscriptVisible: _voiceTranscriptVisible, ...message }) => message)
   const trimmed = messages.length < entry.messages.length
   const oldestMessageCursor = trimmed
@@ -218,7 +218,9 @@ export function ChatProvider({ children }: PropsWithChildren) {
     const cachedEntries = await Promise.all(currentCharacters.map(async character => {
       try {
         const cache = await getStoredConversationCache(API_BASE_URL, accountId, character.id)
-        return cache ? [character.id, cache] as const : undefined
+        return cache
+          ? [character.id, persistentConversationEntry(cache)] as const
+          : undefined
       } catch (error) {
         console.warn('Could not prewarm conversation cache.', { characterId: character.id, error })
         return undefined
@@ -824,8 +826,9 @@ export function ChatProvider({ children }: PropsWithChildren) {
     if (inMemory || !userId) return inMemory
     try {
       const stored = await getStoredConversationCache(API_BASE_URL, userId, characterId)
-      if (stored) conversationCacheRef.current.set(characterId, stored)
-      return stored
+      const normalized = stored ? persistentConversationEntry(stored) : undefined
+      if (normalized) conversationCacheRef.current.set(characterId, normalized)
+      return normalized
     } catch (error) {
       console.warn('Could not read conversation cache.', error)
       return undefined
@@ -842,7 +845,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         translationError: _translationError,
         ...message
       }) => message)
-    const stableEntry = { ...entry, messages: stableMessages }
+    const stableEntry = persistentConversationEntry({ ...entry, messages: stableMessages })
     conversationCacheRef.current.set(characterId, stableEntry)
     scheduleConversationCachePersistence(characterId, stableEntry)
   }, [scheduleConversationCachePersistence])
