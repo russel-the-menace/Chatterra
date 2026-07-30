@@ -40,6 +40,14 @@ type ConversationCacheEntry = ConversationHistoryCache
 
 const MAX_CACHED_CONVERSATION_MESSAGES = 20
 
+export type ConversationListViewState = {
+  offsetY: number
+  messageCount: number
+  latestMessageKey: string
+  followLatest: boolean
+  withinImmersiveRange: boolean
+}
+
 type ChatContextValue = {
   apiBaseUrl: string
   ready: boolean
@@ -83,6 +91,8 @@ type ChatContextValue = {
   getConversationCache: (characterId: string) => ConversationCacheEntry | undefined
   hydrateConversationCache: (characterId: string) => Promise<ConversationCacheEntry | undefined>
   setConversationCache: (characterId: string, entry: ConversationCacheEntry) => void
+  getConversationListViewState: (characterId: string) => ConversationListViewState | undefined
+  setConversationListViewState: (characterId: string, state: ConversationListViewState) => void
   clearConversationCache: (characterId: string) => void
   markCloudVoiceUnavailable: () => void
 }
@@ -171,6 +181,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const [lastMessageAtByCharacter, setLastMessageAtByCharacter] = useState<Record<string, string>>({})
   const activeCharacterRef = useRef<string | null>(null)
   const conversationCacheRef = useRef<Map<string, ConversationCacheEntry>>(new Map())
+  const conversationListViewStateRef = useRef<Map<string, ConversationListViewState>>(new Map())
   const conversationCacheDirtyRef = useRef<Map<string, ConversationCacheEntry>>(new Map())
   const conversationCacheTimerRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
   const conversationCacheWriteRef = useRef<Map<string, Promise<void>>>(new Map())
@@ -189,6 +200,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const resetWorkspaceState = useCallback(() => {
     conversationCacheTimerRef.current.forEach(timer => clearTimeout(timer))
     conversationCacheRef.current.clear()
+    conversationListViewStateRef.current.clear()
     conversationCacheDirtyRef.current.clear()
     conversationCacheTimerRef.current.clear()
     conversationCacheWriteRef.current.clear()
@@ -520,9 +532,21 @@ export function ChatProvider({ children }: PropsWithChildren) {
       if (hasWorkspaceSnapshotRef.current && changedCharacterIds.size > 0) {
         changedCharacterIds.forEach(characterId => {
           const cached = conversationCacheRef.current.get(characterId)
-          const nextConversationId = nextConversationIds[characterId] || null
-          if (cached && cached.conversationId !== nextConversationId) {
+          const conversation = newestConversationByCharacter.get(characterId)
+          const cachedLatestMessage = cached?.messages.at(-1)
+          const cachedLatestMessageId = cachedLatestMessage?.sourceMessageId || cachedLatestMessage?.id
+          const serverLatestMessageId = conversation?.latestMessage?.id
+          const shouldDiscardCachedConversation = Boolean(
+            cached
+            && conversation
+            && (
+              cached.conversationId !== conversation.id
+              || cachedLatestMessageId !== serverLatestMessageId
+            )
+          )
+          if (shouldDiscardCachedConversation) {
             conversationCacheRef.current.delete(characterId)
+            conversationListViewStateRef.current.delete(characterId)
           }
         })
         setConversationVersions(current => {
@@ -845,13 +869,37 @@ export function ChatProvider({ children }: PropsWithChildren) {
         translationError: _translationError,
         ...message
       }) => message)
-    const stableEntry = persistentConversationEntry({ ...entry, messages: stableMessages })
+    const stableEntry = { ...entry, messages: stableMessages }
+    const cachedViewState = conversationListViewStateRef.current.get(characterId)
+    const latestMessage = stableMessages.at(-1)
+    const latestMessageKey = latestMessage?.renderKey || latestMessage?.id
+    if (
+      cachedViewState
+      && (
+        cachedViewState.messageCount !== stableMessages.length
+        || cachedViewState.latestMessageKey !== latestMessageKey
+      )
+    ) {
+      conversationListViewStateRef.current.delete(characterId)
+    }
     conversationCacheRef.current.set(characterId, stableEntry)
-    scheduleConversationCachePersistence(characterId, stableEntry)
+    scheduleConversationCachePersistence(characterId, persistentConversationEntry(stableEntry))
   }, [scheduleConversationCachePersistence])
+
+  const getConversationListViewState = useCallback((characterId: string) => (
+    conversationListViewStateRef.current.get(characterId)
+  ), [])
+
+  const setConversationListViewState = useCallback((
+    characterId: string,
+    state: ConversationListViewState
+  ) => {
+    conversationListViewStateRef.current.set(characterId, state)
+  }, [])
 
   const clearConversationCache = useCallback((characterId: string) => {
     conversationCacheRef.current.delete(characterId)
+    conversationListViewStateRef.current.delete(characterId)
     conversationCacheDirtyRef.current.delete(characterId)
     const timer = conversationCacheTimerRef.current.get(characterId)
     if (timer) {
@@ -904,6 +952,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
     getConversationCache,
     hydrateConversationCache,
     setConversationCache,
+    getConversationListViewState,
+    setConversationListViewState,
     clearConversationCache,
     markCloudVoiceUnavailable,
   }), [
@@ -919,6 +969,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     login,
     logout,
     getConversationCache,
+    getConversationListViewState,
     hydrateConversationCache,
     markCharacterRead,
     proactivePreviews,
@@ -935,6 +986,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     setCharacterPinned,
     markConversationActive,
     setConversationCache,
+    setConversationListViewState,
     setDraft,
     setQuoteDraft,
     unreadCharacterIds,

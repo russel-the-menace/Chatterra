@@ -994,8 +994,10 @@ export default function ChatScreen() {
     setCharacterPinned,
     markConversationActive,
     getConversationCache,
+    getConversationListViewState,
     hydrateConversationCache,
     setConversationCache,
+    setConversationListViewState,
     clearConversationCache,
   } = useChat()
   const character = useMemo(
@@ -1005,6 +1007,22 @@ export default function ChatScreen() {
   const draft = characterId ? getDraft(characterId) : ''
   const quotedMessage = characterId ? getQuoteDraft(characterId) : null
   const initialCacheRef = useRef(characterId ? getConversationCache(characterId) : undefined)
+  const initialListViewStateRef = useRef(
+    characterId ? getConversationListViewState(characterId) : undefined
+  )
+  const initialLatestMessage = initialCacheRef.current?.messages.at(-1)
+  const hasInitialListViewState = Boolean(
+    initialListViewStateRef.current
+    && initialListViewStateRef.current.messageCount === initialCacheRef.current?.messages.length
+    && initialListViewStateRef.current.latestMessageKey === (
+      initialLatestMessage?.renderKey || initialLatestMessage?.id
+    )
+  )
+  const initialContentOffsetRef = useRef<{ x: number; y: number } | undefined>(
+    hasInitialListViewState && initialListViewStateRef.current
+      ? { x: 0, y: initialListViewStateRef.current.offsetY }
+      : undefined
+  )
   const [messages, setMessages] = useState<ChatMessage[]>(() => initialCacheRef.current?.messages || [])
   const [conversationId, setConversationId] = useState<string | null>(
     initialCacheRef.current?.conversationId || null
@@ -1027,6 +1045,7 @@ export default function ChatScreen() {
   const [error, setError] = useState<string | null>(null)
   const [showScrollToLatest, setShowScrollToLatest] = useState(false)
   const [unseenLatestCount, setUnseenLatestCount] = useState(0)
+  const [loadingOlderHistory, setLoadingOlderHistory] = useState(false)
   const [messageActionSession, setMessageActionSession] = useState<MessageActionSession | null>(null)
   const [messageActionMenuInteractive, setMessageActionMenuInteractive] = useState(true)
   const listRef = useAnimatedRef<FlatList<ChatMessage>>()
@@ -1053,11 +1072,13 @@ export default function ChatScreen() {
   const composerFocusedRef = useRef(false)
   const quoteDraftRevisionRef = useRef(0)
   const sendingRef = useRef(false)
-  const withinImmersiveRangeRef = useRef(true)
-  const followLatestRef = useRef(true)
+  const withinImmersiveRangeRef = useRef(
+    initialListViewStateRef.current?.withinImmersiveRange ?? true
+  )
+  const followLatestRef = useRef(initialListViewStateRef.current?.followLatest ?? true)
   const unseenLatestRef = useRef(false)
   const manualScrollRef = useRef(false)
-  const initialScrollRef = useRef(true)
+  const initialScrollRef = useRef(!hasInitialListViewState)
   const initialScrollScheduledRef = useRef(false)
   const initialScrollFrameRef = useRef<number | null>(null)
   const loadingOlderHistoryRef = useRef(false)
@@ -1431,6 +1452,7 @@ export default function ChatScreen() {
     }
     initialScrollRef.current = true
     initialScrollScheduledRef.current = false
+    initialContentOffsetRef.current = undefined
     setInitialPositionReady(false)
   }, [])
 
@@ -1554,6 +1576,21 @@ export default function ChatScreen() {
   useEffect(() => {
     messagesRef.current = messages
   }, [messages])
+
+  useEffect(() => () => {
+    if (!characterId) return
+    const latestMessage = messagesRef.current.at(-1)
+    const { contentHeight, offsetY, viewportHeight } = scrollMetricsRef.current
+    const latestMessageKey = latestMessage?.renderKey || latestMessage?.id
+    if (!latestMessageKey || contentHeight <= 0 || viewportHeight <= 0) return
+    setConversationListViewState(characterId, {
+      offsetY: Math.max(0, offsetY),
+      messageCount: messagesRef.current.length,
+      latestMessageKey,
+      followLatest: followLatestRef.current,
+      withinImmersiveRange: withinImmersiveRangeRef.current,
+    })
+  }, [characterId, setConversationListViewState])
 
   useEffect(() => {
     const pendingDeliveryMessageId = quotedMessage?.pendingDeliveryMessageId
@@ -1859,6 +1896,7 @@ export default function ChatScreen() {
       || loadingOlderHistoryRef.current) return
 
     loadingOlderHistoryRef.current = true
+    setLoadingOlderHistory(true)
     const pageRequestId = historyPageRequestRef.current + 1
     historyPageRequestRef.current = pageRequestId
     const historyRequestId = historyRequestRef.current
@@ -1889,6 +1927,7 @@ export default function ChatScreen() {
     } finally {
       if (pageRequestId === historyPageRequestRef.current) {
         loadingOlderHistoryRef.current = false
+        setLoadingOlderHistory(false)
       }
     }
   }, [conversationId, hasMoreHistory, oldestMessageCursor])
@@ -2743,6 +2782,7 @@ export default function ChatScreen() {
             <Reanimated.FlatList
               ref={listRef}
               data={messages}
+              contentOffset={initialContentOffsetRef.current}
               disableVirtualization={!initialPositionReady}
               initialNumToRender={Math.max(1, messages.length)}
               maxToRenderPerBatch={Math.max(1, messages.length)}
@@ -2826,6 +2866,11 @@ export default function ChatScreen() {
               onContentSizeChange={handleContentSizeChange}
               scrollEventThrottle={16}
             />
+            {loadingOlderHistory && (
+              <View pointerEvents="none" style={styles.olderHistoryLoading}>
+                <ActivityIndicator size="small" color={palette.textMuted} />
+              </View>
+            )}
           </Reanimated.View>
 
           <Reanimated.View style={composerKeyboardAnimatedStyle}>
@@ -3366,6 +3411,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingTop: 18,
     paddingBottom: MESSAGE_LIST_BOTTOM_PADDING,
+  },
+  olderHistoryLoading: {
+    position: 'absolute',
+    top: 8,
+    alignSelf: 'center',
+    width: 34,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 17,
+    backgroundColor: 'rgba(255, 255, 255, 0.88)',
   },
   messageRow: {
     width: '100%',
