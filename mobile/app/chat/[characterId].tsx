@@ -45,6 +45,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { Avatar } from '@/components/avatar'
 import { VoiceMessageBubble } from '@/components/voice-message-bubble'
+import { WeChatVoiceWave } from '@/components/wechat-voice-wave'
 import { api, ApiError } from '@/src/api'
 import { useChat } from '@/src/chat-context'
 import { mergeMessagePage } from '@/src/message-page-merge'
@@ -2856,7 +2857,7 @@ export default function ChatScreen() {
                       accessibilityLabel="Voice message mode is unavailable while transcribing"
                       style={[styles.composerModeButton, styles.voiceButtonDisabled]}
                     >
-                      <Ionicons name="volume-high-outline" size={22} color={palette.text} />
+                      <WeChatVoiceWave color={palette.text} centered height={22} />
                     </Pressable>
                     <View
                       accessibilityRole="progressbar"
@@ -2907,7 +2908,7 @@ export default function ChatScreen() {
                       accessibilityLabel="Switch to voice message"
                       style={({ pressed }) => [styles.composerModeButton, pressed && styles.voiceButtonPressed]}
                     >
-                      <Ionicons name="volume-high-outline" size={22} color={palette.text} />
+                      <WeChatVoiceWave color={palette.text} centered height={22} />
                     </Pressable>
                     <TextInput
                       ref={composerInputRef}

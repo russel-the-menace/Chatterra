@@ -1,46 +1,13 @@
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from 'expo-audio'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Pressable, StyleSheet, Text } from 'react-native'
-import Svg, { G, Path } from 'react-native-svg'
 
 import { mediaUrl } from '@/src/api'
 import { MessageVoice } from '@/src/types'
 import { palette } from '@/src/theme'
+import { WeChatVoiceWave } from '@/components/wechat-voice-wave'
 
 const displayDuration = (duration?: number) => `${Math.max(1, Math.round(duration || 1))}\"`
-const VOICE_WAVE_HEIGHT = 21.576895536
-const VOICE_WAVE_WIDTH = 31.83318
-
-function WeChatVoiceWave({
-  color,
-  level,
-}: {
-  color: string
-  level: number
-}) {
-  return (
-    <Svg width={VOICE_WAVE_WIDTH} height={VOICE_WAVE_HEIGHT} viewBox="0 0 31.83318 21.576895536">
-      <G>
-        <Path
-          d="M6 10.788447768 L9.029578126 8.176617685 A4 4 0 0 1 9.029578126 13.40027785 Z"
-          fill={color}
-        />
-        {level >= 2 && (
-          <Path
-            d="M12.437853517 5.238308843 A8.5 8.5 0 0 1 12.437853517 16.338586693 L10.923064454 15.032671652 A6.5 6.5 0 0 0 10.923064454 6.544223884 Z"
-            fill={color}
-          />
-        )}
-        {level >= 3 && (
-          <Path
-            d="M15.846128909 2.3 A13 13 0 0 1 15.846128909 19.276895536 L14.331339846 17.970980494 A11 11 0 0 0 14.331339846 3.605915041 Z"
-            fill={color}
-          />
-        )}
-      </G>
-    </Svg>
-  )
-}
 
 export function VoiceMessageBubble({
   voice,
