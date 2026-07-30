@@ -1015,12 +1015,19 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
     }
   }
 
-  const userContentJson = existingVoiceMessage?.contentJson || (voiceMetadata || quote
+  const userContentJson = existingVoiceMessage?.contentJson
     ? {
-        ...(voiceMetadata ? { voice: voiceMetadata } : {}),
-        ...(quote ? { quote } : {})
+        ...existingVoiceMessage.contentJson,
+        ...(existingVoice
+          ? { voice: { ...existingVoice, transcriptStatus: 'ready' } }
+          : {}),
       }
-    : undefined)
+    : (voiceMetadata || quote
+      ? {
+          ...(voiceMetadata ? { voice: voiceMetadata } : {}),
+          ...(quote ? { quote } : {})
+        }
+      : undefined)
 
   const userMessage: Message = {
     id: existingVoiceMessage?.id || clientMessageId || newId(),

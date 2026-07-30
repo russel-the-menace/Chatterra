@@ -2072,6 +2072,40 @@ export default function ChatScreen() {
     if (!userId || !message.sourceMessageId || !isUserVoiceMessage(message)) return
     closeMessageActionMenu()
     if (message.voiceTranscriptionLoading) return
+    if (message.text.trim()) {
+      setMessages(current => current.map(item => {
+        if (item.id !== message.id || item.voice?.provider !== 'user-recording') return item
+        return {
+          ...item,
+          voice: { ...item.voice, transcriptStatus: 'ready' },
+          voiceTranscriptVisible: true,
+          voiceTranscriptionLoading: false,
+        }
+      }))
+      void api.convertVoiceMessageToText(userId, message.sourceMessageId)
+        .then(result => {
+          const mapped = mapMessages([result.message])[0]
+          if (!mapped) return
+          setMessages(current => current.map(item => (
+            item.id === message.id
+              ? {
+                  ...item,
+                  ...mapped,
+                  renderKey: item.renderKey || mapped.renderKey,
+                  voiceTranscriptVisible: true,
+                  voiceTranscriptionLoading: false,
+                }
+              : item
+          )))
+        })
+        .catch(error => {
+          console.warn('[voice] voice_transcript_status_persist_failed', {
+            error: error instanceof Error ? error.message : 'unknown_error',
+            messageId: message.sourceMessageId,
+          })
+        })
+      return
+    }
     setMessages(current => current.map(item => (
       item.id === message.id
         ? { ...item, voiceTranscriptionLoading: true }
