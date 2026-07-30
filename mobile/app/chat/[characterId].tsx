@@ -1035,11 +1035,11 @@ export default function ChatScreen() {
       ? { x: 0, y: initialListViewStateRef.current.offsetY }
       : undefined
   )
-  const restoredContentHeightRef = useRef(
-    hasInitialListViewState && initialListViewState
-      ? initialListViewState.contentHeight
-      : undefined
-  )
+  const restoredLatestAlignmentPendingRef = useRef(Boolean(
+    hasInitialListViewState
+    && initialListViewState?.followLatest
+    && initialListViewState.withinImmersiveRange
+  ))
   const initialDisplayMessageCount = hasInitialListViewState && initialListViewState
     ? initialListViewState.messageCount
     : HISTORY_PAGE_SIZE
@@ -1613,7 +1613,6 @@ export default function ChatScreen() {
     if (!latestMessageKey || contentHeight <= 0 || viewportHeight <= 0) return
     const exactBottomOffset = Math.max(0, contentHeight - viewportHeight)
     setConversationListViewState(characterId, {
-      contentHeight,
       offsetY: followLatestRef.current && withinImmersiveRangeRef.current
         ? exactBottomOffset
         : Math.max(0, offsetY),
@@ -2697,16 +2696,23 @@ export default function ChatScreen() {
     const viewportHeight = event.nativeEvent.layout.height
     scrollMetricsRef.current.viewportHeight = viewportHeight
     scrollViewportHeight.value = viewportHeight
+    if (restoredLatestAlignmentPendingRef.current
+      && scrollMetricsRef.current.contentHeight > 0) {
+      restoredLatestAlignmentPendingRef.current = false
+      scrollToExactLatest()
+      return
+    }
     settleInitialScroll()
   }
 
   const handleContentSizeChange = (_width: number, height: number) => {
     scrollMetricsRef.current.contentHeight = height
     scrollContentHeight.value = height
-    const restoredContentHeight = restoredContentHeightRef.current
-    if (restoredContentHeight !== undefined) {
-      restoredContentHeightRef.current = undefined
-      if (Math.abs(restoredContentHeight - height) <= 1) return
+    if (restoredLatestAlignmentPendingRef.current
+      && scrollMetricsRef.current.viewportHeight > 0) {
+      restoredLatestAlignmentPendingRef.current = false
+      scrollToExactLatest()
+      return
     }
     const prependAnchor = prependHistoryAnchorRef.current
     if (prependAnchor && height > prependAnchor.contentHeight) {
