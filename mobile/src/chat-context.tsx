@@ -187,6 +187,26 @@ export function ChatProvider({ children }: PropsWithChildren) {
     setLastMessageAtByCharacter({})
   }, [])
 
+  const prewarmConversationCaches = useCallback(async (
+    accountId: string,
+    currentCharacters: Character[]
+  ) => {
+    const cachedEntries = await Promise.all(currentCharacters.map(async character => {
+      try {
+        const cache = await getStoredConversationCache(API_BASE_URL, accountId, character.id)
+        return cache ? [character.id, cache] as const : undefined
+      } catch (error) {
+        console.warn('Could not prewarm conversation cache.', { characterId: character.id, error })
+        return undefined
+      }
+    }))
+
+    cachedEntries.forEach(entry => {
+      if (!entry || conversationCacheRef.current.has(entry[0])) return
+      conversationCacheRef.current.set(entry[0], entry[1])
+    })
+  }, [])
+
   const refreshVoiceInputCapability = useCallback(async () => {
     try {
       const capability = await api.getVoiceCapability()
@@ -268,6 +288,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
           api.listPinnedCharacterIds(storedSession.user.id),
           api.listCharacters(storedSession.user.id),
         ])
+        await prewarmConversationCaches(storedSession.user.id, nextCharacters)
         if (cancelled) return
         quoteDraftsRef.current = storedQuoteDrafts
         setQuoteDrafts(storedQuoteDrafts)
@@ -293,7 +314,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [prewarmConversationCaches])
 
   const login = useCallback(async (nextUsername: string, password: string) => {
     const session = await api.login(nextUsername, password)
@@ -318,6 +339,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         api.listPinnedCharacterIds(storedSession.user.id),
         api.listCharacters(storedSession.user.id),
       ])
+      await prewarmConversationCaches(storedSession.user.id, nextCharacters)
       quoteDraftsRef.current = storedQuoteDrafts
       setQuoteDrafts(storedQuoteDrafts)
       setPinnedCharacterIds(new Set(pinnedIds))
@@ -326,7 +348,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     } catch (error) {
       setConnectionError(messageForError(error))
     }
-  }, [resetWorkspaceState])
+  }, [prewarmConversationCaches, resetWorkspaceState])
 
   const logout = useCallback(async () => {
     try {
