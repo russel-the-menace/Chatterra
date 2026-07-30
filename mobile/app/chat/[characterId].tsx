@@ -41,12 +41,19 @@ import { VoiceMessageBubble } from '@/components/voice-message-bubble'
 import { WeChatVoiceWave } from '@/components/wechat-voice-wave'
 import { api, ApiError } from '@/src/api'
 import { useChat } from '@/src/chat-context'
+import {
+  ChatTimelineItem,
+  chatTimeline,
+  chatTimelineItemType,
+  messageRenderKey,
+} from '@/src/chat-timeline'
 import { mergeMessagePage } from '@/src/message-page-merge'
 import { starterMessageForCharacter } from '@/src/starter-message'
 import { palette } from '@/src/theme'
 import { useVoiceInput } from '@/src/voice-input'
 import { useVoiceMessageRecorder } from '@/src/voice-message-recorder'
 import {
+  Character,
   ChatMessage,
   ChatResponse,
   AssistantVoiceMessage,
@@ -65,8 +72,10 @@ const OUTGOING_DELIVERY_INDICATOR_DELAY_MS = 3_000
 const OUTGOING_DELIVERY_TIMEOUT_MS = 60_000
 const OUTGOING_DELIVERY_STATUS_POLL_INITIAL_DELAY_MS = 250
 const OUTGOING_DELIVERY_STATUS_POLL_INTERVAL_MS = 500
-const MESSAGE_ROW_GAP = 14
-const LATEST_MESSAGE_COMPOSER_GAP = 15
+const MESSAGE_ROW_GAP = 10
+// The composer adds 8px above its input row, so this preserves a 10px visual gap
+// between the newest bubble and the input border.
+const LATEST_MESSAGE_COMPOSER_GAP = 2
 const MESSAGE_ACTION_MENU_MAX_WIDTH = 308
 const MESSAGE_ACTION_MENU_HEIGHT = 86
 const MESSAGE_ACTION_ARROW_SIZE = 6.44
@@ -95,14 +104,21 @@ const visibleHistoryWindow = (messages: ChatMessage[], messageCount = HISTORY_PA
   messages.slice(-Math.max(1, messageCount))
 )
 
-const chatMessageItemType = (message: ChatMessage) => {
-  if (message.loading) return 'loading'
-  if (message.voice) return `${message.sender}-voice`
-  if (message.quote || message.voiceTranscriptVisible || message.translationVisible) {
-    return `${message.sender}-supplement`
-  }
-  return message.sender
+const stampLegacyStarterMessages = (messages: ChatMessage[]) => {
+  const createdAt = new Date().toISOString()
+  return messages.map(message => (
+    message.id.startsWith('starter-') && !message.createdAt
+      ? { ...message, createdAt }
+      : message
+  ))
 }
+
+const localStarterMessage = (character: Character, id: string): ChatMessage => ({
+  id,
+  sender: 'assistant',
+  text: starterMessageForCharacter(character),
+  createdAt: new Date().toISOString(),
+})
 
 const cursorForMessage = (message?: ChatMessage): MessageHistoryCursor | undefined => (
   message?.createdAt
@@ -401,7 +417,10 @@ const mapMessages = (messages: ServerMessage[]): ChatMessage[] => messages
     }))
   })
 
-const responseMessages = (response: ChatResponse): ChatMessage[] => {
+const responseMessages = (
+  response: ChatResponse,
+  createdAt = new Date().toISOString()
+): ChatMessage[] => {
   const stored = Array.isArray(response.replySegments)
     ? response.replySegments.filter((segment): segment is string => (
         typeof segment === 'string' && Boolean(segment.trim())
@@ -422,6 +441,7 @@ const responseMessages = (response: ChatResponse): ChatMessage[] => {
     animateEntry: true,
     animationDelayMs: 0,
     voice: response.voice?.segmentIndex === index ? response.voice : undefined,
+    createdAt,
   }))
 }
 
@@ -793,6 +813,14 @@ function MessageBubbleContent({
   )
 }
 
+function DateDivider({ label }: { label: string }) {
+  return (
+    <View pointerEvents="none" style={styles.dateDivider}>
+      <Text style={styles.dateDividerLabel}>{label}</Text>
+    </View>
+  )
+}
+
 function MessageRow({
   message,
   characterName,
@@ -810,7 +838,7 @@ function MessageRow({
   onSelectionOutsideTap,
   onSelectionTouchEnd,
   onRetryMessage,
-  isOldest,
+  assistantContinuation,
 }: {
   message: ChatMessage
   characterName: string
@@ -828,11 +856,11 @@ function MessageRow({
   onSelectionOutsideTap: () => void
   onSelectionTouchEnd: () => void
   onRetryMessage: (message: ChatMessage) => void
-  isOldest: boolean
+  assistantContinuation: boolean
 }) {
   const messageKey = message.renderKey || message.id
   const isUser = message.sender === 'user'
-  const isContinuation = !isUser && (message.groupIndex || 0) > 0
+  const isContinuation = !isUser && assistantContinuation
   const readyVoice = message.voice?.status === 'ready' && Boolean(message.voice.audioUrl)
   const entryProgress = useRef(new RNAnimated.Value(message.animateEntry ? 0 : 1)).current
   const bubbleRef = useRef<View>(null)
@@ -862,8 +890,6 @@ function MessageRow({
     <RNAnimated.View
       style={[
         styles.messageRow,
-        isOldest && styles.messageRowOldest,
-        isContinuation && styles.messageRowGrouped,
         {
           opacity: entryProgress,
           transform: [{
@@ -877,17 +903,16 @@ function MessageRow({
         isUser ? styles.messagePrimaryRowUser : styles.messagePrimaryRowAssistant,
       ]}>
         {!isUser && !isContinuation && (
-          <Pressable onPress={onEditCharacter} accessibilityLabel={`Edit ${characterName}`}>
+          <Pressable
+            onPress={onEditCharacter}
+            accessibilityLabel={`Edit ${characterName}`}
+            style={styles.assistantAvatar}
+          >
             <Avatar avatar={characterAvatar} name={characterName} size={40} />
           </Pressable>
         )}
         {isContinuation && <View style={styles.avatarSpacer} />}
         <View style={[styles.messageContent, isUser && styles.messageContentUser]}>
-          {!isUser && !isContinuation && (
-            <Pressable onPress={onEditCharacter} hitSlop={5}>
-              <Text style={styles.messageAuthor}>{characterName}</Text>
-            </Pressable>
-          )}
           {isUser && (
             <MessageDeliveryIndicator
               state={message.deliveryState}
@@ -1039,7 +1064,7 @@ export default function ChatScreen() {
   const initialListViewStateRef = useRef(
     characterId ? getConversationListViewState(characterId) : undefined
   )
-  const initialCachedMessages = initialCacheRef.current?.messages || []
+  const initialCachedMessages = stampLegacyStarterMessages(initialCacheRef.current?.messages || [])
   const initialCachedLatestMessage = initialCachedMessages.at(-1)
   const initialListViewState = initialListViewStateRef.current
   const hasInitialListViewState = Boolean(
@@ -1066,7 +1091,7 @@ export default function ChatScreen() {
   )
   const initialDisplayCursor = cursorForMessage(initialDisplayMessages[0])
   const [messages, setMessages] = useState<ChatMessage[]>(() => initialDisplayMessages)
-  const displayMessages = useMemo(() => [...messages].reverse(), [messages])
+  const timelineItems = useMemo(() => chatTimeline(messages), [messages])
   const [conversationId, setConversationId] = useState<string | null>(
     initialCacheRef.current?.conversationId || null
   )
@@ -1093,7 +1118,7 @@ export default function ChatScreen() {
   const [loadingOlderHistory, setLoadingOlderHistory] = useState(false)
   const [messageActionSession, setMessageActionSession] = useState<MessageActionSession | null>(null)
   const [messageActionMenuInteractive, setMessageActionMenuInteractive] = useState(true)
-  const listRef = useRef<FlashListRef<ChatMessage>>(null)
+  const listRef = useRef<FlashListRef<ChatTimelineItem>>(null)
   const composerInputRef = useRef<TextInput>(null)
   const composerRegionRef = useRef<View>(null)
   const messagesRef = useRef(messages)
@@ -1483,6 +1508,7 @@ export default function ChatScreen() {
           groupIndex: nextMessage.groupIndex,
           groupSize: nextMessage.groupSize,
           animateEntry: true,
+          createdAt: nextMessage.createdAt,
         }
         followIncoming()
         setMessages(current => {
@@ -1642,7 +1668,7 @@ export default function ChatScreen() {
       if (!matching) {
         const cachedHistory = getConversationCache(character.id)
         if (cachedHistory?.messages.length) {
-          const cachedMessages = visibleHistoryWindow(cachedHistory.messages)
+          const cachedMessages = visibleHistoryWindow(stampLegacyStarterMessages(cachedHistory.messages))
           setConversationId(cachedHistory.conversationId)
           setHasMoreHistory(Boolean(
             cachedHistory.hasMoreHistory || cachedMessages.length < cachedHistory.messages.length
@@ -1655,11 +1681,7 @@ export default function ChatScreen() {
         setConversationId(null)
         setHasMoreHistory(false)
         setOldestMessageCursor(undefined)
-        const starterMessages: ChatMessage[] = [{
-          id: `starter-${character.id}`,
-          sender: 'assistant',
-          text: starterMessageForCharacter(character),
-        }]
+        const starterMessages = [localStarterMessage(character, `starter-${character.id}`)]
         setMessages(starterMessages)
         setConversationCache(character.id, {
           conversationId: null,
@@ -1754,7 +1776,7 @@ export default function ChatScreen() {
         // Cached history can be painted immediately. The inverted list starts
         // at its latest edge without waiting for dynamic row measurement.
         const cachedMessages = visibleHistoryWindow(
-          cachedHistory.messages,
+          stampLegacyStarterMessages(cachedHistory.messages),
           hasInitialListViewState ? initialDisplayMessageCount : HISTORY_PAGE_SIZE
         )
         messagesRef.current = cachedMessages
@@ -1956,11 +1978,7 @@ export default function ChatScreen() {
       setConversationId(null)
       setHasMoreHistory(false)
       setOldestMessageCursor(undefined)
-      setMessages([{
-        id: `starter-${character.id}-${Date.now()}`,
-        sender: 'assistant',
-        text: starterMessageForCharacter(character),
-      }])
+      setMessages([localStarterMessage(character, `starter-${character.id}-${Date.now()}`)])
       resetInitialScroll()
       quoteDraftRevisionRef.current += 1
       setQuoteDraft(character.id, null)
@@ -2323,6 +2341,7 @@ export default function ChatScreen() {
               segmentIndex: 0,
               sender: 'user',
               text: pendingQuoteDraft.pendingDeliveryText || composerText,
+              createdAt: new Date().toISOString(),
               quote: {
                 sourceMessageId: pendingQuoteDraft.sourceMessageId,
                 segmentIndex: pendingQuoteDraft.segmentIndex,
@@ -2372,6 +2391,7 @@ export default function ChatScreen() {
           text: quoteDraftForSend.text,
         }
       : undefined)
+    const messageCreatedAt = messageToRetry?.createdAt || new Date().toISOString()
     const userMessage: ChatMessage = messageToRetry
       ? {
           ...messageToRetry,
@@ -2379,6 +2399,7 @@ export default function ChatScreen() {
           renderKey: messageToRetry.renderKey || userMessageId,
           deliveryState: 'sending',
           quote,
+          createdAt: messageCreatedAt,
         }
       : {
           id: userMessageId,
@@ -2387,6 +2408,7 @@ export default function ChatScreen() {
           text,
           quote,
           deliveryState: 'sending',
+          createdAt: messageCreatedAt,
         }
     const loadingId = createLocalId()
     const loadingMessage: ChatMessage = {
@@ -2394,6 +2416,7 @@ export default function ChatScreen() {
       sender: 'assistant',
       text: '',
       loading: true,
+      createdAt: messageCreatedAt,
     }
 
     startLatestScroll(withinImmersiveRangeRef.current)
@@ -2752,22 +2775,24 @@ export default function ChatScreen() {
           <Reanimated.View style={[styles.messageListArea, messageListKeyboardAnimatedStyle]}>
             <FlashList
               ref={listRef}
-              data={displayMessages}
+              data={timelineItems}
               inverted
               contentOffset={initialContentOffsetRef.current}
               maintainVisibleContentPosition={CHAT_MAINTAIN_VISIBLE_CONTENT_POSITION}
-              keyExtractor={item => item.renderKey || item.id}
-              getItemType={chatMessageItemType}
+              keyExtractor={item => item.key}
+              getItemType={chatTimelineItemType}
               drawDistance={window.height}
               extraData={messageActionSession}
-              renderItem={({ item, index }) => {
-                const messageKey = item.renderKey || item.id
+              renderItem={({ item }) => {
+                if (item.kind === 'date') return <DateDivider label={item.label} />
+                const message = item.message
+                const messageKey = messageRenderKey(message)
                 const selectionSession = messageActionSession?.messageKey === messageKey
                   ? messageActionSession
                   : undefined
                 return (
                   <MessageRow
-                    message={item}
+                    message={message}
                     characterName={character.name}
                     characterAvatar={character.avatar}
                     userAvatar={userAvatar}
@@ -2802,7 +2827,7 @@ export default function ChatScreen() {
                       }
                     }}
                     onRetryMessage={message => void sendMessage(message)}
-                    isOldest={index === displayMessages.length - 1}
+                    assistantContinuation={item.assistantContinuation}
                   />
                 )
               }}
@@ -3378,6 +3403,10 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   messageListContent: {
+    flexGrow: 1,
+    // Native layout is flipped by `inverted`; placing a short transcript at its
+    // native end makes it begin at the visual top of the chat area.
+    justifyContent: 'flex-end',
     paddingHorizontal: 12,
     // Inversion swaps the physical content edges: top is the visual composer edge.
     paddingTop: LATEST_MESSAGE_COMPOSER_GAP,
@@ -3399,8 +3428,15 @@ const styles = StyleSheet.create({
     marginBottom: MESSAGE_ROW_GAP,
     flexDirection: 'column',
   },
-  messageRowOldest: {
-    marginBottom: 0,
+  dateDivider: {
+    alignItems: 'center',
+    paddingVertical: 11,
+  },
+  dateDividerLabel: {
+    color: palette.textMuted,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '600',
   },
   messagePrimaryRow: {
     width: '100%',
@@ -3408,14 +3444,14 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     gap: 8,
   },
-  messageRowGrouped: {
-    marginBottom: 6,
-  },
   messagePrimaryRowAssistant: {
     justifyContent: 'flex-start',
   },
   messagePrimaryRowUser: {
     justifyContent: 'flex-end',
+  },
+  assistantAvatar: {
+    alignSelf: 'flex-start',
   },
   messageContent: {
     maxWidth: '76%',
@@ -3428,13 +3464,6 @@ const styles = StyleSheet.create({
   avatarSpacer: {
     width: 40,
     height: 1,
-  },
-  messageAuthor: {
-    marginLeft: 2,
-    marginBottom: 4,
-    color: palette.textMuted,
-    fontSize: 11,
-    lineHeight: 15,
   },
   bubbleAnchor: {
     maxWidth: '100%',

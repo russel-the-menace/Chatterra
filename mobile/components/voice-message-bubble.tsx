@@ -1,6 +1,6 @@
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from 'expo-audio'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Pressable, StyleSheet, Text } from 'react-native'
+import { Pressable, StyleSheet, Text, useWindowDimensions } from 'react-native'
 
 import { mediaUrl } from '@/src/api'
 import { MessageVoice } from '@/src/types'
@@ -8,6 +8,26 @@ import { palette } from '@/src/theme'
 import { WeChatVoiceWave } from '@/components/wechat-voice-wave'
 
 const displayDuration = (duration?: number) => `${Math.max(1, Math.round(duration || 1))}\"`
+const MIN_VOICE_DURATION_SECONDS = 1
+const MAX_VOICE_DURATION_SECONDS = 11
+const MIN_VOICE_BUBBLE_WIDTH = 92
+const CHAT_HORIZONTAL_INSET = 12
+const CHAT_AVATAR_SIZE = 40
+const CHAT_ROW_GAP = 8
+
+const voiceBubbleWidth = (duration: number | undefined, screenWidth: number) => {
+  const maxWidth = Math.max(
+    MIN_VOICE_BUBBLE_WIDTH,
+    screenWidth / 2 - CHAT_HORIZONTAL_INSET - CHAT_AVATAR_SIZE - CHAT_ROW_GAP
+  )
+  const clampedDuration = Math.min(
+    MAX_VOICE_DURATION_SECONDS,
+    Math.max(MIN_VOICE_DURATION_SECONDS, duration || MIN_VOICE_DURATION_SECONDS)
+  )
+  const progress = (clampedDuration - MIN_VOICE_DURATION_SECONDS)
+    / (MAX_VOICE_DURATION_SECONDS - MIN_VOICE_DURATION_SECONDS)
+  return MIN_VOICE_BUBBLE_WIDTH + (maxWidth - MIN_VOICE_BUBBLE_WIDTH) * progress
+}
 
 export function VoiceMessageBubble({
   voice,
@@ -18,6 +38,7 @@ export function VoiceMessageBubble({
   isUser?: boolean
   onLongPress?: () => void
 }) {
+  const { width: screenWidth } = useWindowDimensions()
   const player = useAudioPlayer(mediaUrl(voice.audioUrl || ''), {
     downloadFirst: true,
     updateInterval: 150,
@@ -102,13 +123,14 @@ export function VoiceMessageBubble({
       style={({ pressed }) => [
         styles.voiceMessage,
         isUser && styles.voiceMessageUser,
-        { width: Math.min(146, Math.max(92, 76 + (voice.durationSeconds || 4) * 8)) },
+        { width: voiceBubbleWidth(voice.durationSeconds, screenWidth) },
         pressed && styles.voiceMessagePressed,
       ]}
     >
       <WeChatVoiceWave
         color={isUser ? '#FFFFFF' : palette.text}
         level={waveLevel}
+        mirrored
       />
       <Text style={[styles.duration, isUser && styles.durationUser]}>{displayDuration(voice.durationSeconds)}</Text>
     </Pressable>

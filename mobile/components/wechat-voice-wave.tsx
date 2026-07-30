@@ -9,13 +9,18 @@ export function WeChatVoiceWave({
   centered = false,
   height = WAVE_HEIGHT,
   level = 3,
+  mirrored = false,
 }: {
   color: string
   centered?: boolean
   height?: number
   level?: number
+  mirrored?: boolean
 }) {
   const width = height * (WAVE_WIDTH / WAVE_HEIGHT)
+  const transform = mirrored
+    ? `translate(${WAVE_WIDTH - (centered ? WAVE_CENTER_OFFSET_X : 0)} 0) scale(-1 1)`
+    : centered ? `translate(${WAVE_CENTER_OFFSET_X} 0)` : undefined
 
   return (
     <Svg
@@ -23,7 +28,7 @@ export function WeChatVoiceWave({
       height={height}
       viewBox={`0 0 ${WAVE_WIDTH} ${WAVE_HEIGHT}`}
     >
-      <G transform={centered ? `translate(${WAVE_CENTER_OFFSET_X} 0)` : undefined}>
+      <G transform={transform}>
         <Path
           d="M6 10.788447768 L9.029578126 8.176617685 A4 4 0 0 1 9.029578126 13.40027785 Z"
           fill={color}
