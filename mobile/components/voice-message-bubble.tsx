@@ -119,11 +119,14 @@ export function VoiceMessageBubble({
           <RNAnimated.View
             key={index}
             style={[
-              styles.soundWaveArc,
-              index === 0 && styles.soundWaveArcSmall,
-              index === 1 && styles.soundWaveArcMedium,
-              index === 2 && styles.soundWaveArcLarge,
-              { borderColor: isUser ? '#FFFFFF' : palette.text, opacity },
+              index === 0 ? styles.soundWaveDot : styles.soundWaveArc,
+              index === 1 && styles.soundWaveArcShort,
+              index === 2 && styles.soundWaveArcLong,
+              {
+                backgroundColor: index === 0 ? (isUser ? '#FFFFFF' : palette.text) : undefined,
+                borderColor: isUser ? '#FFFFFF' : palette.text,
+                opacity,
+              },
             ]}
           />
         ))}
@@ -148,7 +151,7 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   soundWaves: {
-    width: 20,
+    width: 22,
     height: 20,
     position: 'relative',
   },
@@ -162,27 +165,27 @@ const styles = StyleSheet.create({
     borderTopWidth: 1.8,
     borderBottomWidth: 1.8,
   },
-  soundWaveArcSmall: {
+  soundWaveDot: {
+    position: 'absolute',
     width: 4,
-    height: 8,
-    top: 6,
+    height: 4,
+    top: 8,
     left: 1,
-    borderTopRightRadius: 5,
-    borderBottomRightRadius: 5,
+    borderRadius: 2,
   },
-  soundWaveArcMedium: {
-    width: 5,
-    height: 13,
-    top: 3.5,
+  soundWaveArcShort: {
+    width: 6,
+    height: 10,
+    top: 5,
     left: 7,
-    borderTopRightRadius: 7,
-    borderBottomRightRadius: 7,
+    borderTopRightRadius: 6,
+    borderBottomRightRadius: 6,
   },
-  soundWaveArcLarge: {
-    width: 5,
+  soundWaveArcLong: {
+    width: 8,
     height: 18,
     top: 1,
-    left: 14,
+    left: 13,
     borderTopRightRadius: 10,
     borderBottomRightRadius: 10,
   },

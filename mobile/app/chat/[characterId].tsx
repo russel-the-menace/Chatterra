@@ -840,7 +840,7 @@ function MessageRow({
       ]}>
         {!isUser && !isContinuation && (
           <Pressable onPress={onEditCharacter} accessibilityLabel={`Edit ${characterName}`}>
-            <Avatar avatar={characterAvatar} name={characterName} size={34} />
+            <Avatar avatar={characterAvatar} name={characterName} size={40} />
           </Pressable>
         )}
         {isContinuation && <View style={styles.avatarSpacer} />}
@@ -917,7 +917,7 @@ function MessageRow({
             </View>
           )}
         </View>
-        {isUser && <Avatar name="Me" avatar="Me" size={34} muted />}
+        {isUser && <Avatar name="Me" avatar="Me" size={40} muted />}
       </View>
       {(message.quote || message.voiceTranscriptVisible || (
         message.translationVisible
@@ -3290,7 +3290,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
   },
   avatarSpacer: {
-    width: 34,
+    width: 40,
     height: 1,
   },
   messageAuthor: {
@@ -3382,12 +3382,12 @@ const styles = StyleSheet.create({
   },
   messageSupplementAssistant: {
     alignSelf: 'flex-start',
-    marginLeft: 42,
+    marginLeft: 48,
     alignItems: 'flex-start',
   },
   messageSupplementUser: {
     alignSelf: 'flex-end',
-    marginRight: 42,
+    marginRight: 48,
     alignItems: 'flex-end',
   },
   sentQuote: {
