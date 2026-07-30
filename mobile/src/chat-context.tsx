@@ -109,7 +109,9 @@ const cursorForMessage = (message: ChatMessage) => (
 )
 
 const persistentConversationEntry = (entry: ConversationCacheEntry): ConversationCacheEntry => {
-  const messages = entry.messages.slice(-MAX_PERSISTED_CONVERSATION_MESSAGES)
+  const messages = entry.messages
+    .slice(-MAX_PERSISTED_CONVERSATION_MESSAGES)
+    .map(({ voiceTranscriptVisible: _voiceTranscriptVisible, ...message }) => message)
   const trimmed = messages.length < entry.messages.length
   const oldestMessageCursor = trimmed
     ? cursorForMessage(messages[0]) || entry.oldestMessageCursor

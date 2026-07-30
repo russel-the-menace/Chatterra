@@ -387,9 +387,9 @@ const mapMessages = (messages: ServerMessage[]): ChatMessage[] => messages
       voice: voice && (
         voice.provider === 'user-recording' || voice.segmentIndex === index
       ) ? voice : undefined,
-      voiceTranscriptVisible: voice?.provider === 'user-recording'
-        && voice.transcriptStatus === 'ready'
-        && Boolean(text.trim()),
+      // A transcript can be ready on the server without being expanded in the UI.
+      // Expanding it is an explicit, current-session action from the voice message menu.
+      voiceTranscriptVisible: false,
       groupIndex: index,
       groupSize: segments.length,
       createdAt: message.createdAt,

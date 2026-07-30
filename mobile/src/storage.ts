@@ -164,7 +164,6 @@ const parseChatMessage = (value: unknown): ChatMessage | undefined => {
     translation: optionalString(message.translation),
     translationVisible: optionalBoolean(message.translationVisible),
     voice,
-    voiceTranscriptVisible: optionalBoolean(message.voiceTranscriptVisible),
     groupIndex: optionalNonNegativeInteger(message.groupIndex),
     groupSize: optionalNonNegativeInteger(message.groupSize),
     createdAt: optionalString(message.createdAt),
