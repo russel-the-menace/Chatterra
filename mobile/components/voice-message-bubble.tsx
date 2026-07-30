@@ -13,15 +13,13 @@ const VOICE_WAVE_ICON_SIZE = 24
 function WeChatVoiceWave({
   color,
   level,
-  mirrored,
 }: {
   color: string
   level: number
-  mirrored: boolean
 }) {
   return (
     <Svg width={VOICE_WAVE_ICON_SIZE} height={VOICE_WAVE_ICON_SIZE} viewBox="0 0 24 24">
-      <G transform={mirrored ? 'translate(24 0) scale(-1 1)' : undefined}>
+      <G>
         {level >= 2 && (
           <Path
             d="M8.3 8 C11.5 8 11.5 16 8.3 16"
@@ -44,7 +42,6 @@ function WeChatVoiceWave({
       <Path
         d="M3.2 9.4 C5.8 10 7.1 10.9 7.4 12 C7.1 13.1 5.8 14 3.2 14.6 Z"
         fill={color}
-        transform={mirrored ? 'translate(13.4 0)' : undefined}
       />
     </Svg>
   )
@@ -150,7 +147,6 @@ export function VoiceMessageBubble({
       <WeChatVoiceWave
         color={isUser ? '#FFFFFF' : palette.text}
         level={waveLevel}
-        mirrored={isUser}
       />
       <Text style={[styles.duration, isUser && styles.durationUser]}>{displayDuration(voice.durationSeconds)}</Text>
     </Pressable>
