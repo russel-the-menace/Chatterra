@@ -2466,6 +2466,7 @@ export default function ChatScreen() {
 
   const handleVoicePress = () => {
     if (voiceInput.status !== 'recording') setVoiceMetadata(undefined)
+    Keyboard.dismiss()
     voiceInput.toggle(draft)
   }
 
@@ -2691,7 +2692,62 @@ export default function ChatScreen() {
                 styles.composer,
                 { paddingBottom: Math.max(8, insets.bottom) },
               ]}>
-                {composerMode === 'text' ? (
+                {composerMode === 'text' && voiceInputMode === 'cloud' && (
+                  voiceInput.status === 'recording' || voiceInput.status === 'processing'
+                ) ? (
+                  <View style={styles.composerInputRow}>
+                    <Pressable
+                      disabled
+                      accessibilityRole="button"
+                      accessibilityLabel="Voice message mode is unavailable while transcribing"
+                      style={[styles.composerModeButton, styles.voiceButtonDisabled]}
+                    >
+                      <Ionicons name="volume-high-outline" size={22} color={palette.text} />
+                    </Pressable>
+                    <View
+                      accessibilityRole="progressbar"
+                      accessibilityLabel={voiceInput.status === 'processing'
+                        ? 'Preparing cloud transcription'
+                        : 'Recording for cloud transcription'}
+                      style={styles.cloudDictationBar}
+                    >
+                      {voiceInput.status === 'processing' ? (
+                        <ActivityIndicator size="small" color="#C9D1DC" />
+                      ) : (
+                        <View style={styles.cloudDictationWave}>
+                          {[10, 18, 12, 28, 18, 36, 22, 14, 30, 18, 26, 12, 20].map((height, index) => (
+                            <View key={index} style={[styles.cloudDictationWaveBar, { height }]} />
+                          ))}
+                        </View>
+                      )}
+                    </View>
+                    <Pressable
+                      onPress={voiceInput.reset}
+                      accessibilityRole="button"
+                      accessibilityLabel="Cancel cloud transcription"
+                      style={({ pressed }) => [
+                        styles.cloudDictationAction,
+                        pressed && styles.cloudDictationActionPressed,
+                      ]}
+                    >
+                      <Ionicons name="close" size={25} color="#667085" />
+                    </Pressable>
+                    <Pressable
+                      onPress={voiceInput.stop}
+                      disabled={voiceInput.status !== 'recording'}
+                      accessibilityRole="button"
+                      accessibilityLabel="Convert recording to text"
+                      style={({ pressed }) => [
+                        styles.cloudDictationAction,
+                        styles.cloudDictationConfirmAction,
+                        voiceInput.status !== 'recording' && styles.voiceButtonDisabled,
+                        pressed && voiceInput.status === 'recording' && styles.cloudDictationActionPressed,
+                      ]}
+                    >
+                      <Ionicons name="checkmark" size={25} color="#FFFFFF" />
+                    </Pressable>
+                  </View>
+                ) : composerMode === 'text' ? (
                   <View style={styles.composerInputRow}>
                     <Pressable
                       onPress={switchToVoiceComposer}
@@ -2720,14 +2776,16 @@ export default function ChatScreen() {
                       accessibilityRole="button"
                       accessibilityLabel={voiceInput.error
                         ? `Voice input unavailable: ${voiceInput.error}`
-                        : voiceInput.status === 'recording' ? 'Stop cloud transcription' : 'Start cloud transcription'}
+                        : voiceInput.status === 'recording'
+                          ? `Stop ${voiceInputMode === 'local' ? 'local speech recognition' : 'cloud transcription'}`
+                          : `Start ${voiceInputMode === 'local' ? 'local speech recognition' : 'cloud transcription'}`}
                       accessibilityState={{
                         busy: voiceInput.status === 'processing',
                         selected: voiceInput.status === 'recording',
                       }}
                       style={({ pressed }) => [
                         styles.voiceButton,
-                        voiceInput.status === 'recording' && styles.voiceButtonRecording,
+                        voiceInput.status === 'recording' && voiceInputMode === 'local' && styles.voiceButtonLocalRecording,
                         voiceInput.status === 'error' && styles.voiceButtonError,
                         voiceInput.status === 'processing' && styles.voiceButtonDisabled,
                         pressed && voiceInput.status !== 'processing' && styles.voiceButtonPressed,
@@ -2735,7 +2793,7 @@ export default function ChatScreen() {
                     >
                       <Ionicons
                         name={voiceInput.status === 'recording'
-                          ? 'stop'
+                          ? 'mic'
                           : voiceInput.status === 'processing'
                             ? 'ellipsis-horizontal'
                             : 'mic-outline'}
@@ -3451,9 +3509,9 @@ const styles = StyleSheet.create({
     borderColor: '#C9D1DC',
     backgroundColor: '#FFFFFF',
   },
-  voiceButtonRecording: {
-    borderColor: '#F97066',
-    backgroundColor: '#FEF3F2',
+  voiceButtonLocalRecording: {
+    borderColor: '#7CC85D',
+    backgroundColor: '#EAF7E4',
   },
   voiceButtonError: {
     borderColor: '#FDA29B',
@@ -3464,6 +3522,44 @@ const styles = StyleSheet.create({
   },
   voiceButtonPressed: {
     backgroundColor: '#F2F4F7',
+  },
+  cloudDictationBar: {
+    flex: 1,
+    height: 44,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    backgroundColor: '#202225',
+  },
+  cloudDictationWave: {
+    width: '100%',
+    height: 38,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  cloudDictationWaveBar: {
+    width: 3,
+    borderRadius: 2,
+    backgroundColor: '#98A2B3',
+  },
+  cloudDictationAction: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#C9D1DC',
+    backgroundColor: '#FFFFFF',
+  },
+  cloudDictationConfirmAction: {
+    borderColor: palette.accent,
+    backgroundColor: palette.accent,
+  },
+  cloudDictationActionPressed: {
+    opacity: 0.68,
   },
   holdToTalkButton: {
     flex: 1,
