@@ -76,7 +76,7 @@ const OUTGOING_DELIVERY_STATUS_POLL_INTERVAL_MS = 500
 const MESSAGE_ROW_GAP = 14
 const LATEST_MESSAGE_COMPOSER_GAP = 15
 const MESSAGE_ACTION_MENU_MAX_WIDTH = 308
-const MESSAGE_ACTION_MENU_HEIGHT = 66
+const MESSAGE_ACTION_MENU_HEIGHT = 72
 const MESSAGE_ACTION_ARROW_SIZE = 6.44
 const MESSAGE_ACTION_GAP = 4
 const MESSAGE_ACTION_EDGE_GAP = 8
@@ -3834,21 +3834,22 @@ const styles = StyleSheet.create({
   },
   messageActionArrowTop: {
     top: -MESSAGE_ACTION_ARROW_SIZE,
-    borderBottomWidth: MESSAGE_ACTION_ARROW_SIZE,
+    borderBottomWidth: MESSAGE_ACTION_ARROW_SIZE + 1,
     borderBottomColor: '#2B2D30',
   },
   messageActionArrowBottom: {
     bottom: -MESSAGE_ACTION_ARROW_SIZE,
-    borderTopWidth: MESSAGE_ACTION_ARROW_SIZE,
+    borderTopWidth: MESSAGE_ACTION_ARROW_SIZE + 1,
     borderTopColor: '#2B2D30',
   },
   messageAction: {
     width: MESSAGE_ACTION_ITEM_WIDTH,
     flexShrink: 0,
-    height: 56,
+    height: 62,
     alignItems: 'center',
     justifyContent: 'flex-start',
-    paddingTop: 5,
+    paddingTop: 8,
+    paddingBottom: 3,
     gap: 3,
   },
   messageActionPressed: {
