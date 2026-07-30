@@ -252,7 +252,7 @@ export const useVoiceInput = ({
 
       recording = new File(recorder.uri)
       const requestId = createVoiceRequestId('dictation')
-      const upload = await prepareVoiceUpload(recording, recordingMimeType())
+      const upload = await prepareVoiceUpload(recording)
       logVoiceDiagnostic('dictation_recording_ready', {
         requestId,
         fileBytes: recording.size,
@@ -261,7 +261,7 @@ export const useVoiceInput = ({
       })
       const transcription = await api.transcribeVoice({
         userId: userId || '',
-        audio: upload.audio,
+        fileUri: upload.fileUri,
         mimeType: recordingMimeType(),
         byteLength: upload.byteLength,
         requestId,

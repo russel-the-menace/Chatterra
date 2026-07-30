@@ -1,7 +1,7 @@
 import { File } from 'expo-file-system'
 
 export type PreparedVoiceUpload = {
-  audio: Blob
+  fileUri: string
   byteLength: number
 }
 
@@ -10,19 +10,18 @@ export const createVoiceRequestId = (kind: 'dictation' | 'voice-message') => (
 )
 
 export const prepareVoiceUpload = async (
-  file: File,
-  mimeType: string
+  file: File
 ): Promise<PreparedVoiceUpload> => {
-  const bytes = await file.bytes()
-  if (bytes.byteLength === 0) {
+  const byteLength = file.size
+  if (byteLength === 0) {
     throw new Error('The recording was empty. Please try again.')
   }
 
-  // RN's fetch bridge can serialize expo-file-system File instances as an empty body.
-  // Materializing the native file into a standard Blob keeps the byte count explicit.
+  // iOS 16's RN Blob bridge does not support ArrayBuffer construction. The native
+  // file uploader accepts the URI directly and sends the file as a raw request body.
   return {
-    audio: new Blob([bytes], { type: mimeType }),
-    byteLength: bytes.byteLength,
+    fileUri: file.uri,
+    byteLength,
   }
 }
 

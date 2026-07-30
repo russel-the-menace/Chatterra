@@ -131,7 +131,7 @@ export const useVoiceMessageRecorder = ({
       recording = new File(recorder.uri)
       const mimeType = recordingMimeType()
       const requestId = createVoiceRequestId('voice-message')
-      const upload = await prepareVoiceUpload(recording, mimeType)
+      const upload = await prepareVoiceUpload(recording)
       logVoiceDiagnostic('voice_message_recording_ready', {
         requestId,
         action,
@@ -150,7 +150,7 @@ export const useVoiceMessageRecorder = ({
         }
         const transcription = await api.transcribeVoice({
           userId: userId || '',
-          audio: upload.audio,
+          fileUri: upload.fileUri,
           mimeType,
           byteLength: upload.byteLength,
           requestId,
@@ -168,7 +168,7 @@ export const useVoiceMessageRecorder = ({
           userId,
           characterId,
           conversationId: conversationId || undefined,
-          audio: upload.audio,
+          fileUri: upload.fileUri,
           durationMilliseconds,
           mimeType,
           byteLength: upload.byteLength,

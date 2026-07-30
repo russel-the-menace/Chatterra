@@ -1,4 +1,5 @@
 import Constants from 'expo-constants'
+import * as FileSystem from 'expo-file-system/legacy'
 
 import {
   Character,
@@ -87,6 +88,30 @@ const request = async <T>(path: string, init?: RequestInit, timeoutMs = 20_000):
   } finally {
     clearTimeout(timeout)
   }
+}
+
+const uploadVoiceFile = async <T>(input: {
+  path: string
+  fileUri: string
+  headers: Record<string, string>
+}) => {
+  const response = await FileSystem.uploadAsync(`${API_BASE_URL}${input.path}`, input.fileUri, {
+    httpMethod: 'POST',
+    uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+    headers: {
+      Accept: 'application/json',
+      ...input.headers,
+    },
+  })
+  const payload = JSON.parse(response.body || '{}') as Record<string, unknown>
+  if (response.status < 200 || response.status >= 300) {
+    throw new ApiError(
+      typeof payload.error === 'string' ? payload.error : `Request failed (${response.status})`,
+      response.status,
+      payload
+    )
+  }
+  return payload as T
 }
 
 export const api = {
@@ -194,28 +219,28 @@ export const api = {
 
   async transcribeVoice(input: {
     userId: string
-    audio: Blob
+    fileUri: string
     mimeType: string
-    byteLength?: number
+    byteLength: number
     requestId?: string
   }) {
     console.info('[voice] transcription_upload_started', {
       requestId: input.requestId,
       mimeType: input.mimeType,
-      byteLength: input.byteLength ?? input.audio.size,
+      byteLength: input.byteLength,
     })
     try {
-      const result = await request<{
+      const result = await uploadVoiceFile<{
         transcription: { text: string; provider: 'groq'; model: string }
-      }>('/api/voice/transcriptions', {
-        method: 'POST',
+      }>({
+        path: '/api/voice/transcriptions',
+        fileUri: input.fileUri,
         headers: {
           'Content-Type': input.mimeType,
           'X-Chatterra-User-Id': input.userId,
           ...(input.requestId ? { 'X-Chatterra-Voice-Request-Id': input.requestId } : {}),
         },
-        body: input.audio,
-      }, 60_000)
+      })
       console.info('[voice] transcription_upload_succeeded', {
         requestId: input.requestId,
         transcriptLength: result.transcription.text.length,
@@ -225,7 +250,7 @@ export const api = {
       console.warn('[voice] transcription_upload_failed', {
         requestId: input.requestId,
         mimeType: input.mimeType,
-        byteLength: input.byteLength ?? input.audio.size,
+        byteLength: input.byteLength,
         error: error instanceof Error ? error.message : 'unknown_error',
       })
       throw error
@@ -236,25 +261,26 @@ export const api = {
     userId: string
     characterId: string
     conversationId?: string
-    audio: Blob
+    fileUri: string
     durationMilliseconds: number
     mimeType: string
-    byteLength?: number
+    byteLength: number
     requestId?: string
   }) {
     console.info('[voice] voice_message_upload_started', {
       requestId: input.requestId,
       mimeType: input.mimeType,
-      byteLength: input.byteLength ?? input.audio.size,
+      byteLength: input.byteLength,
       durationMilliseconds: Math.round(input.durationMilliseconds),
     })
     try {
-      const result = await request<{
+      const result = await uploadVoiceFile<{
         conversation: Conversation
         message: ServerMessage
         starterMessage?: ServerMessage
-      }>('/api/voice/messages', {
-        method: 'POST',
+      }>({
+        path: '/api/voice/messages',
+        fileUri: input.fileUri,
         headers: {
           'Content-Type': input.mimeType,
           'X-Chatterra-User-Id': input.userId,
@@ -263,15 +289,14 @@ export const api = {
           'X-Chatterra-Voice-Duration-Ms': String(Math.round(input.durationMilliseconds)),
           ...(input.requestId ? { 'X-Chatterra-Voice-Request-Id': input.requestId } : {}),
         },
-        body: input.audio,
-      }, 60_000)
+      })
       console.info('[voice] voice_message_upload_succeeded', { requestId: input.requestId })
       return result
     } catch (error) {
       console.warn('[voice] voice_message_upload_failed', {
         requestId: input.requestId,
         mimeType: input.mimeType,
-        byteLength: input.byteLength ?? input.audio.size,
+        byteLength: input.byteLength,
         error: error instanceof Error ? error.message : 'unknown_error',
       })
       throw error
