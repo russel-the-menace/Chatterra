@@ -23,23 +23,26 @@ export default function ProfileEditorScreen() {
   const { ready, userAvatar, userName, saveUserProfile } = useChat()
   const [displayName, setDisplayName] = useState(userName || '')
   const [avatar, setAvatar] = useState(userAvatar || '')
+  const [nameEdited, setNameEdited] = useState(false)
+  const [avatarEdited, setAvatarEdited] = useState(false)
   const [saving, setSaving] = useState(false)
   const [processingAvatar, setProcessingAvatar] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    setDisplayName(userName || '')
-  }, [userName])
+    if (!nameEdited) setDisplayName(userName || '')
+  }, [nameEdited, userName])
 
   useEffect(() => {
-    setAvatar(userAvatar || '')
-  }, [userAvatar])
+    if (!avatarEdited) setAvatar(userAvatar || '')
+  }, [avatarEdited, userAvatar])
 
   const pickAvatar = async () => {
     try {
       setProcessingAvatar(true)
       const selectedAvatar = await pickSquareAvatar()
       if (!selectedAvatar) return
+      setAvatarEdited(true)
       setAvatar(selectedAvatar)
       setError(null)
     } catch (avatarError) {
@@ -131,7 +134,10 @@ export default function ProfileEditorScreen() {
             <Text style={styles.label}>Name</Text>
             <TextInput
               value={displayName}
-              onChangeText={setDisplayName}
+              onChangeText={value => {
+                setNameEdited(true)
+                setDisplayName(value)
+              }}
               autoCapitalize="words"
               autoCorrect={false}
               maxLength={120}
