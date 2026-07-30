@@ -77,10 +77,10 @@ const MESSAGE_ROW_GAP = 14
 const LATEST_MESSAGE_COMPOSER_GAP = 15
 const MESSAGE_ACTION_MENU_MAX_WIDTH = 308
 const MESSAGE_ACTION_MENU_HEIGHT = 66
-const MESSAGE_ACTION_ARROW_SIZE = 5.6
+const MESSAGE_ACTION_ARROW_SIZE = 6.44
 const MESSAGE_ACTION_GAP = 4
 const MESSAGE_ACTION_EDGE_GAP = 8
-const MESSAGE_ACTION_ITEM_WIDTH = 96
+const MESSAGE_ACTION_ITEM_WIDTH = 80
 const MESSAGE_ACTION_MENU_HORIZONTAL_PADDING = 4
 const MESSAGE_SELECTION_HIT_PADDING = 28
 const MESSAGE_SELECTION_HANDLE_HIT_PADDING = 22
@@ -3208,7 +3208,7 @@ export default function ChatScreen() {
                     ? 'Converting'
                     : messageActionMessage.voice?.transcriptStatus === 'ready'
                       ? 'Discard converted'
-                      : 'Convert to Text'}
+                      : <>Convert{'\n'}to Text</>}
                 </Text>
               </Pressable>
             ) : (
