@@ -119,7 +119,11 @@ const persistQuoteDrafts = async (
 
 const persistentConversationEntry = (entry: ConversationCacheEntry): ConversationCacheEntry => {
   const messages = entry.messages
-    .map(({ voiceTranscriptVisible: _voiceTranscriptVisible, ...message }) => message)
+    .map(({
+      voiceTranscriptVisible: _voiceTranscriptVisible,
+      translationVisible: _translationVisible,
+      ...message
+    }) => message)
 
   return {
     ...entry,

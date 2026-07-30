@@ -73,11 +73,10 @@ const OUTGOING_DELIVERY_TIMEOUT_MS = 60_000
 const OUTGOING_DELIVERY_STATUS_POLL_INITIAL_DELAY_MS = 250
 const OUTGOING_DELIVERY_STATUS_POLL_INTERVAL_MS = 500
 const MESSAGE_ROW_GAP = 10
-// The composer adds 8px above its input row, so this preserves a 10px visual gap
-// between the newest bubble and the input border.
-const LATEST_MESSAGE_COMPOSER_GAP = 2
+const MESSAGE_LIST_EDGE_GAP = 8
 const MESSAGE_ACTION_MENU_MAX_WIDTH = 308
-const MESSAGE_ACTION_MENU_HEIGHT = 86
+const MESSAGE_ACTION_MENU_COMPACT_HEIGHT = 72
+const MESSAGE_ACTION_MENU_EXPANDED_HEIGHT = 86
 const MESSAGE_ACTION_ARROW_SIZE = 6.44
 const MESSAGE_ACTION_GAP = 4
 const MESSAGE_ACTION_EDGE_GAP = 8
@@ -247,6 +246,7 @@ const getMessageActionLayout = ({
   safeTop,
   safeBottom,
   itemCount,
+  menuHeight,
   usableBottom,
 }: {
   anchor: MessageAnchor
@@ -257,6 +257,7 @@ const getMessageActionLayout = ({
   safeTop: number
   safeBottom: number
   itemCount: number
+  menuHeight: number
   usableBottom?: number
 }) => {
   const availableWidth = Math.max(
@@ -284,12 +285,12 @@ const getMessageActionLayout = ({
   )
   const maximumTop = bottomBoundary
     - MESSAGE_ACTION_EDGE_GAP
-    - MESSAGE_ACTION_MENU_HEIGHT
+    - menuHeight
   const belowTop = anchor.y + anchor.height + MESSAGE_ACTION_GAP + MESSAGE_ACTION_ARROW_SIZE
   const aboveTop = anchor.y
     - MESSAGE_ACTION_GAP
     - MESSAGE_ACTION_ARROW_SIZE
-    - MESSAGE_ACTION_MENU_HEIGHT
+    - menuHeight
   const belowFits = belowTop <= maximumTop
   const aboveFits = aboveTop >= minimumTop
   const belowSpace = bottomBoundary - anchor.y - anchor.height
@@ -401,10 +402,9 @@ const mapMessages = (messages: ServerMessage[]): ChatMessage[] => messages
         && typeof (englishTranslations as Record<string, unknown>)[String(index)] === 'string'
         ? String((englishTranslations as Record<string, unknown>)[String(index)])
         : undefined,
-      translationVisible: Boolean(
-        englishTranslations && typeof englishTranslations === 'object'
-          && typeof (englishTranslations as Record<string, unknown>)[String(index)] === 'string'
-      ),
+      // Translation text may be cached by the server, but revealing it is a
+      // session-only choice and must start hidden after an app restart.
+      translationVisible: false,
       voice: voice && (
         voice.provider === 'user-recording' || voice.segmentIndex === index
       ) ? voice : undefined,
@@ -2692,6 +2692,9 @@ export default function ChatScreen() {
   const messageActionItemCount = messageActionMessage
     ? (isUserVoiceMessage(messageActionMessage) ? 2 : 3)
     : 0
+  const messageActionMenuHeight = messageActionMessage && isUserVoiceMessage(messageActionMessage)
+    ? MESSAGE_ACTION_MENU_EXPANDED_HEIGHT
+    : MESSAGE_ACTION_MENU_COMPACT_HEIGHT
   const messageActionLayout = messageActionSession && messageActionMessage
     ? getMessageActionLayout({
         anchor: messageActionSession.anchor,
@@ -2702,6 +2705,7 @@ export default function ChatScreen() {
         safeTop: insets.top,
         safeBottom: insets.bottom,
         itemCount: messageActionItemCount,
+        menuHeight: messageActionMenuHeight,
         usableBottom: messageActionSession.usableBottom,
       })
     : null
@@ -3184,6 +3188,7 @@ export default function ChatScreen() {
                 opacity: messageActionMenuOpacity,
                 top: messageActionLayout.top,
                 width: messageActionLayout.width,
+                height: messageActionMenuHeight,
               },
             ]}
           >
@@ -3409,8 +3414,8 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     paddingHorizontal: 12,
     // Inversion swaps the physical content edges: top is the visual composer edge.
-    paddingTop: LATEST_MESSAGE_COMPOSER_GAP,
-    paddingBottom: 18,
+    paddingTop: MESSAGE_LIST_EDGE_GAP,
+    paddingBottom: MESSAGE_LIST_EDGE_GAP,
   },
   olderHistoryLoading: {
     position: 'absolute',
@@ -3430,7 +3435,8 @@ const styles = StyleSheet.create({
   },
   dateDivider: {
     alignItems: 'center',
-    paddingVertical: 11,
+    paddingTop: 3,
+    paddingBottom: 11,
   },
   dateDividerLabel: {
     color: palette.textMuted,
@@ -3514,6 +3520,7 @@ const styles = StyleSheet.create({
     backgroundColor: palette.assistantBubble,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: '#E3E8EF',
+    paddingVertical: 9 - StyleSheet.hairlineWidth,
   },
   userBubble: {
     backgroundColor: palette.userBubble,
@@ -3885,7 +3892,6 @@ const styles = StyleSheet.create({
   messageActionMenu: {
     position: 'absolute',
     zIndex: 2,
-    height: MESSAGE_ACTION_MENU_HEIGHT,
     paddingHorizontal: MESSAGE_ACTION_MENU_HORIZONTAL_PADDING,
     borderRadius: 7,
     flexDirection: 'row',
@@ -3919,7 +3925,6 @@ const styles = StyleSheet.create({
   messageAction: {
     width: MESSAGE_ACTION_ITEM_WIDTH,
     flexShrink: 0,
-    height: 76,
     alignItems: 'center',
     justifyContent: 'flex-start',
     paddingTop: 15,
@@ -3933,6 +3938,7 @@ const styles = StyleSheet.create({
     opacity: 0.35,
   },
   messageActionLabel: {
+    width: '100%',
     color: '#FFFFFF',
     fontSize: 11,
     lineHeight: 14,

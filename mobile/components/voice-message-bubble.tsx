@@ -143,7 +143,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 7,
+    gap: 3,
   },
   voiceMessageUser: {
     flexDirection: 'row-reverse',
