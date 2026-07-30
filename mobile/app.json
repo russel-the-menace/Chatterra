@@ -52,7 +52,7 @@
         "expo-image-picker",
         {
           "photosPermission": "Allow Chatterra to select a character avatar.",
-          "microphonePermission": false
+          "microphonePermission": "Allow Chatterra to use the microphone for voice messages."
         }
       ],
       [
