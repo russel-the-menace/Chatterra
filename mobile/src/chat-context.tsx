@@ -43,6 +43,7 @@ type ChatContextValue = {
   apiBaseUrl: string
   ready: boolean
   userId: string | null
+  userAvatar?: string
   characters: Character[]
   connectionError: string | null
   voiceInputMode: 'cloud' | 'local'
@@ -67,6 +68,8 @@ type ChatContextValue = {
   ) => void
   refreshCharacters: (requestedUserId?: string) => Promise<void>
   saveCharacter: (character: Character | Omit<Character, 'id'>) => Promise<Character>
+  saveBuiltInCharacterAvatar: (characterId: string, avatar: string) => Promise<Character>
+  saveUserAvatar: (avatar: string) => Promise<void>
   markCharacterRead: (characterId: string) => void
   setActiveCharacter: (characterId: string | null) => void
   setCharacterPinned: (characterId: string, pinned: boolean) => Promise<void>
@@ -128,6 +131,7 @@ const persistentConversationEntry = (entry: ConversationCacheEntry): Conversatio
 export function ChatProvider({ children }: PropsWithChildren) {
   const [ready, setReady] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
+  const [userAvatar, setUserAvatar] = useState<string | undefined>()
   const [characters, setCharacters] = useState<Character[]>([])
   const [connectionError, setConnectionError] = useState<string | null>(null)
   const [voiceInputMode, setVoiceInputMode] = useState<'cloud' | 'local'>('local')
@@ -253,6 +257,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     try {
       const snapshot = await api.getSyncSnapshot(userId)
       setCharacters(snapshot.characters)
+      setUserAvatar(snapshot.userAvatar)
       setPinnedCharacterIds(new Set(snapshot.pinnedCharacterIds))
       setPinnedCharacterOrder(snapshot.pinnedCharacterIds)
       setConnectionError(null)
@@ -464,6 +469,21 @@ export function ChatProvider({ children }: PropsWithChildren) {
     return saved
   }, [userId])
 
+  const saveBuiltInCharacterAvatar = useCallback(async (characterId: string, avatar: string) => {
+    if (!userId) throw new Error('User is not ready.')
+    const saved = await api.updateBuiltInCharacterAvatar(userId, characterId, avatar)
+    setCharacters(current => current.map(character => (
+      character.id === saved.id ? saved : character
+    )))
+    return saved
+  }, [userId])
+
+  const saveUserAvatar = useCallback(async (avatar: string) => {
+    if (!userId) throw new Error('User is not ready.')
+    const result = await api.updateUserAvatar(userId, avatar)
+    setUserAvatar(result.userAvatar || avatar)
+  }, [userId])
+
   const markCharacterRead = useCallback((characterId: string) => {
     setUnreadCharacterIds(current => {
       if (!current.has(characterId)) return current
@@ -639,6 +659,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     apiBaseUrl: API_BASE_URL,
     ready,
     userId,
+    userAvatar,
     characters,
     connectionError,
     voiceInputMode,
@@ -655,6 +676,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
     setQuoteDraft,
     refreshCharacters,
     saveCharacter,
+    saveBuiltInCharacterAvatar,
+    saveUserAvatar,
     markCharacterRead,
     setActiveCharacter,
     setCharacterPinned,
@@ -687,6 +710,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
     ready,
     refreshCharacters,
     saveCharacter,
+    saveBuiltInCharacterAvatar,
+    saveUserAvatar,
     setActiveCharacter,
     setCharacterPinned,
     markConversationActive,
@@ -695,6 +720,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     setDraft,
     setQuoteDraft,
     unreadCharacterIds,
+    userAvatar,
     userId,
   ])
 

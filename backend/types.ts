@@ -67,6 +67,7 @@ export interface ConversationSyncRecord extends Conversation {
 
 export interface SyncSnapshot {
   serverTime: string
+  userAvatar?: string
   characters: Character[]
   conversations: ConversationSyncRecord[]
   pinnedCharacterIds: UUID[]

@@ -1,5 +1,5 @@
 export const palette = {
-  accent: '#16A34A',
+  accent: '#5BB450',
   accentPressed: '#15803D',
   accentSoft: '#DCFCE7',
   background: '#F3F5F7',
@@ -8,7 +8,7 @@ export const palette = {
   text: '#111827',
   textMuted: '#667085',
   border: '#D8DEE6',
-  userBubble: '#16A34A',
+  userBubble: '#5BB450',
   assistantBubble: '#FFFFFF',
   danger: '#C2413B',
   warning: '#B45309',

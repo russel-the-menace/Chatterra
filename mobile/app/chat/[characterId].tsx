@@ -780,6 +780,7 @@ function MessageRow({
   message,
   characterName,
   characterAvatar,
+  userAvatar,
   onEditCharacter,
   onLongPress,
   selecting,
@@ -796,6 +797,7 @@ function MessageRow({
   message: ChatMessage
   characterName: string
   characterAvatar?: string
+  userAvatar?: string
   onEditCharacter: () => void
   onLongPress: (message: ChatMessage, anchor: MessageAnchor) => void
   selecting: boolean
@@ -929,7 +931,7 @@ function MessageRow({
             </View>
           )}
         </View>
-        {isUser && <Avatar name="Me" avatar="Me" size={40} muted />}
+        {isUser && <Avatar name="Me" avatar={userAvatar || 'Me'} size={40} muted />}
       </View>
       {(message.quote || message.voiceTranscriptVisible || (
         message.translationVisible
@@ -983,6 +985,7 @@ export default function ChatScreen() {
   const {
     ready,
     userId,
+    userAvatar,
     voiceInputMode,
     markCloudVoiceUnavailable,
     characters,
@@ -2804,6 +2807,7 @@ export default function ChatScreen() {
                     message={item}
                     characterName={character.name}
                     characterAvatar={character.avatar}
+                    userAvatar={userAvatar}
                     onEditCharacter={openEditor}
                     onLongPress={openMessageActionMenu}
                     selecting={Boolean(selectionSession)}

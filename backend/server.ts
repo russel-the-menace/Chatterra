@@ -64,7 +64,9 @@ import {
   listMessagePage,
   listPinnedCharacterIds,
   newId,
+  setBuiltInCharacterAvatar,
   setCharacterPinned,
+  setUserAvatar,
   setUserMemoryConsent,
   listRecentMessages,
   upsertExpoPushDevice,
@@ -222,6 +224,13 @@ app.put('/api/users/:id/preferences', asyncRoute(async (req, res) => {
   return res.json({ memoryEnabled })
 }))
 
+app.put('/api/users/:id/avatar', asyncRoute(async (req, res) => {
+  const avatar = typeof req.body?.avatar === 'string' ? req.body.avatar.trim().slice(0, 1_500_000) : ''
+  if (!avatar) return res.status(400).json({ error: 'avatar is required' })
+  const userAvatar = await setUserAvatar(req.params.id, avatar)
+  return res.json({ userAvatar })
+}))
+
 app.get('/api/users/:id/contact-preferences', asyncRoute(async (req, res) => {
   const pinnedCharacterIds = await listPinnedCharacterIds(req.params.id)
   return res.json({ pinnedCharacterIds })
@@ -234,6 +243,14 @@ app.put('/api/users/:id/characters/:characterId/pin', asyncRoute(async (req, res
   const pinned = await setCharacterPinned(req.params.id, req.params.characterId, req.body.pinned)
   if (pinned === undefined) return res.status(404).json({ error: 'character not found' })
   return res.json({ characterId: req.params.characterId, pinned })
+}))
+
+app.put('/api/users/:id/characters/:characterId/avatar', asyncRoute(async (req, res) => {
+  const avatar = typeof req.body?.avatar === 'string' ? req.body.avatar.trim().slice(0, 1_500_000) : ''
+  if (!avatar) return res.status(400).json({ error: 'avatar is required' })
+  const character = await setBuiltInCharacterAvatar(req.params.id, req.params.characterId, avatar)
+  if (!character) return res.status(404).json({ error: 'built-in character not found' })
+  return res.json({ character })
 }))
 
 app.post('/api/characters', asyncRoute(async (req, res) => {

@@ -3,7 +3,9 @@ import { router } from 'expo-router'
 import { useMemo, useState } from 'react'
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
+  Modal,
   Pressable,
   RefreshControl,
   StyleSheet,
@@ -14,6 +16,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 
 import { Avatar } from '@/components/avatar'
+import { pickSquareAvatar } from '@/src/avatar-upload'
 import { useChat } from '@/src/chat-context'
 import { layout, palette } from '@/src/theme'
 import { Character } from '@/src/types'
@@ -62,15 +65,19 @@ export default function ContactsScreen() {
   const {
     apiBaseUrl,
     ready,
+    userAvatar,
     characters,
     connectionError,
     pinnedCharacterIds,
     pinnedCharacterOrder,
     lastMessageAtByCharacter,
     refreshCharacters,
+    saveUserAvatar,
   } = useChat()
   const [search, setSearch] = useState('')
   const [refreshing, setRefreshing] = useState(false)
+  const [settingsVisible, setSettingsVisible] = useState(false)
+  const [savingUserAvatar, setSavingUserAvatar] = useState(false)
 
   const visibleCharacters = useMemo(() => {
     const query = search.trim().toLocaleLowerCase()
@@ -109,77 +116,159 @@ export default function ContactsScreen() {
     }
   }
 
+  const openCharacterCreator = () => {
+    setSettingsVisible(false)
+    router.push({ pathname: '/character/[characterId]', params: { characterId: 'new' } })
+  }
+
+  const chooseUserAvatar = async () => {
+    try {
+      setSavingUserAvatar(true)
+      const avatar = await pickSquareAvatar()
+      if (!avatar) return
+      await saveUserAvatar(avatar)
+      setSettingsVisible(false)
+    } catch (avatarError) {
+      Alert.alert(
+        'Avatar unavailable',
+        avatarError instanceof Error ? avatarError.message : 'Could not save the selected photo.'
+      )
+    } finally {
+      setSavingUserAvatar(false)
+    }
+  }
+
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.title}>Chatterra</Text>
-          <Text style={styles.subtitle}>Conversations</Text>
-        </View>
-        <Pressable
-          onPress={() => router.push({ pathname: '/character/[characterId]', params: { characterId: 'new' } })}
-          accessibilityRole="button"
-          accessibilityLabel="Add character"
-          hitSlop={10}
-          style={({ pressed }) => [styles.iconButton, pressed && styles.iconButtonPressed]}
-        >
-          <Ionicons name="add" size={25} color={palette.text} />
-        </Pressable>
-      </View>
-
-      <View style={styles.searchBox}>
-        <Ionicons name="search" size={18} color={palette.textMuted} />
-        <TextInput
-          value={search}
-          onChangeText={setSearch}
-          placeholder="Search"
-          placeholderTextColor="#98A2B3"
-          returnKeyType="search"
-          clearButtonMode="while-editing"
-          style={styles.searchInput}
-        />
-      </View>
-
-      {!ready ? (
-        <View style={styles.centerState}>
-          <ActivityIndicator color={palette.accent} />
-        </View>
-      ) : connectionError && characters.length === 0 ? (
-        <View style={styles.centerState}>
-          <Ionicons name="cloud-offline-outline" size={30} color={palette.textMuted} />
-          <Text style={styles.stateTitle}>Server unavailable</Text>
-          <Text style={styles.stateText}>{connectionError}</Text>
-          <Text style={styles.endpointText}>{apiBaseUrl}</Text>
-          <Pressable onPress={() => void refresh()} style={styles.retryButton}>
-            <Text style={styles.retryButtonText}>Retry</Text>
+    <>
+      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+        <View style={styles.header}>
+          <View>
+            <Text style={styles.title}>Chatterra</Text>
+            <Text style={styles.subtitle}>Conversations</Text>
+          </View>
+          <Pressable
+            onPress={() => setSettingsVisible(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Settings"
+            hitSlop={10}
+            style={({ pressed }) => [styles.iconButton, pressed && styles.iconButtonPressed]}
+          >
+            <Ionicons name="settings-outline" size={22} color={palette.text} />
           </Pressable>
         </View>
-      ) : (
-        <FlatList
-          data={visibleCharacters}
-          keyExtractor={item => item.id}
-          renderItem={({ item }) => (
-            <ContactRow character={item} pinned={pinnedCharacterIds.has(item.id)} />
-          )}
-          contentContainerStyle={styles.listContent}
-          keyboardShouldPersistTaps="handled"
-          refreshControl={(
-            <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={palette.accent} />
-          )}
-          ListHeaderComponent={connectionError ? (
-            <View style={styles.warningBanner}>
-              <Ionicons name="warning-outline" size={17} color={palette.warning} />
-              <Text style={styles.warningText} numberOfLines={2}>{connectionError}</Text>
+
+        <View style={styles.searchBox}>
+          <Ionicons name="search" size={18} color={palette.textMuted} />
+          <TextInput
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Search"
+            placeholderTextColor="#98A2B3"
+            returnKeyType="search"
+            clearButtonMode="while-editing"
+            style={styles.searchInput}
+          />
+        </View>
+
+        {!ready ? (
+          <View style={styles.centerState}>
+            <ActivityIndicator color={palette.accent} />
+          </View>
+        ) : connectionError && characters.length === 0 ? (
+          <View style={styles.centerState}>
+            <Ionicons name="cloud-offline-outline" size={30} color={palette.textMuted} />
+            <Text style={styles.stateTitle}>Server unavailable</Text>
+            <Text style={styles.stateText}>{connectionError}</Text>
+            <Text style={styles.endpointText}>{apiBaseUrl}</Text>
+            <Pressable onPress={() => void refresh()} style={styles.retryButton}>
+              <Text style={styles.retryButtonText}>Retry</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <FlatList
+            data={visibleCharacters}
+            keyExtractor={item => item.id}
+            renderItem={({ item }) => (
+              <ContactRow character={item} pinned={pinnedCharacterIds.has(item.id)} />
+            )}
+            contentContainerStyle={styles.listContent}
+            keyboardShouldPersistTaps="handled"
+            refreshControl={(
+              <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={palette.accent} />
+            )}
+            ListHeaderComponent={connectionError ? (
+              <View style={styles.warningBanner}>
+                <Ionicons name="warning-outline" size={17} color={palette.warning} />
+                <Text style={styles.warningText} numberOfLines={2}>{connectionError}</Text>
+              </View>
+            ) : null}
+            ListEmptyComponent={(
+              <View style={styles.emptyState}>
+                <Text style={styles.stateText}>{search ? 'No matching conversations.' : 'No characters yet.'}</Text>
+              </View>
+            )}
+          />
+        )}
+      </SafeAreaView>
+
+      <Modal
+        transparent
+        visible={settingsVisible}
+        animationType="fade"
+        onRequestClose={() => setSettingsVisible(false)}
+      >
+        <View style={styles.settingsModal}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Close settings"
+            onPress={() => setSettingsVisible(false)}
+            style={styles.settingsBackdrop}
+          />
+          <SafeAreaView style={styles.settingsDrawer} edges={['top', 'bottom', 'right']}>
+            <View style={styles.settingsDrawerHeader}>
+              <Text style={styles.settingsDrawerTitle}>Settings</Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Close settings"
+                onPress={() => setSettingsVisible(false)}
+                style={styles.settingsCloseButton}
+              >
+                <Ionicons name="close" size={22} color={palette.text} />
+              </Pressable>
             </View>
-          ) : null}
-          ListEmptyComponent={(
-            <View style={styles.emptyState}>
-              <Text style={styles.stateText}>{search ? 'No matching conversations.' : 'No characters yet.'}</Text>
-            </View>
-          )}
-        />
-      )}
-    </SafeAreaView>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Add character"
+              onPress={openCharacterCreator}
+              style={({ pressed }) => [styles.settingsRow, pressed && styles.settingsRowPressed]}
+            >
+              <View style={styles.settingsRowIcon}>
+                <Ionicons name="person-add-outline" size={21} color={palette.text} />
+              </View>
+              <Text style={styles.settingsRowLabel}>Add character</Text>
+              <Ionicons name="chevron-forward" size={19} color={palette.textMuted} />
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Edit your avatar"
+              disabled={savingUserAvatar}
+              onPress={() => void chooseUserAvatar()}
+              style={({ pressed }) => [
+                styles.settingsRow,
+                savingUserAvatar && styles.settingsRowDisabled,
+                pressed && !savingUserAvatar && styles.settingsRowPressed,
+              ]}
+            >
+              <Avatar avatar={userAvatar} name="Me" size={36} muted />
+              <Text style={styles.settingsRowLabel}>Edit your avatar</Text>
+              {savingUserAvatar
+                ? <ActivityIndicator size="small" color={palette.accent} />
+                : <Ionicons name="camera-outline" size={21} color={palette.textMuted} />}
+            </Pressable>
+          </SafeAreaView>
+        </View>
+      </Modal>
+    </>
   )
 }
 
@@ -218,6 +307,72 @@ const styles = StyleSheet.create({
   },
   iconButtonPressed: {
     backgroundColor: '#D8E0E8',
+  },
+  settingsModal: {
+    flex: 1,
+    flexDirection: 'row',
+  },
+  settingsBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(17, 24, 39, 0.32)',
+  },
+  settingsDrawer: {
+    width: 292,
+    maxWidth: '84%',
+    marginLeft: 'auto',
+    backgroundColor: palette.surface,
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderLeftColor: palette.border,
+  },
+  settingsDrawerHeader: {
+    minHeight: 62,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: palette.border,
+  },
+  settingsDrawerTitle: {
+    color: palette.text,
+    fontSize: 18,
+    lineHeight: 23,
+    fontWeight: '700',
+  },
+  settingsCloseButton: {
+    width: 38,
+    height: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  settingsRow: {
+    minHeight: 68,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: palette.border,
+  },
+  settingsRowPressed: {
+    backgroundColor: palette.surfaceMuted,
+  },
+  settingsRowDisabled: {
+    opacity: 0.56,
+  },
+  settingsRowIcon: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: palette.surfaceMuted,
+    borderRadius: 8,
+  },
+  settingsRowLabel: {
+    flex: 1,
+    color: palette.text,
+    fontSize: 16,
+    lineHeight: 21,
   },
   searchBox: {
     height: 42,

@@ -85,6 +85,7 @@ export type SyncConversation = Conversation & {
 
 export type SyncSnapshot = {
   serverTime: string
+  userAvatar?: string
   characters: Character[]
   conversations: SyncConversation[]
   pinnedCharacterIds: string[]

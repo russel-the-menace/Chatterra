@@ -1,11 +1,8 @@
 import Ionicons from '@expo/vector-icons/Ionicons'
-import { ImageManipulator, SaveFormat } from 'expo-image-manipulator'
-import * as ImagePicker from 'expo-image-picker'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useEffect, useMemo, useState } from 'react'
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -18,6 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 
 import { Avatar } from '@/components/avatar'
+import { pickSquareAvatar } from '@/src/avatar-upload'
 import { useChat } from '@/src/chat-context'
 import { layout, palette } from '@/src/theme'
 import { Character } from '@/src/types'
@@ -50,7 +48,7 @@ export default function CharacterEditorScreen() {
   const params = useLocalSearchParams<{ characterId: string | string[] }>()
   const characterId = Array.isArray(params.characterId) ? params.characterId[0] : params.characterId
   const isNew = characterId === 'new'
-  const { ready, characters, saveCharacter } = useChat()
+  const { ready, characters, saveBuiltInCharacterAvatar, saveCharacter } = useChat()
   const existingCharacter = useMemo(
     () => characters.find(character => character.id === characterId),
     [characterId, characters]
@@ -59,6 +57,7 @@ export default function CharacterEditorScreen() {
   const [saving, setSaving] = useState(false)
   const [processingAvatar, setProcessingAvatar] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const isBuiltIn = Boolean(existingCharacter && !existingCharacter.ownerUserId)
 
   useEffect(() => {
     if (existingCharacter && draft.id !== existingCharacter.id) {
@@ -68,33 +67,12 @@ export default function CharacterEditorScreen() {
 
   const pickAvatar = async () => {
     try {
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync()
-      if (!permission.granted) {
-        Alert.alert('Photos permission needed', 'Allow photo access to choose a character avatar.')
-        return
-      }
-
-      const selection = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 0.9,
-      })
-      if (selection.canceled || !selection.assets[0]?.uri) return
-
       setProcessingAvatar(true)
-      const context = ImageManipulator.manipulate(selection.assets[0].uri)
-      context.resize({ width: 512, height: 512 })
-      const rendered = await context.renderAsync()
-      const result = await rendered.saveAsync({
-        base64: true,
-        compress: 0.82,
-        format: SaveFormat.JPEG,
-      })
-      if (!result.base64) throw new Error('Could not process that image.')
+      const avatar = await pickSquareAvatar()
+      if (!avatar) return
       setDraft(current => ({
         ...current,
-        avatar: `data:image/jpeg;base64,${result.base64}`,
+        avatar,
       }))
       setError(null)
     } catch (avatarError) {
@@ -105,6 +83,23 @@ export default function CharacterEditorScreen() {
   }
 
   const submit = async () => {
+    if (isBuiltIn) {
+      if (!draft.avatar?.trim()) {
+        setError('Choose an avatar first.')
+        return
+      }
+      setSaving(true)
+      setError(null)
+      try {
+        await saveBuiltInCharacterAvatar(draft.id, draft.avatar)
+        router.back()
+      } catch (saveError) {
+        setError(saveError instanceof Error ? saveError.message : 'Could not save the avatar.')
+      } finally {
+        setSaving(false)
+      }
+      return
+    }
     if (!draft.name.trim()) {
       setError('Name is required.')
       return
@@ -193,9 +188,16 @@ export default function CharacterEditorScreen() {
           </View>
 
           {error && (
-            <View style={styles.errorBanner}>
+          <View style={styles.errorBanner}>
               <Ionicons name="alert-circle-outline" size={18} color={palette.danger} />
               <Text style={styles.errorText}>{error}</Text>
+            </View>
+          )}
+
+          {isBuiltIn && (
+            <View style={styles.sourceManagedBanner}>
+              <Ionicons name="information-circle-outline" size={18} color={palette.textMuted} />
+              <Text style={styles.sourceManagedText}>Built-in character details are source-managed. You can update the avatar.</Text>
             </View>
           )}
 
@@ -205,7 +207,8 @@ export default function CharacterEditorScreen() {
               value={draft.name}
               onChangeText={name => setDraft(current => ({ ...current, name }))}
               autoCapitalize="words"
-              style={styles.input}
+              editable={!isBuiltIn}
+              style={[styles.input, isBuiltIn && styles.sourceManagedInput]}
             />
           </View>
 
@@ -218,7 +221,8 @@ export default function CharacterEditorScreen() {
               textAlignVertical="top"
               autoCapitalize="sentences"
               autoCorrect={false}
-              style={[styles.input, styles.documentInput]}
+              editable={!isBuiltIn}
+              style={[styles.input, styles.documentInput, isBuiltIn && styles.sourceManagedInput]}
             />
           </View>
         </ScrollView>
@@ -324,6 +328,25 @@ const styles = StyleSheet.create({
     fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }),
     fontSize: 13,
     lineHeight: 19,
+  },
+  sourceManagedInput: {
+    color: palette.textMuted,
+    backgroundColor: palette.surfaceMuted,
+  },
+  sourceManagedBanner: {
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: palette.surfaceMuted,
+  },
+  sourceManagedText: {
+    flex: 1,
+    color: palette.textMuted,
+    fontSize: 13,
+    lineHeight: 18,
   },
   errorBanner: {
     minHeight: 42,

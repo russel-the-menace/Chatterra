@@ -20,7 +20,7 @@ const iso = (value: Date | string | null | undefined): string | undefined => {
 const mapCharacter = (row: any): Character => ({
   id: row.id,
   name: row.name,
-  avatar: row.avatar ?? undefined,
+  avatar: row.avatar_override ?? row.avatar ?? undefined,
   role: row.role ?? undefined,
   personality: row.personality ?? undefined,
   company: row.company ?? undefined,
@@ -193,13 +193,35 @@ export const setUserMemoryConsent = async (userId: string, enabled: boolean) => 
   })
 }
 
+export const setUserAvatar = async (userId: string, avatar: string) => {
+  return withTransaction(async client => {
+    await ensureUser(client, userId)
+    const result = await client.query(
+      `UPDATE users SET
+         preferences = jsonb_set(
+           COALESCE(preferences, '{}'::jsonb),
+           '{avatar}',
+           to_jsonb($2::text),
+           TRUE
+         ),
+         updated_at = NOW()
+       WHERE id = $1
+       RETURNING preferences`,
+      [userId, avatar]
+    )
+    return typeof result.rows[0]?.preferences?.avatar === 'string'
+      ? result.rows[0].preferences.avatar
+      : undefined
+  })
+}
+
 export const listPinnedCharacterIds = async (userId: string): Promise<string[]> => {
   return withTransaction(async client => {
     await ensureUser(client, userId)
     const result = await client.query(
       `SELECT character_id
        FROM user_character_preferences
-       WHERE user_id = $1
+       WHERE user_id = $1 AND pinned_at IS NOT NULL
        ORDER BY pinned_at DESC, character_id`,
       [userId]
     )
@@ -230,8 +252,17 @@ export const setCharacterPinned = async (
       )
     } else {
       await client.query(
-        `DELETE FROM user_character_preferences
+        `UPDATE user_character_preferences
+         SET pinned_at = NULL
          WHERE user_id = $1 AND character_id = $2`,
+        [userId, characterId]
+      )
+      await client.query(
+        `DELETE FROM user_character_preferences
+         WHERE user_id = $1
+           AND character_id = $2
+           AND pinned_at IS NULL
+           AND avatar_override IS NULL`,
         [userId, characterId]
       )
     }
@@ -243,13 +274,44 @@ export const setCharacterPinned = async (
 export const listCharacters = async (userId?: string): Promise<Character[]> => {
   const result = userId
     ? await query(
-      `SELECT * FROM characters
-       WHERE owner_user_id IS NULL OR owner_user_id = $1
-       ORDER BY created_at, name`,
+      `SELECT characters.*, preferences.avatar_override
+       FROM characters
+       LEFT JOIN user_character_preferences preferences
+         ON preferences.character_id = characters.id
+         AND preferences.user_id = $1
+       WHERE characters.owner_user_id IS NULL OR characters.owner_user_id = $1
+       ORDER BY characters.created_at, characters.name`,
       [userId]
     )
     : await query('SELECT * FROM characters WHERE owner_user_id IS NULL ORDER BY created_at, name')
   return result.rows.map(mapCharacter)
+}
+
+export const setBuiltInCharacterAvatar = async (
+  userId: string,
+  characterId: string,
+  avatar: string
+): Promise<Character | undefined> => {
+  return withTransaction(async client => {
+    await ensureUser(client, userId)
+    const characterResult = await client.query(
+      `SELECT * FROM characters
+       WHERE id = $1 AND owner_user_id IS NULL
+       FOR UPDATE`,
+      [characterId]
+    )
+    const character = characterResult.rows[0]
+    if (!character) return undefined
+    await client.query(
+      `INSERT INTO user_character_preferences (
+         user_id, character_id, pinned_at, avatar_override
+       ) VALUES ($1, $2, NULL, $3)
+       ON CONFLICT (user_id, character_id)
+       DO UPDATE SET avatar_override = EXCLUDED.avatar_override`,
+      [userId, characterId, avatar]
+    )
+    return { ...mapCharacter(character), avatar }
+  })
 }
 
 export const getCharacter = async (id: string): Promise<Character | undefined> => {
@@ -384,9 +446,17 @@ export const getSyncSnapshot = async (userId: string): Promise<SyncSnapshot> => 
   return withTransaction(async client => {
     await ensureUser(client, userId)
     const characterResult = await client.query(
-      `SELECT * FROM characters
-       WHERE owner_user_id IS NULL OR owner_user_id = $1
-       ORDER BY created_at, name`,
+      `SELECT characters.*, preferences.avatar_override
+       FROM characters
+       LEFT JOIN user_character_preferences preferences
+         ON preferences.character_id = characters.id
+         AND preferences.user_id = $1
+       WHERE characters.owner_user_id IS NULL OR characters.owner_user_id = $1
+       ORDER BY characters.created_at, characters.name`,
+      [userId]
+    )
+    const userResult = await client.query(
+      'SELECT preferences FROM users WHERE id = $1',
       [userId]
     )
     const conversationResult = await client.query(
@@ -412,7 +482,7 @@ export const getSyncSnapshot = async (userId: string): Promise<SyncSnapshot> => 
     const pinResult = await client.query(
       `SELECT character_id
        FROM user_character_preferences
-       WHERE user_id = $1
+       WHERE user_id = $1 AND pinned_at IS NOT NULL
        ORDER BY pinned_at DESC, character_id`,
       [userId]
     )
@@ -434,6 +504,9 @@ export const getSyncSnapshot = async (userId: string): Promise<SyncSnapshot> => 
 
     return {
       serverTime: new Date().toISOString(),
+      userAvatar: typeof userResult.rows[0]?.preferences?.avatar === 'string'
+        ? userResult.rows[0].preferences.avatar
+        : undefined,
       characters: characterResult.rows.map(mapCharacter),
       conversations,
       pinnedCharacterIds: pinResult.rows.map(row => String(row.character_id))

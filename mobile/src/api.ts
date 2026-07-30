@@ -151,6 +151,21 @@ export const api = {
     return result.character
   },
 
+  async updateBuiltInCharacterAvatar(userId: string, characterId: string, avatar: string) {
+    const result = await request<{ character: Character }>(
+      `/api/users/${encodeURIComponent(userId)}/characters/${encodeURIComponent(characterId)}/avatar`,
+      { method: 'PUT', body: JSON.stringify({ avatar }) }
+    )
+    return result.character
+  },
+
+  async updateUserAvatar(userId: string, avatar: string) {
+    return request<{ userAvatar?: string }>(
+      `/api/users/${encodeURIComponent(userId)}/avatar`,
+      { method: 'PUT', body: JSON.stringify({ avatar }) }
+    )
+  },
+
   async listConversations(userId: string) {
     const result = await request<{ conversations: Conversation[] }>(
       `/api/conversations?userId=${encodeURIComponent(userId)}`
