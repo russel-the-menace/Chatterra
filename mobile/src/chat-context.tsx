@@ -29,16 +29,14 @@ import {
 } from './storage'
 import {
   Character,
-  ChatMessage,
   ComposerQuoteDraft,
   ContactPreviewCache,
   ConversationHistoryCache,
 } from './types'
 import { buildContactPreviewState } from './contact-preview'
+import { mergeMessagePage } from './message-page-merge'
 
 type ConversationCacheEntry = ConversationHistoryCache
-
-const MAX_CACHED_CONVERSATION_MESSAGES = 20
 
 export type ConversationListViewState = {
   offsetY: number
@@ -119,29 +117,13 @@ const persistQuoteDrafts = async (
   throw lastError
 }
 
-const cursorForMessage = (message: ChatMessage) => (
-  message.createdAt
-    ? {
-        createdAt: message.createdAt,
-        id: message.sourceMessageId || message.id,
-      }
-    : undefined
-)
-
 const persistentConversationEntry = (entry: ConversationCacheEntry): ConversationCacheEntry => {
   const messages = entry.messages
-    .slice(-MAX_CACHED_CONVERSATION_MESSAGES)
     .map(({ voiceTranscriptVisible: _voiceTranscriptVisible, ...message }) => message)
-  const trimmed = messages.length < entry.messages.length
-  const oldestMessageCursor = trimmed
-    ? cursorForMessage(messages[0]) || entry.oldestMessageCursor
-    : entry.oldestMessageCursor
 
   return {
     ...entry,
     messages,
-    hasMoreHistory: entry.hasMoreHistory || trimmed,
-    oldestMessageCursor,
   }
 }
 
@@ -531,23 +513,9 @@ export function ChatProvider({ children }: PropsWithChildren) {
 
       if (hasWorkspaceSnapshotRef.current && changedCharacterIds.size > 0) {
         changedCharacterIds.forEach(characterId => {
-          const cached = conversationCacheRef.current.get(characterId)
-          const conversation = newestConversationByCharacter.get(characterId)
-          const cachedLatestMessage = cached?.messages.at(-1)
-          const cachedLatestMessageId = cachedLatestMessage?.sourceMessageId || cachedLatestMessage?.id
-          const serverLatestMessageId = conversation?.latestMessage?.id
-          const shouldDiscardCachedConversation = Boolean(
-            cached
-            && conversation
-            && (
-              cached.conversationId !== conversation.id
-              || cachedLatestMessageId !== serverLatestMessageId
-            )
-          )
-          if (shouldDiscardCachedConversation) {
-            conversationCacheRef.current.delete(characterId)
-            conversationListViewStateRef.current.delete(characterId)
-          }
+          // The chat screen reconciles the newer server page into this cache.
+          // A server omission never authorizes discarding local history.
+          conversationListViewStateRef.current.delete(characterId)
         })
         setConversationVersions(current => {
           const next = { ...current }
@@ -869,14 +837,24 @@ export function ChatProvider({ children }: PropsWithChildren) {
         translationError: _translationError,
         ...message
       }) => message)
-    const stableEntry = { ...entry, messages: stableMessages }
+    const existing = conversationCacheRef.current.get(characterId)
+    const mergedMessages = existing
+      ? mergeMessagePage(existing.messages, stableMessages, 'append')
+      : stableMessages
+    const stableEntry = {
+      ...entry,
+      conversationId: entry.conversationId || existing?.conversationId || null,
+      messages: mergedMessages,
+      hasMoreHistory: Boolean(existing?.hasMoreHistory || entry.hasMoreHistory),
+      oldestMessageCursor: entry.oldestMessageCursor || existing?.oldestMessageCursor,
+    }
     const cachedViewState = conversationListViewStateRef.current.get(characterId)
-    const latestMessage = stableMessages.at(-1)
+    const latestMessage = mergedMessages.at(-1)
     const latestMessageKey = latestMessage?.renderKey || latestMessage?.id
     if (
       cachedViewState
       && (
-        cachedViewState.messageCount !== stableMessages.length
+        cachedViewState.messageCount !== mergedMessages.length
         || cachedViewState.latestMessageKey !== latestMessageKey
       )
     ) {

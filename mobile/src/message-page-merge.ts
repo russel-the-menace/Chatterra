@@ -72,7 +72,23 @@ export const mergeMessagePage = (
   const preservedCurrent = reconciledCurrent.map(message => incomingById.get(message.id) || message)
   const unseenIncoming = hydratedIncoming.filter(message => !currentById.has(message.id))
 
-  return position === 'prepend'
+  const merged = position === 'prepend'
     ? [...unseenIncoming, ...preservedCurrent]
     : [...preservedCurrent, ...unseenIncoming]
+  const originalOrder = new Map(merged.map((message, index) => [message.id, index]))
+  const messageTime = (message: ChatMessage) => {
+    const parsed = message.createdAt ? Date.parse(message.createdAt) : Number.NaN
+    if (Number.isFinite(parsed)) return parsed
+    return message.id.startsWith('starter-') ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY
+  }
+
+  return [...merged].sort((left, right) => {
+    const timeDifference = messageTime(left) - messageTime(right)
+    if (timeDifference !== 0 && !Number.isNaN(timeDifference)) return timeDifference
+    if (left.createdAt && right.createdAt && left.createdAt === right.createdAt) {
+      const idDifference = left.id.localeCompare(right.id)
+      if (idDifference !== 0) return idDifference
+    }
+    return (originalOrder.get(left.id) || 0) - (originalOrder.get(right.id) || 0)
+  })
 }

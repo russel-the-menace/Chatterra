@@ -89,7 +89,6 @@ const MESSAGE_ACTION_REAPPEAR_DELAY_MS = 120
 const MESSAGE_SELECTION_INITIALIZE_MS = 180
 const HISTORY_PAGE_SIZE = 20
 const OLDER_HISTORY_TRIGGER_OFFSET = 80
-const LOCAL_HISTORY_REFRESH_MS = 2 * 60_000
 // The final row margin and list padding together form the visible composer gap.
 const MESSAGE_LIST_BOTTOM_PADDING = LATEST_MESSAGE_COMPOSER_GAP - MESSAGE_ROW_GAP
 const CLOUD_WAVEFORM_SAMPLE_COUNT = 30
@@ -99,6 +98,16 @@ const cloudWaveformHeight = (metering?: number) => {
   const normalized = Math.max(0, Math.min(1, (decibels + 54) / 42))
   return Math.round(4 + 25 * Math.pow(normalized, 0.62))
 }
+
+const visibleHistoryWindow = (messages: ChatMessage[], retainLoadedWindow = false) => (
+  retainLoadedWindow ? messages : messages.slice(-HISTORY_PAGE_SIZE)
+)
+
+const cursorForMessage = (message?: ChatMessage): MessageHistoryCursor | undefined => (
+  message?.createdAt
+    ? { createdAt: message.createdAt, id: message.sourceMessageId || message.id }
+    : undefined
+)
 
 type MessageAnchor = {
   x: number
@@ -1023,15 +1032,23 @@ export default function ChatScreen() {
       ? { x: 0, y: initialListViewStateRef.current.offsetY }
       : undefined
   )
-  const [messages, setMessages] = useState<ChatMessage[]>(() => initialCacheRef.current?.messages || [])
+  const initialDisplayMessages = visibleHistoryWindow(
+    initialCacheRef.current?.messages || [],
+    hasInitialListViewState
+  )
+  const initialDisplayCursor = cursorForMessage(initialDisplayMessages[0])
+  const [messages, setMessages] = useState<ChatMessage[]>(() => initialDisplayMessages)
   const [conversationId, setConversationId] = useState<string | null>(
     initialCacheRef.current?.conversationId || null
   )
   const [hasMoreHistory, setHasMoreHistory] = useState(
-    () => initialCacheRef.current?.hasMoreHistory || false
+    () => Boolean(
+      initialCacheRef.current?.hasMoreHistory
+      || initialDisplayMessages.length < (initialCacheRef.current?.messages.length || 0)
+    )
   )
   const [oldestMessageCursor, setOldestMessageCursor] = useState<MessageHistoryCursor | undefined>(
-    () => initialCacheRef.current?.oldestMessageCursor
+    () => initialDisplayCursor || initialCacheRef.current?.oldestMessageCursor
   )
   const [initialPositionReady, setInitialPositionReady] = useState(Boolean(initialCacheRef.current))
   const [activity, setActivity] = useState('Online')
@@ -1674,6 +1691,19 @@ export default function ChatScreen() {
       }
 
       if (!matching) {
+        const cachedHistory = getConversationCache(character.id)
+        if (cachedHistory?.messages.length) {
+          const cachedMessages = visibleHistoryWindow(cachedHistory.messages)
+          setInitialPositionReady(true)
+          setConversationId(cachedHistory.conversationId)
+          setHasMoreHistory(Boolean(
+            cachedHistory.hasMoreHistory || cachedMessages.length < cachedHistory.messages.length
+          ))
+          setOldestMessageCursor(cursorForMessage(cachedMessages[0]) || cachedHistory.oldestMessageCursor)
+          setMessages(cachedMessages)
+          setError(null)
+          return
+        }
         setConversationId(null)
         setHasMoreHistory(false)
         setOldestMessageCursor(undefined)
@@ -1694,14 +1724,14 @@ export default function ChatScreen() {
         if (!requestIsCurrent()) return
         if (quiet && hasPendingLocalDelivery()) return
         const cachedHistory = getConversationCache(character.id)
-        const cachedMessages = cachedHistory?.messages || []
-        const mappedMessages = mergeMessagePage(
-          cachedMessages,
-          mapMessages(messagePage.messages),
-          'append'
-        )
-        const nextHasMoreHistory = cachedHistory?.hasMoreHistory ?? messagePage.hasMore
-        const nextOldestMessageCursor = cachedHistory?.oldestMessageCursor ?? messagePage.nextCursor
+        const serverMessages = mapMessages(messagePage.messages)
+        const mappedMessages = quiet
+          ? mergeMessagePage(messagesRef.current, serverMessages, 'append')
+          : serverMessages
+        const nextHasMoreHistory = Boolean(cachedHistory?.hasMoreHistory || messagePage.hasMore)
+        const nextOldestMessageCursor = cursorForMessage(mappedMessages[0])
+          || cachedHistory?.oldestMessageCursor
+          || messagePage.nextCursor
         if (quiet) {
           const existingIds = new Set(messagesRef.current.map(message => message.id))
           const newAssistantMessageCount = mappedMessages.filter(message => (
@@ -1778,16 +1808,20 @@ export default function ChatScreen() {
       } else {
         // Cached history can be painted immediately; exact bottom alignment
         // continues through the normal layout callbacks without a blank frame.
+        const cachedMessages = visibleHistoryWindow(
+          cachedHistory.messages,
+          hasInitialListViewState
+        )
         setInitialPositionReady(true)
-        messagesRef.current = cachedHistory.messages
-        setMessages(cachedHistory.messages)
+        messagesRef.current = cachedMessages
+        setMessages(cachedMessages)
         setConversationId(cachedHistory.conversationId)
-        setHasMoreHistory(Boolean(cachedHistory.hasMoreHistory))
-        setOldestMessageCursor(cachedHistory.oldestMessageCursor)
+        setHasMoreHistory(Boolean(
+          cachedHistory.hasMoreHistory || cachedMessages.length < cachedHistory.messages.length
+        ))
+        setOldestMessageCursor(cursorForMessage(cachedMessages[0]) || cachedHistory.oldestMessageCursor)
         setLoadingHistory(false)
-        if (Date.now() - cachedHistory.cachedAt > LOCAL_HISTORY_REFRESH_MS) {
-          void loadConversationRef.current(true)
-        }
+        void loadConversationRef.current(true)
       }
       void refreshState()
     })()
@@ -1798,6 +1832,7 @@ export default function ChatScreen() {
   }, [
     character?.id,
     getConversationCache,
+    hasInitialListViewState,
     hydrateConversationCache,
     refreshState,
     resetInitialScroll,
@@ -1904,6 +1939,28 @@ export default function ChatScreen() {
     const anchor = { ...scrollMetricsRef.current }
 
     try {
+      const cachedHistory = characterId ? getConversationCache(characterId) : undefined
+      const visibleOldestMessage = messagesRef.current[0]
+      const visibleOldestMessageId = visibleOldestMessage?.sourceMessageId || visibleOldestMessage?.id
+      const cachedOldestIndex = cachedHistory?.messages.findIndex(message => (
+        (message.sourceMessageId || message.id) === visibleOldestMessageId
+      )) ?? -1
+      if (cachedHistory && cachedOldestIndex > 0) {
+        const localOlderMessages = cachedHistory.messages.slice(
+          Math.max(0, cachedOldestIndex - HISTORY_PAGE_SIZE),
+          cachedOldestIndex
+        )
+        prependHistoryAnchorRef.current = {
+          contentHeight: anchor.contentHeight,
+          offsetY: anchor.offsetY,
+        }
+        setMessages(current => mergeMessagePage(current, localOlderMessages, 'prepend'))
+        const nextOldestIndex = cachedOldestIndex - localOlderMessages.length
+        const nextOldest = cachedHistory.messages[nextOldestIndex]
+        setHasMoreHistory(Boolean(nextOldestIndex > 0 || cachedHistory.hasMoreHistory))
+        setOldestMessageCursor(cursorForMessage(nextOldest) || cachedHistory.oldestMessageCursor)
+        return
+      }
       const messagePage = await api.listMessagePage(conversationId, {
         limit: HISTORY_PAGE_SIZE,
         before: oldestMessageCursor,
@@ -1930,7 +1987,7 @@ export default function ChatScreen() {
         setLoadingOlderHistory(false)
       }
     }
-  }, [conversationId, hasMoreHistory, oldestMessageCursor])
+  }, [characterId, conversationId, getConversationCache, hasMoreHistory, oldestMessageCursor])
 
   const proactiveVersion = characterId ? conversationVersions[characterId] || 0 : 0
   const syncedConversationId = characterId ? conversationIdsByCharacter[characterId] || null : null

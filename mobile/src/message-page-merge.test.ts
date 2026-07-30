@@ -61,6 +61,17 @@ const run = () => {
   const prepended = mergeMessagePage([userMessage], older, 'prepend')
   expect(sameIds(prepended, ['older-message', 'server-user']), 'older history should prepend')
 
+  const first: ChatMessage = { id: 'first', sender: 'assistant', text: '1', createdAt: '2026-07-30T00:00:01.000Z' }
+  const second: ChatMessage = { id: 'second', sender: 'assistant', text: '2', createdAt: '2026-07-30T00:00:02.000Z' }
+  const third: ChatMessage = { id: 'third', sender: 'assistant', text: '3', createdAt: '2026-07-30T00:00:03.000Z' }
+  const fourth: ChatMessage = { id: 'fourth', sender: 'assistant', text: '4', createdAt: '2026-07-30T00:00:04.000Z' }
+  const insertedFromServer = mergeMessagePage([first, third, fourth], [first, second, third, fourth], 'append')
+  expect(sameIds(insertedFromServer, ['first', 'second', 'third', 'fourth']),
+    'server messages should be inserted chronologically without deleting local messages')
+  const serverSubset = mergeMessagePage(insertedFromServer, [third, fourth], 'append')
+  expect(sameIds(serverSubset, ['first', 'second', 'third', 'fourth']),
+    'a server subset must not remove locally cached messages')
+
   const convertedVoice: UserVoiceMessage = {
     provider: 'user-recording',
     status: 'ready',
