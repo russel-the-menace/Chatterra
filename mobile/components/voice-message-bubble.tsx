@@ -1,19 +1,50 @@
-import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons'
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from 'expo-audio'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Pressable, StyleSheet, Text, View } from 'react-native'
+import { Pressable, StyleSheet, Text } from 'react-native'
+import Svg, { Circle, G, Path } from 'react-native-svg'
 
 import { mediaUrl } from '@/src/api'
 import { MessageVoice } from '@/src/types'
 import { palette } from '@/src/theme'
 
 const displayDuration = (duration?: number) => `${Math.max(1, Math.round(duration || 1))}\"`
-const VOICE_WAVE_ICON_SIZE = 18
-const VOICE_WAVE_ICON_NAMES = [
-  'wifi-strength-1',
-  'wifi-strength-2',
-  'wifi-strength-3',
-] as const
+const VOICE_WAVE_ICON_SIZE = 24
+
+function WeChatVoiceWave({
+  color,
+  level,
+  mirrored,
+}: {
+  color: string
+  level: number
+  mirrored: boolean
+}) {
+  return (
+    <Svg width={VOICE_WAVE_ICON_SIZE} height={VOICE_WAVE_ICON_SIZE} viewBox="0 0 24 24">
+      <G transform={mirrored ? 'translate(24 0) scale(-1 1)' : undefined}>
+        <Circle cx={3.8} cy={12} r={2.1} fill={color} />
+        {level >= 2 && (
+          <Path
+            d="M9 8 C12.5 10.25 12.5 13.75 9 16"
+            fill="none"
+            stroke={color}
+            strokeLinecap="round"
+            strokeWidth={1.8}
+          />
+        )}
+        {level >= 3 && (
+          <Path
+            d="M14 3.5 C20.5 8.25 20.5 15.75 14 20.5"
+            fill="none"
+            stroke={color}
+            strokeLinecap="round"
+            strokeWidth={1.8}
+          />
+        )}
+      </G>
+    </Svg>
+  )
+}
 
 export function VoiceMessageBubble({
   voice,
@@ -112,18 +143,11 @@ export function VoiceMessageBubble({
         pressed && styles.voiceMessagePressed,
       ]}
     >
-      <View
-        style={[
-          styles.soundWaves,
-          isUser ? styles.soundWavesUser : styles.soundWavesAssistant,
-        ]}
-      >
-        <MaterialCommunityIcons
-          name={VOICE_WAVE_ICON_NAMES[waveLevel - 1]}
-          size={VOICE_WAVE_ICON_SIZE}
-          color={isUser ? '#FFFFFF' : palette.text}
-        />
-      </View>
+      <WeChatVoiceWave
+        color={isUser ? '#FFFFFF' : palette.text}
+        level={waveLevel}
+        mirrored={isUser}
+      />
       <Text style={[styles.duration, isUser && styles.durationUser]}>{displayDuration(voice.durationSeconds)}</Text>
     </Pressable>
   )
@@ -142,18 +166,6 @@ const styles = StyleSheet.create({
   },
   voiceMessagePressed: {
     opacity: 0.6,
-  },
-  soundWaves: {
-    width: VOICE_WAVE_ICON_SIZE,
-    height: VOICE_WAVE_ICON_SIZE,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  soundWavesUser: {
-    transform: [{ rotate: '90deg' }],
-  },
-  soundWavesAssistant: {
-    transform: [{ rotate: '-90deg' }],
   },
   duration: {
     color: palette.text,
