@@ -67,10 +67,10 @@ change the editing experience; the character remains one coherent piece of writi
 
 <table>
   <tr>
-    <td width="43%" valign="top">
+    <td width="50%" valign="top">
       <img src="docs/assets/character-document-editor.png" alt="The editable character document" />
     </td>
-    <td width="57%" valign="top">
+    <td width="50%" valign="top">
       <img src="docs/assets/character-architecture.svg" alt="Character document and runtime architecture" />
     </td>
   </tr>

@@ -1,85 +1,96 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 760" role="img" aria-labelledby="title description">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 2168" role="img" aria-labelledby="title description">
   <title id="title">Chatterra character architecture</title>
-  <desc id="description">A character document becomes a versioned template. Private character state and relevant context feed the inference orchestrator, which creates durable, segmented conversation output.</desc>
+  <desc id="description">A portrait architecture diagram showing how a character document becomes a versioned template, gains private character state, composes context, and produces durable conversation output.</desc>
   <defs>
     <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#0f172a" flood-opacity="0.12"/>
+      <feDropShadow dx="0" dy="10" stdDeviation="13" flood-color="#0f172a" flood-opacity="0.12"/>
     </filter>
-    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
-      <path d="M1 1 L11 6 L1 11 Z" fill="#8090a8"/>
+    <marker id="arrow" markerWidth="14" markerHeight="14" refX="11" refY="7" orient="auto">
+      <path d="M1 1 L13 7 L1 13 Z" fill="#8090a8"/>
     </marker>
     <style>
-      .title { font: 700 26px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; fill: #152238; }
-      .label { font: 700 18px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; fill: #152238; }
-      .body { font: 15px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; fill: #65738a; }
-      .line { stroke: #8090a8; stroke-width: 2.5; fill: none; marker-end: url(#arrow); }
+      .eyebrow { font: 700 17px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; fill: #34c759; letter-spacing: 1.6px; }
+      .title { font: 700 36px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; fill: #152238; }
+      .label { font: 700 25px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; fill: #152238; }
+      .body { font: 18px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; fill: #65738a; }
+      .line { stroke: #8090a8; stroke-width: 3; fill: none; marker-end: url(#arrow); }
     </style>
   </defs>
 
-  <rect width="1000" height="760" rx="26" fill="#f7f9fc"/>
-  <text x="52" y="64" class="title">A character is a document, then a life in context</text>
+  <rect width="1000" height="2168" rx="28" fill="#f7f9fc"/>
+  <text x="60" y="86" class="eyebrow">CHARACTER RUNTIME</text>
+  <text x="60" y="138" class="title">A document, then a life in context</text>
+  <text x="60" y="174" class="body">The prompt defines the person. The runtime lets them remember.</text>
 
   <g filter="url(#shadow)">
-    <rect x="52" y="116" width="260" height="164" rx="16" fill="#ffffff"/>
-    <rect x="52" y="116" width="10" height="164" rx="5" fill="#34c759"/>
-    <text x="84" y="157" class="label">Character document</text>
-    <text x="84" y="190" class="body">Full prompt and boundaries</text>
-    <text x="84" y="214" class="body">Voice, language, background</text>
-    <text x="84" y="238" class="body">Front matter for runtime policy</text>
+    <rect x="60" y="230" width="880" height="250" rx="20" fill="#ffffff"/>
+    <rect x="60" y="230" width="12" height="250" rx="6" fill="#34c759"/>
+    <text x="102" y="286" class="label">1. Character document</text>
+    <text x="102" y="328" class="body">Full prompt, boundaries, voice, language, and background.</text>
+    <text x="102" y="360" class="body">Front matter derives the runtime policy instead of making</text>
+    <text x="102" y="392" class="body">the UI guess what every single field means.</text>
+    <text x="102" y="432" class="body">Source-managed built-ins or a user-authored character.</text>
+  </g>
+
+  <path d="M500 500 V550" class="line"/>
+
+  <g filter="url(#shadow)">
+    <rect x="60" y="570" width="880" height="250" rx="20" fill="#ffffff"/>
+    <rect x="60" y="570" width="12" height="250" rx="6" fill="#5f7ee7"/>
+    <text x="102" y="626" class="label">2. Versioned template</text>
+    <text x="102" y="668" class="body">Identity can evolve without rewriting the history that came before.</text>
+    <text x="102" y="700" class="body">A stable definition is the reference point for the character instance.</text>
+    <text x="102" y="758" class="body">One character, one coherent source of truth.</text>
+  </g>
+
+  <path d="M500 840 V890" class="line"/>
+
+  <g filter="url(#shadow)">
+    <rect x="60" y="910" width="880" height="280" rx="20" fill="#ffffff"/>
+    <rect x="60" y="910" width="12" height="280" rx="6" fill="#ff9f43"/>
+    <text x="102" y="966" class="label">3. Private character instance</text>
+    <text x="102" y="1008" class="body">One user gets one private worldline, not a shared generic persona.</text>
+    <text x="102" y="1040" class="body">Relationship state, relevant memories, causal events, and a next action</text>
+    <text x="102" y="1072" class="body">time give a character continuity between chat sessions.</text>
+    <text x="102" y="1138" class="body">This is where proactive messages get a reason instead of a random timer.</text>
+  </g>
+
+  <path d="M500 1210 V1280 H265 V1330" class="line"/>
+  <path d="M500 1210 V1280 H735 V1330" class="line"/>
+
+  <g filter="url(#shadow)">
+    <rect x="60" y="1350" width="410" height="300" rx="20" fill="#ffffff"/>
+    <rect x="60" y="1350" width="12" height="300" rx="6" fill="#8f61d9"/>
+    <text x="102" y="1406" class="label">4. Context composer</text>
+    <text x="102" y="1448" class="body">Recent conversation</text>
+    <text x="102" y="1480" class="body">Summary and local time</text>
+    <text x="102" y="1512" class="body">Relevant memories</text>
+    <text x="102" y="1544" class="body">Policy for this moment</text>
+    <text x="102" y="1600" class="body">No raw prompt dump.</text>
   </g>
 
   <g filter="url(#shadow)">
-    <rect x="382" y="116" width="236" height="164" rx="16" fill="#ffffff"/>
-    <rect x="382" y="116" width="10" height="164" rx="5" fill="#5f7ee7"/>
-    <text x="414" y="157" class="label">Versioned template</text>
-    <text x="414" y="190" class="body">Stable identity to evolve</text>
-    <text x="414" y="214" class="body">without rewriting history</text>
-    <text x="414" y="238" class="body">Source-managed or user-authored</text>
+    <rect x="530" y="1350" width="410" height="300" rx="20" fill="#ffffff"/>
+    <rect x="530" y="1350" width="12" height="300" rx="6" fill="#34c759"/>
+    <text x="572" y="1406" class="label">5. Orchestrator</text>
+    <text x="572" y="1448" class="body">Reply, correction,</text>
+    <text x="572" y="1480" class="body">or initiative</text>
+    <text x="572" y="1512" class="body">Delivery policy</text>
+    <text x="572" y="1544" class="body">Validated bubble bounds</text>
+    <text x="572" y="1600" class="body">Persist before present.</text>
   </g>
+
+  <path d="M490 1500 H510" class="line"/>
+  <path d="M735 1670 V1760" class="line"/>
 
   <g filter="url(#shadow)">
-    <rect x="688" y="116" width="260" height="164" rx="16" fill="#ffffff"/>
-    <rect x="688" y="116" width="10" height="164" rx="5" fill="#ff9f43"/>
-    <text x="720" y="157" class="label">Private character instance</text>
-    <text x="720" y="190" class="body">One user / one worldline</text>
-    <text x="720" y="214" class="body">Mood, relationship, next action</text>
-    <text x="720" y="238" class="body">Facts and causal event history</text>
+    <rect x="60" y="1780" width="880" height="220" rx="20" fill="#152238"/>
+    <circle cx="118" cy="1840" r="18" fill="#34c759"/>
+    <text x="158" y="1836" style="font: 700 25px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; fill: #ffffff;">Durable conversation output</text>
+    <text x="158" y="1876" style="font: 18px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; fill: #c9d4e5;">Messages are saved before the client stages them as chat bubbles.</text>
+    <text x="158" y="1908" style="font: 18px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; fill: #c9d4e5;">Delivery segments, voice metadata, and contact previews stay with the record.</text>
+    <text x="158" y="1960" style="font: 18px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; fill: #8fe1ad;">The result can look casual because the state is not.</text>
   </g>
 
-  <path d="M312 198 H365" class="line"/>
-  <path d="M618 198 H671" class="line"/>
-
-  <g filter="url(#shadow)">
-    <rect x="111" y="392" width="300" height="180" rx="16" fill="#ffffff"/>
-    <rect x="111" y="392" width="10" height="180" rx="5" fill="#8f61d9"/>
-    <text x="143" y="434" class="label">Context composer</text>
-    <text x="143" y="468" class="body">Recent conversation and summary</text>
-    <text x="143" y="492" class="body">Relevant memories and local time</text>
-    <text x="143" y="516" class="body">Character policy for this moment</text>
-    <text x="143" y="540" class="body">No raw prompt dump</text>
-  </g>
-
-  <g filter="url(#shadow)">
-    <rect x="589" y="392" width="300" height="180" rx="16" fill="#ffffff"/>
-    <rect x="589" y="392" width="10" height="180" rx="5" fill="#34c759"/>
-    <text x="621" y="434" class="label">Inference orchestrator</text>
-    <text x="621" y="468" class="body">Reply, correction, or initiative</text>
-    <text x="621" y="492" class="body">Safety and delivery policy</text>
-    <text x="621" y="516" class="body">Validate bubble boundaries</text>
-    <text x="621" y="540" class="body">Persist before presenting</text>
-  </g>
-
-  <path d="M500 280 V350 H261 V375" class="line"/>
-  <path d="M818 280 V350 H739 V375" class="line"/>
-  <path d="M411 482 H572" class="line"/>
-
-  <g filter="url(#shadow)">
-    <rect x="210" y="635" width="580" height="82" rx="16" fill="#152238"/>
-    <circle cx="291" cy="678" r="13" fill="#34c759"/>
-    <text x="324" y="674" style="font: 700 17px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; fill: #ffffff;">Durable conversation output</text>
-    <text x="324" y="695" style="font: 14px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; fill: #c9d4e5;">Messages, delivery segments, voice metadata,</text>
-    <text x="324" y="713" style="font: 14px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; fill: #c9d4e5;">and contact previews</text>
-  </g>
-  <path d="M739 572 V627" class="line"/>
-  <path d="M261 572 V627 H739" stroke="#8090a8" stroke-width="2.5" fill="none"/>
+  <text x="60" y="2074" class="body">Chatterra: characters with a written identity and a persistent runtime.</text>
 </svg>
