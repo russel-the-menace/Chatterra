@@ -33,7 +33,7 @@ const minji: Character = {
 const ren: Character = {
   ...minji,
   id: 'seed-ren-friend',
-  name: '蓮',
+  name: '結衣',
   role: 'Japanese international student friend and third-year mathematics major',
   language: 'Japanese only; understands English input'
 }

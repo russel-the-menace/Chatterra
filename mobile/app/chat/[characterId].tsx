@@ -31,7 +31,6 @@ import {
 import Reanimated, {
   cancelAnimation,
   Easing as ReanimatedEasing,
-  LinearTransition,
   scrollTo,
   useAnimatedKeyboard,
   useAnimatedReaction,
@@ -93,10 +92,6 @@ const OLDER_HISTORY_TRIGGER_OFFSET = 80
 const LOCAL_HISTORY_REFRESH_MS = 2 * 60_000
 // The final row margin and list padding together form the visible composer gap.
 const MESSAGE_LIST_BOTTOM_PADDING = LATEST_MESSAGE_COMPOSER_GAP - MESSAGE_ROW_GAP
-const MESSAGE_BUBBLE_LAYOUT = LinearTransition
-  .duration(MESSAGE_REVEAL_DURATION_MS)
-  .easing(ReanimatedEasing.out(ReanimatedEasing.cubic))
-const AnimatedPressable = Reanimated.createAnimatedComponent(Pressable)
 const CLOUD_WAVEFORM_SAMPLE_COUNT = 30
 
 const cloudWaveformHeight = (metering?: number) => {
@@ -902,8 +897,7 @@ function MessageRow({
             collapsable={false}
             style={[styles.bubbleAnchor, selecting && styles.bubbleAnchorSelecting]}
           >
-            <AnimatedPressable
-              layout={isUser ? undefined : MESSAGE_BUBBLE_LAYOUT}
+            <Pressable
               delayLongPress={280}
               disabled={message.loading || selecting}
               onLongPress={handleLongPress}
@@ -927,7 +921,7 @@ function MessageRow({
                 onSelectionOutsideTap={onSelectionOutsideTap}
                 onSelectionTouchEnd={onSelectionTouchEnd}
               />
-            </AnimatedPressable>
+            </Pressable>
             </View>
           )}
         </View>
@@ -3757,8 +3751,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   voiceButtonLocalRecording: {
-    borderColor: '#7CC85D',
-    backgroundColor: '#EAF7E4',
+    borderColor: palette.accentBorder,
+    backgroundColor: palette.accentSoft,
   },
   voiceButtonError: {
     borderColor: '#FDA29B',
@@ -3822,12 +3816,12 @@ const styles = StyleSheet.create({
     borderColor: '#C9D1DC',
   },
   holdToTalkButtonPressed: {
-    backgroundColor: '#EEF7EA',
-    borderColor: '#7CC85D',
+    backgroundColor: '#EDF9EF',
+    borderColor: palette.accentBorder,
   },
   holdToTalkButtonRecording: {
-    backgroundColor: '#EAF7E4',
-    borderColor: '#7CC85D',
+    backgroundColor: palette.accentSoft,
+    borderColor: palette.accentBorder,
   },
   holdToTalkButtonError: {
     borderColor: '#FDA29B',
@@ -3839,7 +3833,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   sendButtonDisabled: {
-    backgroundColor: '#9BD49D',
+    backgroundColor: palette.accentMuted,
   },
   sendButtonPressed: {
     backgroundColor: palette.accentPressed,
@@ -3980,7 +3974,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#8DDE62',
+    backgroundColor: palette.accent,
     marginBottom: 46,
   },
   voiceRecordingWave: {
@@ -3992,7 +3986,7 @@ const styles = StyleSheet.create({
   voiceRecordingBar: {
     width: 4,
     borderRadius: 2,
-    backgroundColor: '#3C7A2A',
+    backgroundColor: palette.accentDeep,
   },
   voiceRecordingActions: {
     width: '100%',
