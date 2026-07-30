@@ -9,7 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Platform } from 'react-native'
 
 import { api, ApiError } from './api'
-import { DetectedLanguage, ServerMessage, VoiceTranscriptMetadata } from './types'
+import { ChatResponse, DetectedLanguage, ServerMessage, VoiceTranscriptMetadata } from './types'
 import { createVoiceRequestId, logVoiceDiagnostic, prepareVoiceUpload } from './voice-upload'
 import { requestGroqTranscriptionConsent } from './voice-transcription-consent'
 import { requestVoiceMessageConsent } from './voice-message-consent'
@@ -21,7 +21,12 @@ type VoiceMessageRecorderOptions = {
   characterId?: string
   conversationId?: string | null
   onConvertedToText?: (text: string, metadata: VoiceTranscriptMetadata) => void
-  onSent?: (result: { conversationId: string; message: ServerMessage; starterMessage?: ServerMessage }) => void
+  onSent?: (result: {
+    conversationId: string
+    message: ServerMessage
+    starterMessage?: ServerMessage
+    response?: Omit<ChatResponse, 'conversationId'>
+  }) => void
   userId?: string
 }
 
@@ -179,6 +184,15 @@ export const useVoiceMessageRecorder = ({
           conversationId: result.conversation.id,
           message: result.message,
           starterMessage: result.starterMessage,
+          response: result.reply === undefined
+            ? undefined
+            : {
+                behavior: result.behavior,
+                messageId: result.messageId,
+                reply: result.reply,
+                replySegments: result.replySegments,
+                voice: result.voice,
+              },
         })
       }
       if (session === sessionRef.current && mountedRef.current) updateSnapshot(initialSnapshot)

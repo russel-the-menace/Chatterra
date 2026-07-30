@@ -828,6 +828,7 @@ export const prepareInteraction = async ({
   messageId,
   message,
   contentJson,
+  messageAlreadyPersisted = false,
   mode = 'practice',
   now = new Date()
 }: {
@@ -837,6 +838,7 @@ export const prepareInteraction = async ({
   messageId: string
   message: string
   contentJson?: Record<string, any>
+  messageAlreadyPersisted?: boolean
   mode?: InteractionMode
   now?: Date
 }): Promise<InteractionPreparation> => {
@@ -849,19 +851,39 @@ export const prepareInteraction = async ({
        WHERE id = $1`,
       [instance.id]
     )
-    await client.query(
-      `INSERT INTO messages (
-         id, conversation_id, sender_role, sender_id, content, content_json, created_at
-       ) VALUES ($1, $2, 'user', $3, $4, $5::jsonb, $6)`,
-      [
-        messageId,
-        conversationId,
-        userId,
-        message,
-        contentJson ? JSON.stringify(contentJson) : null,
-        now.toISOString()
-      ]
-    )
+    if (messageAlreadyPersisted) {
+      const updated = await client.query(
+        `UPDATE messages
+         SET content = $4, content_json = $5::jsonb
+         WHERE id = $1
+           AND conversation_id = $2
+           AND sender_role = 'user'
+           AND sender_id = $3
+         RETURNING id`,
+        [
+          messageId,
+          conversationId,
+          userId,
+          message,
+          contentJson ? JSON.stringify(contentJson) : null,
+        ]
+      )
+      if (!updated.rows[0]) throw new Error('persisted user message was not found')
+    } else {
+      await client.query(
+        `INSERT INTO messages (
+           id, conversation_id, sender_role, sender_id, content, content_json, created_at
+         ) VALUES ($1, $2, 'user', $3, $4, $5::jsonb, $6)`,
+        [
+          messageId,
+          conversationId,
+          userId,
+          message,
+          contentJson ? JSON.stringify(contentJson) : null,
+          now.toISOString()
+        ]
+      )
+    }
     await client.query(
       `UPDATE conversations SET
          character_instance_id = $2,

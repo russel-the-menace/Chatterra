@@ -36,12 +36,18 @@ export function VoiceMessageBubble({
 
   const togglePlayback = () => {
     if (Date.now() < suppressPlaybackUntilRef.current) return
-    if (status.playing) {
-      player.pause()
-      return
+    try {
+      if (status.playing) {
+        player.pause()
+        return
+      }
+      if (status.didJustFinish) void player.seekTo(0)
+      player.play()
+    } catch (error) {
+      console.warn('[voice] voice_message_playback_failed', {
+        error: error instanceof Error ? error.message : 'unknown_error',
+      })
     }
-    if (status.didJustFinish) void player.seekTo(0)
-    player.play()
   }
 
   return (
@@ -57,7 +63,7 @@ export function VoiceMessageBubble({
       accessibilityHint={`${displayDuration(voice.durationSeconds)} voice message`}
       style={({ pressed }) => [
         styles.voiceMessage,
-        { width: Math.min(220, Math.max(132, 104 + (voice.durationSeconds || 4) * 11)) },
+        { width: Math.min(128, Math.max(102, 74 + (voice.durationSeconds || 4) * 7)) },
         pressed && styles.voiceMessagePressed,
       ]}
     >
@@ -65,7 +71,7 @@ export function VoiceMessageBubble({
         <Ionicons
           name={status.playing ? 'pause' : 'volume-high-outline'}
           size={25}
-          color={isUser ? '#14532D' : palette.text}
+          color={isUser ? '#FFFFFF' : palette.text}
         />
       </View>
       <View style={styles.waveBars}>
@@ -89,6 +95,7 @@ export function VoiceMessageBubble({
 const styles = StyleSheet.create({
   voiceMessage: {
     minHeight: 46,
+    paddingHorizontal: 11,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
@@ -117,7 +124,7 @@ const styles = StyleSheet.create({
     backgroundColor: palette.accent,
   },
   waveBarUser: {
-    backgroundColor: '#3D7C2B',
+    backgroundColor: 'rgba(255, 255, 255, 0.68)',
   },
   duration: {
     color: palette.text,
@@ -125,6 +132,6 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   durationUser: {
-    color: '#14532D',
+    color: '#FFFFFF',
   },
 })

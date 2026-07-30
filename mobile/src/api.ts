@@ -280,6 +280,11 @@ export const api = {
         conversation: Conversation
         message: ServerMessage
         starterMessage?: ServerMessage
+        reply?: ChatResponse['reply']
+        replySegments?: string[]
+        messageId?: string
+        voice?: ChatResponse['voice']
+        behavior?: ChatResponse['behavior']
       }>({
         path: '/api/voice/messages',
         fileUri: input.fileUri,

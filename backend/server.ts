@@ -474,7 +474,57 @@ app.post(
         contentJson: { voice },
         createdAt: new Date().toISOString(),
       })
-      return res.status(201).json({ conversation, message, starterMessage })
+      let reply: Record<string, any> | undefined
+      if (canTranscribe(`${req.ip}:${userId}`)) {
+        try {
+          const transcriptionContext = voiceTranscriptionContextForCharacter(character)
+          console.info('Voice message reply transcription context selected', {
+            ...logDetails,
+            context: transcriptionContext?.id || 'generic',
+          })
+          const transcription = await transcribeWithGroq({
+            audio: req.body,
+            mimeType,
+            prompt: transcriptionContext?.prompt,
+          })
+          const response = await fetch(`http://127.0.0.1:${process.env.PORT || 3000}/api/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              character: { id: character.id },
+              conversationId: conversation.id,
+              message: transcription.text,
+              userId,
+              voiceMessageId: message.id,
+            }),
+            signal: AbortSignal.timeout(90_000),
+          })
+          reply = await response.json().catch(() => ({})) as Record<string, any>
+          if (!response.ok) {
+            throw new Error(typeof reply.error === 'string' ? reply.error : 'voice reply request failed')
+          }
+        } catch (error) {
+          console.error('Voice message reply generation failed', {
+            ...logDetails,
+            error: error instanceof Error ? error.name : 'unknown_error',
+          })
+        }
+      } else {
+        console.warn('Voice message reply transcription skipped', { ...logDetails, reason: 'rate_limited' })
+      }
+      const storedMessage = await getOwnedMessage(userId, message.id) || message
+      return res.status(201).json({
+        conversation,
+        message: storedMessage,
+        starterMessage,
+        ...(reply ? {
+          behavior: reply.behavior,
+          messageId: reply.messageId,
+          reply: reply.reply,
+          replySegments: reply.replySegments,
+          voice: reply.voice,
+        } : {}),
+      })
     } catch (error) {
       console.error('Voice message upload failed', {
         ...logDetails,
@@ -514,6 +564,11 @@ app.post('/api/voice/messages/:id/transcription', asyncRoute(async (req, res) =>
   }
   if (voice.transcriptStatus === 'ready' && message.content.trim()) {
     return res.json({ message })
+  }
+  if (message.content.trim()) {
+    const updated = await updateUserVoiceMessageTranscript(message.id, message.content)
+    if (!updated) return res.status(404).json({ error: 'voice message not found' })
+    return res.json({ message: updated })
   }
   const rateLimitKey = `${req.ip}:${userId}`
   if (!canTranscribe(rateLimitKey)) {
@@ -765,11 +820,20 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
   const clientMessageId = typeof req.body?.clientMessageId === 'string'
     ? req.body.clientMessageId.trim()
     : ''
+  const voiceMessageId = typeof req.body?.voiceMessageId === 'string'
+    ? req.body.voiceMessageId.trim()
+    : ''
   if (
     clientMessageId
     && !/^[A-Za-z0-9][A-Za-z0-9._:-]{7,199}$/.test(clientMessageId)
   ) {
     return res.status(400).json({ error: 'clientMessageId is invalid' })
+  }
+  if (voiceMessageId && !/^[A-Za-z0-9][A-Za-z0-9._:-]{7,199}$/.test(voiceMessageId)) {
+    return res.status(400).json({ error: 'voiceMessageId is invalid' })
+  }
+  if (voiceMessageId && clientMessageId && voiceMessageId !== clientMessageId) {
+    return res.status(400).json({ error: 'voiceMessageId must match clientMessageId' })
   }
   const voiceMetadata = voiceMetadataFromPayload(req.body?.voice)
   let quoteInput: MessageQuoteInput | undefined
@@ -794,7 +858,30 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
 
   const storedCharacter = await getCharacterForUser(normalizedUserId, String(character.id))
   if (!storedCharacter) return res.status(400).json({ error: 'character not found' })
-  if (clientMessageId) {
+  const existingVoiceMessage = voiceMessageId
+    ? await getOwnedMessage(normalizedUserId, voiceMessageId)
+    : undefined
+  const existingVoice = parseUserVoiceMessageMetadata(existingVoiceMessage?.contentJson?.voice)
+  if (voiceMessageId && (
+    !existingVoiceMessage
+    || existingVoiceMessage.senderRole !== 'user'
+    || !existingVoice
+  )) {
+    return res.status(404).json({ error: 'voice message not found' })
+  }
+  if (existingVoiceMessage?.content.trim()) {
+    return res.json({
+      reply: null,
+      userMessageId: existingVoiceMessage.id,
+      conversationId: existingVoiceMessage.conversationId,
+      behavior: {
+        decision: 'already_persisted',
+        responseStatus: 'already_persisted'
+      },
+      traceId: newId(),
+    })
+  }
+  if (clientMessageId && !voiceMessageId) {
     const existingClientMessage = await getOwnedMessage(normalizedUserId, clientMessageId)
     if (existingClientMessage) {
       const existingConversation = await getConversation(existingClientMessage.conversationId)
@@ -828,9 +915,19 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
     mode
   })
 
-  let conversation = conversationId
-    ? await getConversation(String(conversationId))
-    : undefined
+  let conversation = existingVoiceMessage
+    ? await getConversation(existingVoiceMessage.conversationId)
+    : conversationId
+      ? await getConversation(String(conversationId))
+      : undefined
+
+  if (
+    existingVoiceMessage
+    && conversationId
+    && existingVoiceMessage.conversationId !== String(conversationId)
+  ) {
+    return res.status(400).json({ error: 'voice message conversation mismatch' })
+  }
 
   if (conversation && conversation.userId !== normalizedUserId) {
     return res.status(403).json({ error: 'conversation does not belong to this user' })
@@ -918,21 +1015,21 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
     }
   }
 
-  const userContentJson = voiceMetadata || quote
+  const userContentJson = existingVoiceMessage?.contentJson || (voiceMetadata || quote
     ? {
         ...(voiceMetadata ? { voice: voiceMetadata } : {}),
         ...(quote ? { quote } : {})
       }
-    : undefined
+    : undefined)
 
   const userMessage: Message = {
-    id: clientMessageId || newId(),
+    id: existingVoiceMessage?.id || clientMessageId || newId(),
     conversationId: conversation.id,
     senderRole: 'user',
     senderId: normalizedUserId,
     content: normalizedMessage,
     contentJson: userContentJson,
-    createdAt: new Date().toISOString()
+    createdAt: existingVoiceMessage?.createdAt || new Date().toISOString()
   }
 
   const preparation = await prepareInteraction({
@@ -942,6 +1039,7 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
     messageId: userMessage.id,
     message: normalizedMessage,
     contentJson: userContentJson,
+    messageAlreadyPersisted: Boolean(existingVoiceMessage),
     mode,
     now: new Date(userMessage.createdAt)
   })

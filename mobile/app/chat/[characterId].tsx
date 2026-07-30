@@ -632,7 +632,7 @@ function MessageBubbleContent({
         )
       )}
     >
-      {readyVoice && !selecting && message.voice && (
+      {readyVoice && message.voice && (
         <VoiceMessageBubble voice={message.voice} isUser={isUser} onLongPress={onVoiceLongPress} />
       )}
       {!isLoading && !selecting && !readyVoice && (
@@ -756,6 +756,7 @@ function MessageRow({
   const isUser = message.sender === 'user'
   const isContinuation = !isUser && (message.groupIndex || 0) > 0
   const hasFollowingSegment = (message.groupIndex || 0) < (message.groupSize || 1) - 1
+  const readyVoice = message.voice?.status === 'ready' && Boolean(message.voice.audioUrl)
   const entryProgress = useRef(new RNAnimated.Value(message.animateEntry ? 0 : 1)).current
   const bubbleRef = useRef<View>(null)
 
@@ -811,7 +812,34 @@ function MessageRow({
               onRetry={() => onRetryMessage(message)}
             />
           )}
-          <View
+          {readyVoice ? (
+            <View
+              ref={bubbleRef}
+              collapsable={false}
+              style={[
+                styles.bubble,
+                styles.voiceBubble,
+                isUser ? styles.userBubble : styles.assistantBubble,
+                selecting && styles.bubbleSelecting,
+              ]}
+            >
+              <MessageBubbleContent
+                message={message}
+                isUser={isUser}
+                onVoiceLongPress={handleLongPress}
+                selecting={selecting}
+                selection={selection}
+                selectionAdjusting={selectionAdjusting}
+                selectionControlled={selectionControlled}
+                preserveKeyboard={preserveKeyboard}
+                onSelectionBlur={onSelectionBlur}
+                onSelectionChange={onSelectionChange}
+                onSelectionOutsideTap={onSelectionOutsideTap}
+                onSelectionTouchEnd={onSelectionTouchEnd}
+              />
+            </View>
+          ) : (
+            <View
             ref={bubbleRef}
             collapsable={false}
             style={[styles.bubbleAnchor, selecting && styles.bubbleAnchorSelecting]}
@@ -842,7 +870,8 @@ function MessageRow({
                 onSelectionTouchEnd={onSelectionTouchEnd}
               />
             </AnimatedPressable>
-          </View>
+            </View>
+          )}
         </View>
         {isUser && <Avatar name="Me" avatar="Me" size={34} muted />}
       </View>
@@ -1065,7 +1094,10 @@ export default function ChatScreen() {
         ...(result.starterMessage ? [result.starterMessage] : []),
         result.message,
       ])
-      setMessages(current => mergeMessagePage(current, incoming, 'append'))
+      const assistant = result.response
+        ? responseMessages({ ...result.response, conversationId: result.conversationId })
+        : []
+      setMessages(current => mergeMessagePage(current, [...incoming, ...assistant], 'append'))
       requestAnimationFrame(() => startLatestScroll(true))
     },
   })
@@ -2489,6 +2521,7 @@ export default function ChatScreen() {
         (message.renderKey || message.id) === messageActionSession.messageKey
       ))
     : undefined
+  const messageActionIsVoice = Boolean(messageActionMessage?.voice)
   const messageActionLayout = messageActionSession && messageActionMessage
     ? getMessageActionLayout({
         anchor: messageActionSession.anchor,
@@ -2985,7 +3018,8 @@ export default function ChatScreen() {
                   : styles.messageActionArrowBottom,
               ]}
             />
-            <Pressable
+            {!messageActionIsVoice && <>
+              <Pressable
               disabled={messageActionSession.selection.start === messageActionSession.selection.end}
               onPressIn={() => {
                 messageActionPressRef.current = true
@@ -3003,8 +3037,9 @@ export default function ChatScreen() {
             >
               <Ionicons name="copy-outline" size={18} color="#FFFFFF" />
               <Text style={styles.messageActionLabel}>Copy</Text>
-            </Pressable>
-            <View style={styles.messageActionDivider} />
+              </Pressable>
+              <View style={styles.messageActionDivider} />
+            </>}
             <Pressable
               onPressIn={() => {
                 messageActionPressRef.current = true
@@ -3256,6 +3291,11 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     justifyContent: 'center',
     overflow: 'hidden',
+  },
+  voiceBubble: {
+    minHeight: 46,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
   },
   bubbleSelecting: {
     overflow: 'visible',

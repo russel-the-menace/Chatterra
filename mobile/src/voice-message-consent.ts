@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { Alert } from 'react-native'
 
-const CONSENT_KEY = '@chatterra/voice-message-consent:v1'
+const CONSENT_KEY = '@chatterra/voice-message-consent:v2'
 
 export const requestVoiceMessageConsent = async () => {
   try {
@@ -13,7 +13,7 @@ export const requestVoiceMessageConsent = async () => {
   return new Promise<boolean>(resolve => {
     Alert.alert(
       'Voice messages',
-      'Voice messages are uploaded to Chatterra so they can appear in this conversation. Converting one to text sends that recording to Groq.',
+      'Voice messages are uploaded to Chatterra so they can appear in this conversation. They are transcribed by Groq so your contact can reply; Convert to Text displays that same transcript.',
       [
         { text: 'Not now', style: 'cancel', onPress: () => resolve(false) },
         {
