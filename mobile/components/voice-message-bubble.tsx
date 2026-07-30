@@ -22,7 +22,7 @@ function WeChatVoiceWave({
     <Svg width={VOICE_WAVE_WIDTH} height={VOICE_WAVE_HEIGHT} viewBox="0 0 31.83318 24">
       <G>
         <Path
-          d="M4.534783 12 L8.102888 10.187079 A2.776476448 2.776476448 0 0 1 8.102888 13.812921 Z"
+          d="M6 12 L8.102888 10.187079 A2.776476448 2.776476448 0 0 1 8.102888 13.812921 Z"
           fill={color}
         />
         {level >= 2 && (
