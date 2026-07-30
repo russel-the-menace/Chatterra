@@ -1,5 +1,11 @@
 import { PoolClient } from 'pg'
 import { v4 as uuidv4 } from 'uuid'
+import {
+  AUTH_SESSION_DURATION_MS,
+  createAccessToken,
+  hashAccessToken,
+  verifyPasswordHash,
+} from './authentication'
 import { query, withTransaction } from './database'
 import {
   Character,
@@ -113,18 +119,87 @@ const mapMemory = (row: any): Memory => ({
 })
 
 const ensureUser = async (client: PoolClient, userId: string) => {
-  await client.query(
-    `INSERT INTO users (id, display_name, consent_flags)
-     VALUES ($1, $2, '{"memoryPersonalization": true}'::jsonb)
-     ON CONFLICT (id) DO NOTHING`,
-    [userId, 'Local User']
-  )
+  const user = await client.query('SELECT 1 FROM users WHERE id = $1', [userId])
+  if (user.rowCount === 0) throw new Error('authenticated user not found')
   await client.query(
     `INSERT INTO user_learning_profiles (user_id)
      VALUES ($1)
      ON CONFLICT (user_id) DO NOTHING`,
     [userId]
   )
+}
+
+export type AuthenticatedUser = {
+  id: string
+  username: string
+  displayName: string
+}
+
+export type LoginResult = {
+  accessToken: string
+  expiresAt: string
+  user: AuthenticatedUser
+}
+
+export const authenticateUser = async (username: string, password: string): Promise<LoginResult | undefined> => {
+  const normalizedUsername = username.trim().toLowerCase()
+  const result = await query(
+    `SELECT id, username, display_name, password_hash
+     FROM users
+     WHERE LOWER(username) = $1
+     LIMIT 1`,
+    [normalizedUsername]
+  )
+  const row = result.rows[0]
+  if (!row?.password_hash || !verifyPasswordHash(password, String(row.password_hash))) {
+    return undefined
+  }
+
+  const accessToken = createAccessToken()
+  const expiresAt = new Date(Date.now() + AUTH_SESSION_DURATION_MS)
+  await withTransaction(async client => {
+    await client.query('DELETE FROM auth_sessions WHERE expires_at <= NOW()')
+    await client.query(
+      `INSERT INTO auth_sessions (id, user_id, token_hash, expires_at)
+       VALUES ($1, $2, $3, $4)`,
+      [newId(), row.id, hashAccessToken(accessToken), expiresAt]
+    )
+  })
+
+  return {
+    accessToken,
+    expiresAt: expiresAt.toISOString(),
+    user: {
+      id: String(row.id),
+      username: String(row.username),
+      displayName: String(row.display_name),
+    }
+  }
+}
+
+export const getAuthenticatedUser = async (accessToken: string): Promise<AuthenticatedUser | undefined> => {
+  if (!accessToken) return undefined
+  const result = await query(
+    `SELECT users.id, users.username, users.display_name
+     FROM auth_sessions
+     JOIN users ON users.id = auth_sessions.user_id
+     WHERE auth_sessions.token_hash = $1
+       AND auth_sessions.expires_at > NOW()
+     LIMIT 1`,
+    [hashAccessToken(accessToken)]
+  )
+  const row = result.rows[0]
+  if (!row?.id || !row.username || !row.display_name) return undefined
+  return {
+    id: String(row.id),
+    username: String(row.username),
+    displayName: String(row.display_name),
+  }
+}
+
+export const deleteAuthenticatedSession = async (accessToken: string) => {
+  if (!accessToken) return
+  await query('DELETE FROM auth_sessions WHERE token_hash = $1', [hashAccessToken(accessToken)])
 }
 
 const characterDefinition = (character: Character) => JSON.stringify({

@@ -56,6 +56,22 @@ export type VoiceCapability = {
   }
 }
 
+export type LoginSession = {
+  accessToken: string
+  expiresAt: string
+  user: {
+    id: string
+    username: string
+    displayName: string
+  }
+}
+
+let accessToken: string | undefined
+
+export const setApiAccessToken = (nextAccessToken?: string) => {
+  accessToken = nextAccessToken?.trim() || undefined
+}
+
 const request = async <T>(path: string, init?: RequestInit, timeoutMs = 20_000): Promise<T> => {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
@@ -65,6 +81,7 @@ const request = async <T>(path: string, init?: RequestInit, timeoutMs = 20_000):
       ...init,
       headers: {
         Accept: 'application/json',
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
         ...init?.headers,
       },
@@ -100,6 +117,7 @@ const uploadVoiceFile = async <T>(input: {
     uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
     headers: {
       Accept: 'application/json',
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       ...input.headers,
     },
   })
@@ -115,6 +133,17 @@ const uploadVoiceFile = async <T>(input: {
 }
 
 export const api = {
+  async login(username: string, password: string) {
+    return request<LoginSession>('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    })
+  },
+
+  async logout() {
+    await request<void>('/api/auth/logout', { method: 'POST' })
+  },
+
   async health() {
     return request<{ status: string; database: string }>('/api/health')
   },

@@ -16,6 +16,7 @@
     "test:groq-transcription": "ts-node --transpile-only groq-transcription.test.ts",
     "test:voice-transcription-context": "ts-node --transpile-only voice-transcription-context.test.ts",
     "test:voice-capability": "ts-node --transpile-only voice-capability.test.ts",
+    "test:authentication": "ts-node --transpile-only authentication.test.ts",
     "test:user-voice-message": "ts-node --transpile-only user-voice-message.test.ts",
     "test:translation": "ts-node --transpile-only translation-service.test.ts",
     "test:assistant-voice": "ts-node --transpile-only assistant-voice.test.ts",

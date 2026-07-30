@@ -56,7 +56,7 @@ export const userVoiceMessageMetadata = (input: {
   return {
     provider: 'user-recording',
     status: 'ready',
-    audioUrl: `/api/voice/messages/${encodeURIComponent(input.messageId)}/audio?userId=${encodeURIComponent(input.userId)}`,
+    audioUrl: `/media/voice/${encodeURIComponent(filename)}`,
     durationSeconds,
     filename,
     mimeType: mimeType as UserVoiceMessageMetadata['mimeType'],

@@ -253,12 +253,8 @@ const ensureInstance = async (
   character: Character,
   mode?: InteractionMode
 ) => {
-  await client.query(
-    `INSERT INTO users (id, display_name)
-     VALUES ($1, $2)
-     ON CONFLICT (id) DO NOTHING`,
-    [userId, 'Local User']
-  )
+  const user = await client.query('SELECT 1 FROM users WHERE id = $1', [userId])
+  if (user.rowCount === 0) throw new Error('authenticated user not found')
 
   const version = await ensureCharacterVersion(client, character)
   const result = await client.query(

@@ -20,13 +20,14 @@ import { useChat } from '@/src/chat-context'
 import { layout, palette } from '@/src/theme'
 
 export default function ProfileEditorScreen() {
-  const { ready, userAvatar, userName, saveUserProfile } = useChat()
+  const { ready, userAvatar, userName, saveUserProfile, logout } = useChat()
   const [displayName, setDisplayName] = useState(userName || '')
   const [avatar, setAvatar] = useState(userAvatar || '')
   const [nameEdited, setNameEdited] = useState(false)
   const [avatarEdited, setAvatarEdited] = useState(false)
   const [saving, setSaving] = useState(false)
   const [processingAvatar, setProcessingAvatar] = useState(false)
+  const [signingOut, setSigningOut] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -69,6 +70,12 @@ export default function ProfileEditorScreen() {
     } finally {
       setSaving(false)
     }
+  }
+
+  const signOut = async () => {
+    setSigningOut(true)
+    await logout()
+    router.replace('/login')
   }
 
   if (!ready) {
@@ -148,6 +155,17 @@ export default function ProfileEditorScreen() {
               style={styles.input}
             />
           </View>
+
+          <Pressable
+            onPress={() => void signOut()}
+            disabled={saving || processingAvatar || signingOut}
+            accessibilityRole="button"
+            style={({ pressed }) => [styles.signOutButton, pressed && styles.signOutButtonPressed]}
+          >
+            {signingOut
+              ? <ActivityIndicator size="small" color={palette.danger} />
+              : <Text style={styles.signOutLabel}>Sign out</Text>}
+          </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -264,6 +282,24 @@ const styles = StyleSheet.create({
     color: '#B42318',
     fontSize: 13,
     lineHeight: 18,
+  },
+  signOutButton: {
+    minHeight: 44,
+    marginTop: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#FDA29B',
+    borderRadius: 8,
+    backgroundColor: '#FEF3F2',
+  },
+  signOutButtonPressed: {
+    backgroundColor: '#FEE4E2',
+  },
+  signOutLabel: {
+    color: palette.danger,
+    fontSize: 15,
+    fontWeight: '700',
   },
   centerState: {
     flex: 1,

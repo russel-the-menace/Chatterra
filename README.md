@@ -36,19 +36,9 @@ The mobile client derives the backend LAN host automatically and supports an
 `EXPO_PUBLIC_API_URL` override. See [`mobile/README.md`](mobile/README.md) for
 the complete physical-device setup and Expo Go constraints.
 
-Both clients can use the production API at `https://api.feiwan.online`. Copy the
-example environment files and set the same non-secret user ID in
-`frontend/.env.local` and `mobile/.env` to synchronize conversations, messages,
-characters, and pinned contacts:
-
-```bash
-VITE_USER_ID=YOUR_SHARED_USER_ID
-EXPO_PUBLIC_USER_ID=YOUR_SHARED_USER_ID
-```
-
-This shared-ID bridge is intended for the current single-user deployment. It is
-not authentication; a multi-user release needs account login and server-issued
-sessions before exposing another user's data.
+Both clients can use the production API at `https://api.feiwan.online`. The API
+uses server-issued internal account sessions, persisted locally by each client;
+there is deliberately no public registration flow.
 
 ## Mobile Push Notifications
 

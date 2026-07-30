@@ -14,33 +14,21 @@ const readJson = <T>(name: string, fallback: T): T => {
   return JSON.parse(fs.readFileSync(filePath, 'utf8')) as T
 }
 
-const users = readJson<User[]>('users.json', [])
 const characters = readJson<Character[]>('characters.json', [])
 const conversations = readJson<Conversation[]>('conversations.json', [])
 const messages = readJson<Message[]>('messages.json', [])
 const memories = readJson<Memory[]>('memories.json', [])
 const summaries = readJson<ConversationSummary[]>('conversation-summaries.json', [])
+const INTERNAL_ACCOUNT_ID = 'account-yeatom'
 
 const run = async () => {
   const now = new Date().toISOString()
-  const usersById = new Map(users.map(user => [user.id, user]))
-  const referencedUserIds = new Set<string>([
-    ...conversations.map(conversation => conversation.userId),
-    ...memories.map(memory => memory.userId),
-    ...messages
-      .filter(message => message.senderRole === 'user' && message.senderId)
-      .map(message => message.senderId!)
-  ])
-
-  referencedUserIds.forEach(userId => {
-    if (usersById.has(userId)) return
-    usersById.set(userId, {
-      id: userId,
-      displayName: 'Imported User',
-      createdAt: now,
-      updatedAt: now
-    })
-  })
+  const usersById = new Map<string, User>([[INTERNAL_ACCOUNT_ID, {
+    id: INTERNAL_ACCOUNT_ID,
+    displayName: 'yeatom',
+    createdAt: now,
+    updatedAt: now
+  }]])
 
   const charactersById = new Map(characters.map(character => [character.id, character]))
   const referencedCharacterIds = new Set<string>([
@@ -142,7 +130,7 @@ const run = async () => {
          ON CONFLICT (id) DO NOTHING`,
         [
           conversation.id,
-          conversation.userId,
+          INTERNAL_ACCOUNT_ID,
           conversation.characterId,
           conversation.title ?? null,
           conversation.status || 'active',
@@ -164,7 +152,7 @@ const run = async () => {
           message.id,
           message.conversationId,
           message.senderRole,
-          message.senderId ?? null,
+          message.senderRole === 'user' ? INTERNAL_ACCOUNT_ID : message.senderId ?? null,
           message.content,
           message.contentJson ? JSON.stringify(message.contentJson) : null,
           message.tokenCount ?? null,
@@ -182,7 +170,7 @@ const run = async () => {
          ON CONFLICT (id) DO NOTHING`,
         [
           memory.id,
-          memory.userId,
+          INTERNAL_ACCOUNT_ID,
           memory.characterId && charactersById.has(memory.characterId) ? memory.characterId : null,
           memory.originMessageId && messageIds.has(memory.originMessageId) ? memory.originMessageId : null,
           memory.type,

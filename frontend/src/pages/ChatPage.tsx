@@ -5,7 +5,7 @@ import { AssistantVoiceMessage, ChatMessage } from '../components/MessageBubble'
 import seedCharacter, {characters as seedCharacters, Character} from '../data/character'
 import { VoiceTranscriptMetadata } from '../voice/types'
 import { starterMessageForCharacter } from '../languagePolicy'
-import { CONFIGURED_USER_ID, apiUrl, getSyncSnapshot } from '../api'
+import { apiFetch, apiUrl, getStoredSession, getSyncSnapshot } from '../api'
 
 type CharacterTextKey = 'name' | 'role' | 'company' | 'scenario' | 'goal' | 'language' | 'personality' | 'background' | 'systemPromptTemplate'
 type Point = { x: number; y: number }
@@ -253,7 +253,7 @@ export default function ChatPage(): JSX.Element{
     }
 
     try {
-      const cRes = await fetch(apiUrl(`/api/conversations?userId=${uid}`))
+      const cRes = await apiFetch(apiUrl('/api/conversations'))
       if (!cRes.ok) throw new Error('no convs')
 
       const cData = await cRes.json()
@@ -264,7 +264,7 @@ export default function ChatPage(): JSX.Element{
       if (requestId !== historyRequestRef.current || selectedCharacterIdRef.current !== nextCharacter.id) return
 
       if (matchingConversation) {
-        const mRes = await fetch(apiUrl(`/api/conversations/${matchingConversation.id}/messages`))
+        const mRes = await apiFetch(apiUrl(`/api/conversations/${matchingConversation.id}/messages`))
         const mData = await mRes.json()
         if (requestId !== historyRequestRef.current || selectedCharacterIdRef.current !== nextCharacter.id) return
         const mapped = mergeMessageUiState(cached?.messages || [], mapServerMessages(mData.messages || []))
@@ -448,15 +448,12 @@ export default function ChatPage(): JSX.Element{
   }, [showCharacterEditor, isSavingCharacter, avatarCropSource])
 
   useEffect(() => {
-    let uid = CONFIGURED_USER_ID || localStorage.getItem('chatterra_userId')
-    if (!uid) {
-      uid = String(Date.now())
-    }
-    localStorage.setItem('chatterra_userId', uid)
+    const uid = getStoredSession()?.user.id
+    if (!uid) return
     setUserIdentifier(uid)
     const loadContactPreferences = async () => {
       try {
-        const response = await fetch(apiUrl(`/api/users/${encodeURIComponent(uid)}/contact-preferences`))
+        const response = await apiFetch(apiUrl(`/api/users/${encodeURIComponent(uid)}/contact-preferences`))
         if (!response.ok) return
         const data = await response.json()
         if (Array.isArray(data.pinnedCharacterIds)) {
@@ -470,7 +467,7 @@ export default function ChatPage(): JSX.Element{
     }
     const loadCharacters = async () => {
       try {
-        const res = await fetch(apiUrl(`/api/characters?userId=${encodeURIComponent(uid)}`))
+        const res = await apiFetch(apiUrl('/api/characters'))
         if (res.ok) {
           const data = await res.json()
           if (Array.isArray(data.characters) && data.characters.length > 0) {
@@ -666,7 +663,7 @@ export default function ChatPage(): JSX.Element{
       if (polling || document.visibilityState === 'hidden') return
       polling = true
       try {
-        const response = await fetch(apiUrl('/api/proactive/poll'), {
+        const response = await apiFetch(apiUrl('/api/proactive/poll'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ userId })
@@ -729,7 +726,7 @@ export default function ChatPage(): JSX.Element{
       if (syncing || document.visibilityState === 'hidden') return
       syncing = true
       try {
-        const response = await fetch(apiUrl(`/api/conversations/${conversationId}/messages`))
+        const response = await apiFetch(apiUrl(`/api/conversations/${conversationId}/messages`))
         if (!response.ok) return
         const data = await response.json()
         if (stopped || !Array.isArray(data.messages)) return
@@ -790,7 +787,7 @@ export default function ChatPage(): JSX.Element{
       next.delete(nextCharacter.id)
       return next
     })
-    const uid = userId || localStorage.getItem('chatterra_userId')
+    const uid = userId
     if (uid) void loadHistoryForCharacter(uid, nextCharacter)
   }
 
@@ -845,7 +842,7 @@ export default function ChatPage(): JSX.Element{
   }
 
   const togglePinnedCharacter = async () => {
-    const uid = userId || localStorage.getItem('chatterra_userId')
+    const uid = userId
     if (!uid) return
     const characterId = selectedCharacter.id
     const nextPinned = !pinnedCharacterIds.has(characterId)
@@ -864,7 +861,7 @@ export default function ChatPage(): JSX.Element{
     ))
 
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         apiUrl(`/api/users/${encodeURIComponent(uid)}/characters/${encodeURIComponent(characterId)}/pin`),
         {
           method: 'PUT',
@@ -906,19 +903,19 @@ export default function ChatPage(): JSX.Element{
     void (async () => {
       try {
         const response = message.sourceMessageId
-          ? await fetch(
+          ? await apiFetch(
               apiUrl(`/api/messages/${encodeURIComponent(message.sourceMessageId)}/translations`),
               {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                  userId: userId || localStorage.getItem('chatterra_userId'),
+                  userId,
                   targetLanguage: 'en',
                   segmentIndex: message.segmentIndex || 0
                 })
               }
             )
-          : await fetch(
+          : await apiFetch(
               apiUrl('/api/translations'),
               {
                 method: 'POST',
@@ -985,7 +982,7 @@ export default function ChatPage(): JSX.Element{
     const endpoint = isNewCharacter
       ? apiUrl('/api/characters')
       : apiUrl(`/api/characters/${editingCharacter.id}`)
-    const ownerUserId = userId || localStorage.getItem('chatterra_userId')
+    const ownerUserId = userId
     if (!ownerUserId) {
       setCharacterEditorError('User is not ready.')
       return
@@ -995,7 +992,7 @@ export default function ChatPage(): JSX.Element{
     setCharacterEditorError('')
 
     try {
-      const res = await fetch(endpoint, {
+      const res = await apiFetch(endpoint, {
         method: isNewCharacter ? 'POST' : 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...editingCharacter, userId: ownerUserId })
@@ -1012,7 +1009,7 @@ export default function ChatPage(): JSX.Element{
         selectedCharacterIdRef.current = savedCharacter.id
         setSelectedCharacter(savedCharacter)
         localStorage.setItem('chatterra_characterId', savedCharacter.id)
-        const uid = userId || localStorage.getItem('chatterra_userId')
+        const uid = userId
         if (uid) void loadHistoryForCharacter(uid, savedCharacter)
       } else {
         setSelectedCharacter(prev => prev.id === savedCharacter.id ? savedCharacter : prev)
@@ -1031,11 +1028,11 @@ export default function ChatPage(): JSX.Element{
   }
 
   const clearCurrentCharacterHistory = async () => {
-    const uid = userId || localStorage.getItem('chatterra_userId')
+    const uid = userId
     if (!uid) return
     const targetCharacter = selectedCharacter
 
-    await fetch(apiUrl('/api/chat-history'), {
+    await apiFetch(apiUrl('/api/chat-history'), {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId: uid, characterId: targetCharacter.id })
@@ -1090,13 +1087,13 @@ export default function ChatPage(): JSX.Element{
 
     void (async () => {
       try {
-        const res = await fetch(apiUrl('/api/chat'), {
+        const res = await apiFetch(apiUrl('/api/chat'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             message: text,
             character: targetCharacter,
-            userId: userId || localStorage.getItem('chatterra_userId'),
+            userId,
             conversationId: targetConversationId,
             voice: voice
               ? {

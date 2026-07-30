@@ -13,14 +13,17 @@ import {
   useState,
 } from 'react'
 
-import { API_BASE_URL, api } from './api'
+import { API_BASE_URL, api, setApiAccessToken } from './api'
 import {
-  getOrCreateUserId,
+  clearStoredAuthSession,
+  getStoredAuthSession,
   getStoredComposerQuoteDrafts,
   getStoredConversationCache,
   removeStoredConversationCache,
+  saveStoredAuthSession,
   saveStoredComposerQuoteDrafts,
   saveStoredConversationCache,
+  StoredAuthSession,
 } from './storage'
 import {
   Character,
@@ -43,6 +46,7 @@ type ChatContextValue = {
   apiBaseUrl: string
   ready: boolean
   userId: string | null
+  username?: string
   userName?: string
   userAvatar?: string
   characters: Character[]
@@ -67,6 +71,8 @@ type ChatContextValue = {
       (current: ComposerQuoteDraft | null) => ComposerQuoteDraft | null
     )
   ) => void
+  login: (username: string, password: string) => Promise<void>
+  logout: () => Promise<void>
   refreshCharacters: (requestedUserId?: string) => Promise<void>
   saveCharacter: (character: Character | Omit<Character, 'id'>) => Promise<Character>
   saveBuiltInCharacterAvatar: (characterId: string, avatar: string) => Promise<Character>
@@ -91,11 +97,14 @@ const messageForError = (error: unknown) => (
   error instanceof Error ? error.message : 'Could not load Chatterra.'
 )
 
-const persistQuoteDrafts = async (drafts: Record<string, ComposerQuoteDraft>) => {
+const persistQuoteDrafts = async (
+  userId: string,
+  drafts: Record<string, ComposerQuoteDraft>
+) => {
   let lastError: unknown
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      await saveStoredComposerQuoteDrafts(drafts)
+      await saveStoredComposerQuoteDrafts(userId, drafts)
       return
     } catch (error) {
       lastError = error
@@ -133,6 +142,7 @@ const persistentConversationEntry = (entry: ConversationCacheEntry): Conversatio
 export function ChatProvider({ children }: PropsWithChildren) {
   const [ready, setReady] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
+  const [username, setUsername] = useState<string | undefined>()
   const [userName, setUserName] = useState<string | undefined>()
   const [userAvatar, setUserAvatar] = useState<string | undefined>()
   const [characters, setCharacters] = useState<Character[]>([])
@@ -161,6 +171,31 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const quoteDraftsRef = useRef<Record<string, ComposerQuoteDraft>>({})
   const quoteDraftWriteRef = useRef<Promise<void>>(Promise.resolve())
   const quoteDraftDirtyRef = useRef<Record<string, ComposerQuoteDraft> | null>(null)
+  const sessionRef = useRef<StoredAuthSession | null>(null)
+
+  const resetWorkspaceState = useCallback(() => {
+    conversationCacheTimerRef.current.forEach(timer => clearTimeout(timer))
+    conversationCacheRef.current.clear()
+    conversationViewCacheRef.current.clear()
+    conversationCacheDirtyRef.current.clear()
+    conversationCacheTimerRef.current.clear()
+    conversationCacheWriteRef.current.clear()
+    conversationMetadataRef.current.clear()
+    quoteDraftsRef.current = {}
+    quoteDraftDirtyRef.current = null
+    activeCharacterRef.current = null
+    hasWorkspaceSnapshotRef.current = false
+    setCharacters([])
+    setDrafts({})
+    setQuoteDrafts({})
+    setProactivePreviews({})
+    setUnreadCharacterIds(new Set())
+    setConversationVersions({})
+    setConversationIdsByCharacter({})
+    setPinnedCharacterIds(new Set())
+    setPinnedCharacterOrder([])
+    setLastMessageAtByCharacter({})
+  }, [])
 
   const refreshVoiceInputCapability = useCallback(async () => {
     try {
@@ -176,19 +211,23 @@ export function ChatProvider({ children }: PropsWithChildren) {
   }, [])
 
   useEffect(() => {
+    if (!userId) {
+      setVoiceInputMode('local')
+      return
+    }
     void refreshVoiceInputCapability()
-  }, [refreshVoiceInputCapability])
+  }, [refreshVoiceInputCapability, userId])
 
   const flushQuoteDraftPersistence = useCallback(async () => {
     const pending = quoteDraftDirtyRef.current
-    if (!pending) return
+    if (!pending || !userId) return
     try {
-      await persistQuoteDrafts(pending)
+      await persistQuoteDrafts(userId, pending)
       if (quoteDraftDirtyRef.current === pending) quoteDraftDirtyRef.current = null
     } catch (error) {
       console.warn('Could not persist Quote draft; it will be retried.', error)
     }
-  }, [])
+  }, [userId])
 
   const scheduleQuoteDraftPersistence = useCallback((
     drafts?: Record<string, ComposerQuoteDraft>
@@ -226,24 +265,36 @@ export function ChatProvider({ children }: PropsWithChildren) {
     let cancelled = false
     void (async () => {
       try {
-        const [storedUserId, storedQuoteDrafts] = await Promise.all([
-          getOrCreateUserId(),
-          getStoredComposerQuoteDrafts().catch(() => ({})),
+        const storedSession = await getStoredAuthSession()
+        if (!storedSession) return
+        if (cancelled) return
+        setApiAccessToken(storedSession.accessToken)
+        sessionRef.current = storedSession
+        setUserId(storedSession.user.id)
+        setUsername(storedSession.user.username)
+        setUserName(storedSession.user.displayName)
+        const [storedQuoteDrafts, pinnedIds, nextCharacters] = await Promise.all([
+          getStoredComposerQuoteDrafts(storedSession.user.id).catch(() => ({})),
+          api.listPinnedCharacterIds(storedSession.user.id),
+          api.listCharacters(storedSession.user.id),
         ])
         if (cancelled) return
-        setUserId(storedUserId)
         quoteDraftsRef.current = storedQuoteDrafts
         setQuoteDrafts(storedQuoteDrafts)
-        const [pinnedIds] = await Promise.all([
-          api.listPinnedCharacterIds(storedUserId),
-          refreshCharacters(storedUserId),
-        ])
-        if (!cancelled) {
-          setPinnedCharacterIds(new Set(pinnedIds))
-          setPinnedCharacterOrder(pinnedIds)
+        setCharacters(nextCharacters)
+        setPinnedCharacterIds(new Set(pinnedIds))
+        setPinnedCharacterOrder(pinnedIds)
+      } catch (error) {
+        if (error instanceof Error && 'status' in error && error.status === 401) {
+          setApiAccessToken()
+          sessionRef.current = null
+          await clearStoredAuthSession()
+          setUserId(null)
+          setUsername(undefined)
+          setUserName(undefined)
+        } else {
+          setConnectionError(messageForError(error))
         }
-      } catch {
-        // The contacts screen exposes the connection error and retry action.
       } finally {
         if (!cancelled) setReady(true)
       }
@@ -252,7 +303,58 @@ export function ChatProvider({ children }: PropsWithChildren) {
     return () => {
       cancelled = true
     }
-  }, [refreshCharacters])
+  }, [])
+
+  const login = useCallback(async (nextUsername: string, password: string) => {
+    const session = await api.login(nextUsername, password)
+    const storedSession: StoredAuthSession = {
+      accessToken: session.accessToken,
+      expiresAt: session.expiresAt,
+      user: session.user,
+    }
+    setApiAccessToken(storedSession.accessToken)
+    sessionRef.current = storedSession
+    resetWorkspaceState()
+    setUserId(storedSession.user.id)
+    setUsername(storedSession.user.username)
+    setUserName(storedSession.user.displayName)
+    setUserAvatar(undefined)
+    setConnectionError(null)
+    await saveStoredAuthSession(storedSession)
+
+    try {
+      const [storedQuoteDrafts, pinnedIds, nextCharacters] = await Promise.all([
+        getStoredComposerQuoteDrafts(storedSession.user.id).catch(() => ({})),
+        api.listPinnedCharacterIds(storedSession.user.id),
+        api.listCharacters(storedSession.user.id),
+      ])
+      quoteDraftsRef.current = storedQuoteDrafts
+      setQuoteDrafts(storedQuoteDrafts)
+      setPinnedCharacterIds(new Set(pinnedIds))
+      setPinnedCharacterOrder(pinnedIds)
+      setCharacters(nextCharacters)
+    } catch (error) {
+      setConnectionError(messageForError(error))
+    }
+  }, [resetWorkspaceState])
+
+  const logout = useCallback(async () => {
+    try {
+      if (sessionRef.current?.accessToken) await api.logout()
+    } catch {
+      // The local session must still be cleared if a remote logout cannot complete.
+    } finally {
+      setApiAccessToken()
+      sessionRef.current = null
+      await clearStoredAuthSession()
+      resetWorkspaceState()
+      setUserId(null)
+      setUsername(undefined)
+      setUserName(undefined)
+      setUserAvatar(undefined)
+      setConnectionError(null)
+    }
+  }, [resetWorkspaceState])
 
   const syncWorkspace = useCallback(async () => {
     if (!userId || workspaceSyncingRef.current || appStateRef.current !== 'active') return
@@ -493,6 +595,17 @@ export function ChatProvider({ children }: PropsWithChildren) {
     const result = await api.updateUserProfile(userId, input)
     setUserName(result.userName || input.displayName)
     if (result.userAvatar || input.avatar) setUserAvatar(result.userAvatar || input.avatar)
+    if (sessionRef.current) {
+      const nextSession: StoredAuthSession = {
+        ...sessionRef.current,
+        user: {
+          ...sessionRef.current.user,
+          displayName: result.userName || input.displayName,
+        }
+      }
+      sessionRef.current = nextSession
+      await saveStoredAuthSession(nextSession)
+    }
   }, [userId])
 
   const markCharacterRead = useCallback((characterId: string) => {
@@ -670,6 +783,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     apiBaseUrl: API_BASE_URL,
     ready,
     userId,
+    username,
     userName,
     userAvatar,
     characters,
@@ -686,6 +800,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
     setDraft,
     getQuoteDraft,
     setQuoteDraft,
+    login,
+    logout,
     refreshCharacters,
     saveCharacter,
     saveBuiltInCharacterAvatar,
@@ -712,6 +828,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
     markCloudVoiceUnavailable,
     getDraft,
     getQuoteDraft,
+    login,
+    logout,
     getConversationCache,
     getConversationViewCache,
     hydrateConversationCache,
@@ -737,6 +855,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     userName,
     userAvatar,
     userId,
+    username,
   ])
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>

@@ -68,30 +68,19 @@ configuration; never put API keys or other secrets in an `EXPO_PUBLIC_` value.
 When the phone cannot access the Mac over LAN, expose the backend through a
 separate HTTPS tunnel and set that URL in `EXPO_PUBLIC_API_URL`.
 
-## Device Identity
+## Accounts
 
-There is no authentication layer yet. Without an `EXPO_PUBLIC_USER_ID`, the mobile
-app creates a persistent device-specific user ID, so its conversations and
-relationship state are separate from the browser client.
-
-To synchronize with the browser, set exactly the same ID in both clients:
-
-```bash
-# frontend/.env.local
-VITE_USER_ID=YOUR_SHARED_USER_ID
-
-# mobile/.env
-EXPO_PUBLIC_USER_ID=YOUR_SHARED_USER_ID
-```
+The mobile app signs in with an internal Chatterra account. Registration is not
+exposed in the app. A successful login stores an expiring local session, so the
+user is not prompted again on normal app launches. Conversations, memories,
+character settings, local message caches, and Quote drafts are isolated by the
+authenticated account.
 
 The clients poll a workspace snapshot while foregrounded. Character edits,
 contact pins, new conversations, user messages, assistant messages, and history
-clearing normally appear on the other active client within three seconds.
-PostgreSQL remains the source of truth, and concurrent first messages reuse one
-active conversation.
-
-This is a single-user development bridge, not a substitute for account
-authentication and secure device linking.
+clearing normally appear on another active device for the same account within
+three seconds. PostgreSQL remains the source of truth, and concurrent first
+messages reuse one active conversation.
 
 ## Included
 

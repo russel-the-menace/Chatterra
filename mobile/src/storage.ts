@@ -10,24 +10,62 @@ import {
   MessageQuote,
 } from './types'
 
-const USER_ID_KEY = 'chatterra.mobile.userId'
-const COMPOSER_QUOTE_DRAFTS_KEY = 'chatterra.mobile.composerQuoteDrafts'
+const LEGACY_USER_ID_KEY = 'chatterra.mobile.userId'
+const AUTH_SESSION_KEY = 'chatterra.mobile.authSession.v1'
+const COMPOSER_QUOTE_DRAFTS_PREFIX = 'chatterra.mobile.composerQuoteDrafts.v2'
 const CONVERSATION_CACHE_PREFIX = 'chatterra.mobile.conversationCache.v1'
 
-const createUserId = () => (
-  `mobile-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-)
+export type StoredAuthSession = {
+  accessToken: string
+  expiresAt: string
+  user: {
+    id: string
+    username: string
+    displayName: string
+  }
+}
 
-export const getOrCreateUserId = async () => {
-  const configuredUserId = process.env.EXPO_PUBLIC_USER_ID?.trim()
-  if (configuredUserId) return configuredUserId
+const parseStoredAuthSession = (value: unknown): StoredAuthSession | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const session = value as Record<string, unknown>
+  if (typeof session.accessToken !== 'string' || !session.accessToken) return undefined
+  if (typeof session.expiresAt !== 'string' || Number.isNaN(Date.parse(session.expiresAt))) return undefined
+  if (!session.user || typeof session.user !== 'object' || Array.isArray(session.user)) return undefined
+  const user = session.user as Record<string, unknown>
+  if (
+    typeof user.id !== 'string'
+    || typeof user.username !== 'string'
+    || typeof user.displayName !== 'string'
+  ) return undefined
+  if (Date.parse(session.expiresAt) <= Date.now()) return undefined
+  return {
+    accessToken: session.accessToken,
+    expiresAt: session.expiresAt,
+    user: {
+      id: user.id,
+      username: user.username,
+      displayName: user.displayName,
+    }
+  }
+}
 
-  const existing = await AsyncStorage.getItem(USER_ID_KEY)
-  if (existing) return existing
+export const getStoredAuthSession = async () => {
+  const stored = await AsyncStorage.getItem(AUTH_SESSION_KEY)
+  if (!stored) return undefined
+  try {
+    return parseStoredAuthSession(JSON.parse(stored) as unknown)
+  } catch {
+    return undefined
+  }
+}
 
-  const created = createUserId()
-  await AsyncStorage.setItem(USER_ID_KEY, created)
-  return created
+export const saveStoredAuthSession = async (session: StoredAuthSession) => {
+  await AsyncStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(session))
+  await AsyncStorage.removeItem(LEGACY_USER_ID_KEY)
+}
+
+export const clearStoredAuthSession = async () => {
+  await AsyncStorage.removeItem(AUTH_SESSION_KEY)
 }
 
 const parseComposerQuoteDraft = (value: unknown): ComposerQuoteDraft | undefined => {
@@ -238,8 +276,12 @@ export const removeStoredConversationCache = async (
   await AsyncStorage.removeItem(conversationCacheKey(apiBaseUrl, userId, characterId))
 }
 
-export const getStoredComposerQuoteDrafts = async () => {
-  const stored = await AsyncStorage.getItem(COMPOSER_QUOTE_DRAFTS_KEY)
+const composerQuoteDraftsKey = (userId: string) => (
+  `${COMPOSER_QUOTE_DRAFTS_PREFIX}.${encodeURIComponent(userId)}`
+)
+
+export const getStoredComposerQuoteDrafts = async (userId: string) => {
+  const stored = await AsyncStorage.getItem(composerQuoteDraftsKey(userId))
   if (!stored) return {} as Record<string, ComposerQuoteDraft>
 
   try {
@@ -257,11 +299,12 @@ export const getStoredComposerQuoteDrafts = async () => {
 }
 
 export const saveStoredComposerQuoteDrafts = async (
+  userId: string,
   drafts: Record<string, ComposerQuoteDraft>
 ) => {
   if (Object.keys(drafts).length === 0) {
-    await AsyncStorage.removeItem(COMPOSER_QUOTE_DRAFTS_KEY)
+    await AsyncStorage.removeItem(composerQuoteDraftsKey(userId))
     return
   }
-  await AsyncStorage.setItem(COMPOSER_QUOTE_DRAFTS_KEY, JSON.stringify(drafts))
+  await AsyncStorage.setItem(composerQuoteDraftsKey(userId), JSON.stringify(drafts))
 }

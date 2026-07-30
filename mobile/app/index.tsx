@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons'
-import { router } from 'expo-router'
+import { Redirect, router } from 'expo-router'
 import { useMemo, useState } from 'react'
 import {
   ActivityIndicator,
@@ -63,6 +63,7 @@ export default function ContactsScreen() {
   const {
     apiBaseUrl,
     ready,
+    userId,
     characters,
     connectionError,
     pinnedCharacterIds,
@@ -120,6 +121,8 @@ export default function ContactsScreen() {
     setSettingsVisible(false)
     router.push('/profile')
   }
+
+  if (ready && !userId) return <Redirect href="/login" />
 
   return (
     <>

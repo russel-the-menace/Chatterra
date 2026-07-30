@@ -49,9 +49,12 @@ import {
 import { parseCustomCharacterDocument } from './custom-character'
 import {
   appendMessage,
+  authenticateUser,
   clearUserVoiceMessageTranscript,
   clearChatHistory,
   createCharacter,
+  deleteAuthenticatedSession,
+  getAuthenticatedUser,
   getOrCreateConversationWithStarter,
   getCharacterForUser,
   getConversation,
@@ -105,10 +108,30 @@ app.use('/media/voice', express.static(voiceMediaDirectory, {
   maxAge: '30d',
 }))
 
+type AuthenticatedRequest = Request & {
+  authenticatedUser?: {
+    id: string
+    username: string
+    displayName: string
+  }
+}
+
 const asyncRoute = (
   handler: (req: Request, res: Response, next: NextFunction) => Promise<any>
 ) => (req: Request, res: Response, next: NextFunction) => {
   Promise.resolve(handler(req, res, next)).catch(next)
+}
+
+const accessTokenFromRequest = (req: Request) => {
+  const authorization = req.header('authorization') || ''
+  const match = authorization.match(/^Bearer\s+(.+)$/i)
+  return match?.[1]?.trim() || ''
+}
+
+const authenticatedUserId = (req: Request) => {
+  const user = (req as AuthenticatedRequest).authenticatedUser
+  if (!user) throw new Error('authenticated user is required')
+  return user.id
 }
 
 const canTranscribe = (key: string) => {
@@ -186,6 +209,20 @@ const getStarterMessage = (character?: Character) => {
   return starterMessageForPolicy(character?.name || 'Interviewer', languagePolicy)
 }
 
+app.post('/api/auth/login', asyncRoute(async (req, res) => {
+  const username = typeof req.body?.username === 'string'
+    ? req.body.username.trim().slice(0, 64)
+    : ''
+  const password = typeof req.body?.password === 'string'
+    ? req.body.password.slice(0, 200)
+    : ''
+  if (!username || !password) return res.status(401).json({ error: 'Invalid username or password.' })
+
+  const session = await authenticateUser(username, password)
+  if (!session) return res.status(401).json({ error: 'Invalid username or password.' })
+  return res.json(session)
+}))
+
 app.get('/api/health', asyncRoute(async (_req, res) => {
   await query('SELECT 1')
   return res.json({
@@ -198,17 +235,34 @@ app.get('/api/health', asyncRoute(async (_req, res) => {
   })
 }))
 
+app.use('/api', asyncRoute(async (req, res, next) => {
+  if (req.method === 'OPTIONS') return next()
+  const token = accessTokenFromRequest(req)
+  const user = await getAuthenticatedUser(token)
+  if (!user) return res.status(401).json({ error: 'Authentication is required.' })
+  ;(req as AuthenticatedRequest).authenticatedUser = user
+  next()
+}))
+
+app.use('/api/users/:id', (req, res, next) => {
+  if (req.params.id !== authenticatedUserId(req)) {
+    return res.status(403).json({ error: 'You can only access your own profile.' })
+  }
+  next()
+})
+
+app.post('/api/auth/logout', asyncRoute(async (req, res) => {
+  await deleteAuthenticatedSession(accessTokenFromRequest(req))
+  return res.status(204).end()
+}))
+
 app.get('/api/characters', asyncRoute(async (req, res) => {
-  const userId = typeof req.query.userId === 'string' ? req.query.userId.trim() : undefined
-  const characters = await listCharacters(userId)
+  const characters = await listCharacters(authenticatedUserId(req))
   return res.json({ characters })
 }))
 
 app.get('/api/sync', asyncRoute(async (req, res) => {
-  const userId = String(req.query.userId || '').trim()
-  if (!userId) return res.status(400).json({ error: 'userId required' })
-
-  const snapshot = await getSyncSnapshot(userId)
+  const snapshot = await getSyncSnapshot(authenticatedUserId(req))
   return res.json(snapshot)
 }))
 
@@ -267,10 +321,9 @@ app.put('/api/users/:id/characters/:characterId/avatar', asyncRoute(async (req, 
 }))
 
 app.post('/api/characters', asyncRoute(async (req, res) => {
-  const userId = typeof req.body?.userId === 'string' ? req.body.userId.trim() : ''
+  const userId = authenticatedUserId(req)
   const name = typeof req.body?.name === 'string' ? req.body.name.trim().slice(0, 120) : ''
   const document = typeof req.body?.systemPromptTemplate === 'string' ? req.body.systemPromptTemplate : ''
-  if (!userId) return res.status(400).json({ error: 'userId is required' })
   if (!name) return res.status(400).json({ error: 'name is required' })
 
   let parsed
@@ -297,10 +350,9 @@ app.post('/api/characters', asyncRoute(async (req, res) => {
 }))
 
 app.put('/api/characters/:id', asyncRoute(async (req, res) => {
-  const userId = typeof req.body?.userId === 'string' ? req.body.userId.trim() : ''
+  const userId = authenticatedUserId(req)
   const name = typeof req.body?.name === 'string' ? req.body.name.trim().slice(0, 120) : ''
   const document = typeof req.body?.systemPromptTemplate === 'string' ? req.body.systemPromptTemplate : ''
-  if (!userId) return res.status(400).json({ error: 'userId is required' })
   if (!name) return res.status(400).json({ error: 'name is required' })
   const existing = await getCharacterForUser(userId, req.params.id)
   if (!existing) return res.status(404).json({ error: 'character not found' })
@@ -327,14 +379,15 @@ app.put('/api/characters/:id', asyncRoute(async (req, res) => {
 }))
 
 app.get('/api/conversations', asyncRoute(async (req, res) => {
-  const userId = String(req.query.userId || '')
-  if (!userId) return res.status(400).json({ error: 'userId required' })
-
-  const conversations = await listConversations(userId)
+  const conversations = await listConversations(authenticatedUserId(req))
   return res.json({ conversations })
 }))
 
 app.get('/api/conversations/:id/messages', asyncRoute(async (req, res) => {
+  const conversation = await getConversation(req.params.id)
+  if (!conversation || conversation.userId !== authenticatedUserId(req)) {
+    return res.status(404).json({ error: 'conversation not found' })
+  }
   const requestedLimit = req.query.limit === undefined ? 50 : Number(req.query.limit)
   if (!Number.isSafeInteger(requestedLimit) || requestedLimit < 1) {
     return res.status(400).json({ error: 'limit must be a positive integer' })
@@ -359,8 +412,7 @@ app.get('/api/conversations/:id/messages', asyncRoute(async (req, res) => {
 }))
 
 app.get('/api/messages/:id/delivery-status', asyncRoute(async (req, res) => {
-  const userId = String(req.query.userId || '')
-  if (!userId) return res.status(400).json({ error: 'userId required' })
+  const userId = authenticatedUserId(req)
   const message = await getOwnedMessage(userId, req.params.id)
   const persisted = Boolean(
     message
@@ -407,9 +459,7 @@ app.post(
     limit: MAX_USER_VOICE_MESSAGE_BYTES,
   }),
   asyncRoute(async (req, res) => {
-    const userId = typeof req.headers['x-chatterra-user-id'] === 'string'
-      ? req.headers['x-chatterra-user-id'].trim()
-      : ''
+    const userId = authenticatedUserId(req)
     const characterId = typeof req.headers['x-chatterra-character-id'] === 'string'
       ? req.headers['x-chatterra-character-id'].trim()
       : ''
@@ -427,7 +477,7 @@ app.post(
       hasUserId: Boolean(userId),
     })
     console.info('Voice message upload received', logDetails)
-    if (!userId || !characterId) {
+    if (!characterId) {
       console.warn('Voice message upload rejected', { ...logDetails, reason: 'missing_identity' })
       return res.status(400).json({ error: 'user ID and character ID are required' })
     }
@@ -529,7 +579,10 @@ app.post(
           })
           const response = await fetch(`http://127.0.0.1:${process.env.PORT || 3000}/api/chat`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: req.header('authorization') || '',
+            },
             body: JSON.stringify({
               character: { id: character.id },
               conversationId: conversation.id,
@@ -578,8 +631,7 @@ app.post(
 )
 
 app.get('/api/voice/messages/:id/audio', asyncRoute(async (req, res) => {
-  const userId = typeof req.query.userId === 'string' ? req.query.userId.trim() : ''
-  if (!userId) return res.status(400).json({ error: 'userId required' })
+  const userId = authenticatedUserId(req)
   const message = await getOwnedMessage(userId, req.params.id)
   const voice = parseUserVoiceMessageMetadata(message?.contentJson?.voice)
   if (!message || message.senderRole !== 'user' || !voice) {
@@ -601,8 +653,7 @@ app.get('/api/voice/messages/:id/audio', asyncRoute(async (req, res) => {
 }))
 
 app.post('/api/voice/messages/:id/transcription', asyncRoute(async (req, res) => {
-  const userId = typeof req.body?.userId === 'string' ? req.body.userId.trim() : ''
-  if (!userId) return res.status(400).json({ error: 'userId required' })
+  const userId = authenticatedUserId(req)
   const message = await getOwnedMessage(userId, req.params.id)
   const voice = parseUserVoiceMessageMetadata(message?.contentJson?.voice)
   if (!message || message.senderRole !== 'user' || !voice) {
@@ -657,8 +708,7 @@ app.post('/api/voice/messages/:id/transcription', asyncRoute(async (req, res) =>
 }))
 
 app.delete('/api/voice/messages/:id/transcription', asyncRoute(async (req, res) => {
-  const userId = typeof req.body?.userId === 'string' ? req.body.userId.trim() : ''
-  if (!userId) return res.status(400).json({ error: 'userId required' })
+  const userId = authenticatedUserId(req)
   const message = await getOwnedMessage(userId, req.params.id)
   const voice = parseUserVoiceMessageMetadata(message?.contentJson?.voice)
   if (!message || message.senderRole !== 'user' || !voice) {
@@ -676,19 +726,13 @@ app.post(
     limit: MAX_TRANSCRIPTION_AUDIO_BYTES,
   }),
   asyncRoute(async (req, res) => {
-    const userId = typeof req.headers['x-chatterra-user-id'] === 'string'
-      ? req.headers['x-chatterra-user-id'].trim()
-      : ''
+    const userId = authenticatedUserId(req)
     const characterId = typeof req.headers['x-chatterra-character-id'] === 'string'
       ? req.headers['x-chatterra-character-id'].trim()
       : ''
     const mimeType = req.headers['content-type'] || ''
     const logDetails = voiceRequestLogDetails(req, { hasUserId: Boolean(userId) })
     console.info('Voice transcription received', logDetails)
-    if (!userId) {
-      console.warn('Voice transcription rejected', { ...logDetails, reason: 'missing_user' })
-      return res.status(400).json({ error: 'user ID is required' })
-    }
     if (!isSupportedTranscriptionAudioType(mimeType)) {
       console.warn('Voice transcription rejected', { ...logDetails, reason: 'unsupported_format' })
       return res.status(415).json({ error: 'unsupported audio format' })
@@ -741,12 +785,11 @@ app.post(
 )
 
 app.post('/api/messages/:id/translations', asyncRoute(async (req, res) => {
-  const userId = typeof req.body?.userId === 'string' ? req.body.userId.trim() : ''
+  const userId = authenticatedUserId(req)
   const targetLanguage = typeof req.body?.targetLanguage === 'string'
     ? req.body.targetLanguage.trim().toLowerCase()
     : ''
   const segmentIndex = Number(req.body?.segmentIndex ?? 0)
-  if (!userId) return res.status(400).json({ error: 'userId is required' })
   if (targetLanguage !== 'en') {
     return res.status(400).json({ error: 'only English translation is currently supported' })
   }
@@ -802,8 +845,7 @@ app.post('/api/messages/:id/translations', asyncRoute(async (req, res) => {
 }))
 
 app.get('/api/characters/:id/state', asyncRoute(async (req, res) => {
-  const userId = String(req.query.userId || '')
-  if (!userId) return res.status(400).json({ error: 'userId required' })
+  const userId = authenticatedUserId(req)
 
   const character = await getCharacterForUser(userId, req.params.id)
   if (!character) return res.status(404).json({ error: 'character not found' })
@@ -832,19 +874,17 @@ app.get('/api/characters/:id/state', asyncRoute(async (req, res) => {
 }))
 
 app.post('/api/proactive/poll', asyncRoute(async (req, res) => {
-  const userId = typeof req.body?.userId === 'string' ? req.body.userId.trim() : ''
-  if (!userId) return res.status(400).json({ error: 'userId required' })
+  const userId = authenticatedUserId(req)
   const deliveries = await processDueProactiveActions({ userId, limit: 2 })
   return res.json({ deliveries })
 }))
 
 app.put('/api/push-devices/expo', asyncRoute(async (req, res) => {
-  const userId = typeof req.body?.userId === 'string' ? req.body.userId.trim() : ''
+  const userId = authenticatedUserId(req)
   const expoPushToken = typeof req.body?.expoPushToken === 'string'
     ? req.body.expoPushToken.trim()
     : ''
   const platform = req.body?.platform
-  if (!userId) return res.status(400).json({ error: 'userId is required' })
   if (!isExpoPushToken(expoPushToken)) {
     return res.status(400).json({ error: 'expoPushToken is invalid' })
   }
@@ -857,8 +897,8 @@ app.put('/api/push-devices/expo', asyncRoute(async (req, res) => {
 }))
 
 app.delete('/api/chat-history', asyncRoute(async (req, res) => {
-  const { userId, characterId } = req.body || {}
-  if (!userId) return res.status(400).json({ error: 'userId is required' })
+  const { characterId } = req.body || {}
+  const userId = authenticatedUserId(req)
   if (!characterId) return res.status(400).json({ error: 'characterId is required' })
 
   const result = await clearChatHistory(String(userId), String(characterId))
@@ -867,9 +907,9 @@ app.delete('/api/chat-history', asyncRoute(async (req, res) => {
 }))
 
 app.post('/api/chat', asyncRoute(async (req, res) => {
-  const { message, conversationId, userId, character } = req.body || {}
+  const { message, conversationId, character } = req.body || {}
+  const userId = authenticatedUserId(req)
   if (!message) return res.status(400).json({ error: 'message is required' })
-  if (!userId) return res.status(400).json({ error: 'userId is required' })
   if (!character?.id) return res.status(400).json({ error: 'character is required' })
 
   const normalizedUserId = String(userId)
