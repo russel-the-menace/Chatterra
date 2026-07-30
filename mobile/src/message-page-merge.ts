@@ -16,6 +16,7 @@ const mergeMessageUiState = (current: ChatMessage[], incoming: ChatMessage[]) =>
         : message.translationVisible,
       translationLoading: existing.translationLoading,
       translationError: existing.translationError,
+      voiceTranscriptionLoading: existing.voiceTranscriptionLoading,
       voiceTranscriptVisible: existing.voiceTranscriptVisible && Boolean(message.voice),
     }
   })

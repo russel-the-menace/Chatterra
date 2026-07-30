@@ -4,16 +4,18 @@ import { useEffect, useRef } from 'react'
 import { Pressable, StyleSheet, Text, View } from 'react-native'
 
 import { mediaUrl } from '@/src/api'
-import { AssistantVoiceMessage } from '@/src/types'
+import { MessageVoice } from '@/src/types'
 import { palette } from '@/src/theme'
 
 const displayDuration = (duration?: number) => `${Math.max(1, Math.round(duration || 1))}\"`
 
 export function VoiceMessageBubble({
   voice,
+  isUser = false,
   onLongPress,
 }: {
-  voice: AssistantVoiceMessage
+  voice: MessageVoice
+  isUser?: boolean
   onLongPress?: () => void
 }) {
   const player = useAudioPlayer(mediaUrl(voice.audioUrl || ''), { updateInterval: 150 })
@@ -51,8 +53,8 @@ export function VoiceMessageBubble({
         onLongPress?.()
       }}
       accessibilityRole="button"
-      accessibilityLabel={status.playing ? 'Pause Maya voice message' : 'Play Maya voice message'}
-      accessibilityHint={`${displayDuration(voice.durationSeconds)} AI-generated voice message`}
+      accessibilityLabel={status.playing ? 'Pause voice message' : 'Play voice message'}
+      accessibilityHint={`${displayDuration(voice.durationSeconds)} voice message`}
       style={({ pressed }) => [
         styles.voiceMessage,
         { width: Math.min(220, Math.max(132, 104 + (voice.durationSeconds || 4) * 11)) },
@@ -63,7 +65,7 @@ export function VoiceMessageBubble({
         <Ionicons
           name={status.playing ? 'pause' : 'volume-high-outline'}
           size={25}
-          color={palette.text}
+          color={isUser ? '#14532D' : palette.text}
         />
       </View>
       <View style={styles.waveBars}>
@@ -73,12 +75,13 @@ export function VoiceMessageBubble({
             style={[
               styles.waveBar,
               { height: 6 + index * 3 },
+              isUser && styles.waveBarUser,
               status.playing && styles.waveBarPlaying,
             ]}
           />
         ))}
       </View>
-      <Text style={styles.duration}>{displayDuration(voice.durationSeconds)}</Text>
+      <Text style={[styles.duration, isUser && styles.durationUser]}>{displayDuration(voice.durationSeconds)}</Text>
     </Pressable>
   )
 }
@@ -113,9 +116,15 @@ const styles = StyleSheet.create({
   waveBarPlaying: {
     backgroundColor: palette.accent,
   },
+  waveBarUser: {
+    backgroundColor: '#3D7C2B',
+  },
   duration: {
     color: palette.text,
     fontSize: 16,
     fontVariant: ['tabular-nums'],
+  },
+  durationUser: {
+    color: '#14532D',
   },
 })

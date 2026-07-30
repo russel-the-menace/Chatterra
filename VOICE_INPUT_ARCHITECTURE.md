@@ -12,9 +12,14 @@ flowchart LR
     Launch[App Launch] --> Probe[Mihomo / Node / Groq Probe]
     Probe -->|all checks pass| Cloud[Groq Transcription Adapter]
     Probe -->|any check fails| Local[iPhone Speech Adapter]
+    TextMode[Text mode microphone] --> Cloud
+    VoiceMode[Hold to Talk] --> Capture[Audio Capture Layer]
+    Capture --> VoiceMessage[Private voice-message media]
+    VoiceMessage --> OptionalText[Optional Convert to Text]
+    OptionalText --> Cloud
     Mic[Microphone Button] --> Controller[Voice Input Controller]
-    Controller --> Capture[Audio Capture Layer]
-    Controller --> Cloud
+    Controller --> TextMode
+    Controller --> VoiceMode
     Controller --> Local
     Speech --> Transcript[Transcript Processor]
     Capture --> Transcript
@@ -32,7 +37,9 @@ only after all three checks pass. `mobile/src/voice-input.ts` owns recording,
 transcription events, audio lifetime, interruption recovery, language labeling, and
 voice state. `InputBox` only renders the state and copies transcript updates into its
 controlled draft. `ChatPage` passes the final metadata through the existing `/api/chat`
-request.
+request. The text composer and voice-message composer are distinct modes. Text mode's
+microphone creates an editable draft; Hold to Talk creates an audio message and does not
+trigger a character response or automatic transcription.
 
 ## State Machine
 
@@ -87,12 +94,15 @@ a script-based language label for message metadata.
 
 ## Audio Capture
 
-The cloud recorder requests microphone permission only after the user presses the button.
-It limits recordings to 30 seconds. Raw audio is never attached to a chat message,
-persisted by Chatterra, or written to the backend filesystem. The native fallback uses
-the iPhone speech-recognition capability directly and does not upload an audio file.
-Permission denial, network failures, provider failures, and no-speech results have
-separate error paths.
+The cloud dictation recorder requests microphone permission only after the user presses
+the text-mode microphone. It limits recordings to 30 seconds and deletes its local file
+after transcription. Hold to Talk records up to 60 seconds and stores a private audio
+file for the sent voice message; it is served only through an owned-message endpoint.
+Long-pressing that bubble exposes Convert to Text, which sends the stored recording to
+Groq only after the user requests it. Discard converted removes the transcript but keeps
+the voice message. The native fallback uses the iPhone speech-recognition capability
+directly and does not upload an audio file. Permission denial, network failures, provider
+failures, and no-speech results have separate error paths.
 
 ## Future Adapters
 
@@ -136,8 +146,10 @@ job may create a short, cached audio clip that the user explicitly taps to play.
 ## Privacy and Failure Rules
 
 - A microphone permission prompt is initiated only by a user gesture.
-- Raw audio is not sent to the chat endpoint and is never stored by Chatterra. It is sent
-  only to the dedicated transcription endpoint after the user accepts the disclosure.
+- Dictation audio is not sent to the chat endpoint and is never stored by Chatterra. It is
+  sent only to the dedicated transcription endpoint after the user accepts the disclosure.
+- A directly sent voice message is stored privately so it can be played in the
+  conversation; it is sent to Groq only after the user chooses Convert to Text.
 - Recognition failure never fabricates text.
 - A partial transcript is visibly marked by the recording state and remains editable.
 - A failed session can be retried without losing a manually typed draft.

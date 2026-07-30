@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import {
   ChatMessage,
   AssistantVoiceMessage,
+  MessageVoice,
   ComposerQuoteDraft,
   ConversationHistoryCache,
   MessageHistoryCursor,
@@ -119,6 +120,30 @@ const parseAssistantVoiceMessage = (value: unknown): AssistantVoiceMessage | und
   }
 }
 
+const parseUserVoiceMessage = (value: unknown): Extract<MessageVoice, { provider: 'user-recording' }> | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const voice = value as Record<string, unknown>
+  if (voice.provider !== 'user-recording' || voice.status !== 'ready') return undefined
+  if (typeof voice.audioUrl !== 'string' || !voice.audioUrl) return undefined
+  if (!optionalNonNegativeNumber(voice.durationSeconds)) return undefined
+  if (
+    voice.mimeType !== 'audio/mp4'
+    && voice.mimeType !== 'audio/m4a'
+    && voice.mimeType !== 'audio/x-m4a'
+    && voice.mimeType !== 'audio/3gpp'
+    && voice.mimeType !== 'audio/webm'
+  ) return undefined
+  if (voice.transcriptStatus !== 'none' && voice.transcriptStatus !== 'ready') return undefined
+  return {
+    provider: 'user-recording',
+    status: 'ready',
+    audioUrl: voice.audioUrl,
+    durationSeconds: Number(voice.durationSeconds),
+    mimeType: voice.mimeType as Extract<MessageVoice, { provider: 'user-recording' }>['mimeType'],
+    transcriptStatus: voice.transcriptStatus,
+  }
+}
+
 const parseChatMessage = (value: unknown): ChatMessage | undefined => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const message = value as Record<string, unknown>
@@ -127,7 +152,7 @@ const parseChatMessage = (value: unknown): ChatMessage | undefined => {
   if (typeof message.text !== 'string') return undefined
 
   const quote = parseMessageQuote(message.quote)
-  const voice = parseAssistantVoiceMessage(message.voice)
+  const voice = parseAssistantVoiceMessage(message.voice) || parseUserVoiceMessage(message.voice)
   return {
     id: message.id,
     renderKey: optionalString(message.renderKey),

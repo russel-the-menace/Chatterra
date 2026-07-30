@@ -544,6 +544,73 @@ export const updateAssistantMessageVoice = async (
   })
 }
 
+export const updateUserVoiceMessageTranscript = async (
+  messageId: string,
+  transcript: string
+): Promise<Message | undefined> => {
+  return withTransaction(async client => {
+    const result = await client.query(
+      `UPDATE messages
+       SET content = $2,
+           content_json = jsonb_set(
+             COALESCE(content_json, '{}'::jsonb),
+             '{voice}',
+             jsonb_set(
+               COALESCE(content_json -> 'voice', '{}'::jsonb),
+               '{transcriptStatus}',
+               '"ready"'::jsonb,
+               TRUE
+             ),
+             TRUE
+           )
+       WHERE id = $1 AND sender_role = 'user'
+       RETURNING *`,
+      [messageId, transcript]
+    )
+    if (!result.rows[0]) return undefined
+    await client.query(
+      `UPDATE conversations
+       SET updated_at = NOW()
+       WHERE id = $1`,
+      [result.rows[0].conversation_id]
+    )
+    return mapMessage(result.rows[0])
+  })
+}
+
+export const clearUserVoiceMessageTranscript = async (
+  messageId: string
+): Promise<Message | undefined> => {
+  return withTransaction(async client => {
+    const result = await client.query(
+      `UPDATE messages
+       SET content = '',
+           content_json = jsonb_set(
+             COALESCE(content_json, '{}'::jsonb),
+             '{voice}',
+             jsonb_set(
+               COALESCE(content_json -> 'voice', '{}'::jsonb),
+               '{transcriptStatus}',
+               '"none"'::jsonb,
+               TRUE
+             ),
+             TRUE
+           )
+       WHERE id = $1 AND sender_role = 'user'
+       RETURNING *`,
+      [messageId]
+    )
+    if (!result.rows[0]) return undefined
+    await client.query(
+      `UPDATE conversations
+       SET updated_at = NOW()
+       WHERE id = $1`,
+      [result.rows[0].conversation_id]
+    )
+    return mapMessage(result.rows[0])
+  })
+}
+
 export const upsertExpoPushDevice = async ({
   userId,
   expoPushToken,

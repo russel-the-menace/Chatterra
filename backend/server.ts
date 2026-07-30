@@ -35,8 +35,20 @@ import {
   transcribeWithGroq,
 } from './groq-transcription'
 import { getVoiceCapability } from './voice-capability'
+import {
+  isSupportedUserVoiceMessageType,
+  MAX_USER_VOICE_MESSAGE_BYTES,
+  MAX_USER_VOICE_MESSAGE_DURATION_SECONDS,
+  parseUserVoiceMessageMetadata,
+  readUserVoiceMessage,
+  removeUserVoiceMessage,
+  saveUserVoiceMessage,
+  userVoiceMessageMetadata,
+} from './user-voice-message'
 import { parseCustomCharacterDocument } from './custom-character'
 import {
+  appendMessage,
+  clearUserVoiceMessageTranscript,
   clearChatHistory,
   createCharacter,
   getOrCreateConversationWithStarter,
@@ -56,6 +68,7 @@ import {
   listRecentMessages,
   upsertExpoPushDevice,
   updateAssistantMessageVoice,
+  updateUserVoiceMessageTranscript,
   upsertMessageTranslation,
   updateCharacter
 } from './repository'
@@ -338,6 +351,164 @@ app.post('/api/translations', asyncRoute(async (req, res) => {
 app.get('/api/voice/capability', asyncRoute(async (_req, res) => {
   res.set('Cache-Control', 'no-store')
   return res.json({ capability: await getVoiceCapability() })
+}))
+
+app.post(
+  '/api/voice/messages',
+  express.raw({
+    type: request => isSupportedUserVoiceMessageType(request.headers['content-type']),
+    limit: MAX_USER_VOICE_MESSAGE_BYTES,
+  }),
+  asyncRoute(async (req, res) => {
+    const userId = typeof req.headers['x-chatterra-user-id'] === 'string'
+      ? req.headers['x-chatterra-user-id'].trim()
+      : ''
+    const characterId = typeof req.headers['x-chatterra-character-id'] === 'string'
+      ? req.headers['x-chatterra-character-id'].trim()
+      : ''
+    const requestedConversationId = typeof req.headers['x-chatterra-conversation-id'] === 'string'
+      ? req.headers['x-chatterra-conversation-id'].trim()
+      : ''
+    const mimeType = req.headers['content-type'] || ''
+    const durationMilliseconds = Number(req.headers['x-chatterra-voice-duration-ms'])
+    if (!userId || !characterId) {
+      return res.status(400).json({ error: 'user ID and character ID are required' })
+    }
+    if (!isSupportedUserVoiceMessageType(mimeType)) {
+      return res.status(415).json({ error: 'unsupported voice message format' })
+    }
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+      return res.status(400).json({ error: 'voice message audio is required' })
+    }
+    if (!Number.isFinite(durationMilliseconds) || durationMilliseconds < 250) {
+      return res.status(400).json({ error: 'voice message is too short' })
+    }
+
+    const character = await getCharacterForUser(userId, characterId)
+    if (!character) return res.status(404).json({ error: 'character not found' })
+
+    let conversation: Conversation
+    let starterMessage: Message | undefined
+    if (requestedConversationId) {
+      const existingConversation = await getConversation(requestedConversationId)
+      if (
+        !existingConversation
+        || existingConversation.userId !== userId
+        || existingConversation.characterId !== character.id
+      ) {
+        return res.status(404).json({ error: 'conversation not found' })
+      }
+      conversation = existingConversation
+    } else {
+      const now = new Date().toISOString()
+      const conversationId = newId()
+      const created = await getOrCreateConversationWithStarter(
+        {
+          id: conversationId,
+          userId,
+          characterId: character.id,
+          status: 'active',
+          createdAt: now,
+          updatedAt: now,
+        },
+        {
+          id: newId(),
+          conversationId,
+          senderRole: 'assistant',
+          senderId: character.id,
+          content: getStarterMessage(character),
+          createdAt: now,
+        }
+      )
+      conversation = created.conversation
+      starterMessage = created.starterMessage
+    }
+
+    const messageId = newId()
+    const voice = userVoiceMessageMetadata({
+      messageId,
+      userId,
+      mimeType,
+      durationSeconds: Math.min(
+        MAX_USER_VOICE_MESSAGE_DURATION_SECONDS,
+        durationMilliseconds / 1_000
+      ),
+    })
+    await saveUserVoiceMessage(voice, req.body)
+    try {
+      const message = await appendMessage({
+        id: messageId,
+        conversationId: conversation.id,
+        senderRole: 'user',
+        senderId: userId,
+        content: '',
+        contentJson: { voice },
+        createdAt: new Date().toISOString(),
+      })
+      return res.status(201).json({ conversation, message, starterMessage })
+    } catch (error) {
+      await removeUserVoiceMessage(voice).catch(() => undefined)
+      throw error
+    }
+  })
+)
+
+app.get('/api/voice/messages/:id/audio', asyncRoute(async (req, res) => {
+  const userId = typeof req.query.userId === 'string' ? req.query.userId.trim() : ''
+  if (!userId) return res.status(400).json({ error: 'userId required' })
+  const message = await getOwnedMessage(userId, req.params.id)
+  const voice = parseUserVoiceMessageMetadata(message?.contentJson?.voice)
+  if (!message || message.senderRole !== 'user' || !voice) {
+    return res.status(404).json({ error: 'voice message not found' })
+  }
+  try {
+    const audio = await readUserVoiceMessage(voice)
+    res.set('Cache-Control', 'private, max-age=3600')
+    res.type(voice.mimeType)
+    return res.send(audio)
+  } catch {
+    return res.status(404).json({ error: 'voice message audio not found' })
+  }
+}))
+
+app.post('/api/voice/messages/:id/transcription', asyncRoute(async (req, res) => {
+  const userId = typeof req.body?.userId === 'string' ? req.body.userId.trim() : ''
+  if (!userId) return res.status(400).json({ error: 'userId required' })
+  const message = await getOwnedMessage(userId, req.params.id)
+  const voice = parseUserVoiceMessageMetadata(message?.contentJson?.voice)
+  if (!message || message.senderRole !== 'user' || !voice) {
+    return res.status(404).json({ error: 'voice message not found' })
+  }
+  if (voice.transcriptStatus === 'ready' && message.content.trim()) {
+    return res.json({ message })
+  }
+  const rateLimitKey = `${req.ip}:${userId}`
+  if (!canTranscribe(rateLimitKey)) {
+    return res.status(429).json({ error: 'voice transcription rate limit reached; try again shortly' })
+  }
+  let audio: Buffer
+  try {
+    audio = await readUserVoiceMessage(voice)
+  } catch {
+    return res.status(404).json({ error: 'voice message audio not found' })
+  }
+  const transcription = await transcribeWithGroq({ audio, mimeType: voice.mimeType })
+  const updated = await updateUserVoiceMessageTranscript(message.id, transcription.text)
+  if (!updated) return res.status(404).json({ error: 'voice message not found' })
+  return res.json({ message: updated })
+}))
+
+app.delete('/api/voice/messages/:id/transcription', asyncRoute(async (req, res) => {
+  const userId = typeof req.body?.userId === 'string' ? req.body.userId.trim() : ''
+  if (!userId) return res.status(400).json({ error: 'userId required' })
+  const message = await getOwnedMessage(userId, req.params.id)
+  const voice = parseUserVoiceMessageMetadata(message?.contentJson?.voice)
+  if (!message || message.senderRole !== 'user' || !voice) {
+    return res.status(404).json({ error: 'voice message not found' })
+  }
+  const updated = await clearUserVoiceMessageTranscript(message.id)
+  if (!updated) return res.status(404).json({ error: 'voice message not found' })
+  return res.json({ message: updated })
 }))
 
 app.post(

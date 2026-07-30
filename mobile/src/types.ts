@@ -57,6 +57,17 @@ export type AssistantVoiceMessage = {
   generatedAt?: string
 }
 
+export type UserVoiceMessage = {
+  provider: 'user-recording'
+  status: 'ready'
+  audioUrl: string
+  durationSeconds: number
+  mimeType: 'audio/mp4' | 'audio/m4a' | 'audio/x-m4a' | 'audio/3gpp' | 'audio/webm'
+  transcriptStatus: 'none' | 'ready'
+}
+
+export type MessageVoice = AssistantVoiceMessage | UserVoiceMessage
+
 export type Conversation = {
   id: string
   userId: string
@@ -128,7 +139,8 @@ export type ChatMessage = {
   translationVisible?: boolean
   translationLoading?: boolean
   translationError?: string
-  voice?: AssistantVoiceMessage
+  voice?: MessageVoice
+  voiceTranscriptionLoading?: boolean
   voiceTranscriptVisible?: boolean
   loading?: boolean
   groupIndex?: number

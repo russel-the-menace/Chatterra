@@ -51,10 +51,13 @@ import { mergeMessagePage } from '@/src/message-page-merge'
 import { starterMessageForCharacter } from '@/src/starter-message'
 import { palette } from '@/src/theme'
 import { useVoiceInput } from '@/src/voice-input'
+import { useVoiceMessageRecorder } from '@/src/voice-message-recorder'
 import {
   ChatMessage,
   ChatResponse,
   AssistantVoiceMessage,
+  MessageVoice,
+  UserVoiceMessage,
   MessageHistoryCursor,
   MessageQuote,
   ServerMessage,
@@ -309,6 +312,34 @@ const parseAssistantVoiceMessage = (value: unknown): AssistantVoiceMessage | und
   }
 }
 
+const parseUserVoiceMessage = (value: unknown): Extract<MessageVoice, { provider: 'user-recording' }> | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const voice = value as Record<string, unknown>
+  if (voice.provider !== 'user-recording' || voice.status !== 'ready') return undefined
+  if (typeof voice.audioUrl !== 'string' || !voice.audioUrl) return undefined
+  if (typeof voice.durationSeconds !== 'number' || !Number.isFinite(voice.durationSeconds)) return undefined
+  if (
+    voice.mimeType !== 'audio/mp4'
+    && voice.mimeType !== 'audio/m4a'
+    && voice.mimeType !== 'audio/x-m4a'
+    && voice.mimeType !== 'audio/3gpp'
+    && voice.mimeType !== 'audio/webm'
+  ) return undefined
+  if (voice.transcriptStatus !== 'none' && voice.transcriptStatus !== 'ready') return undefined
+  return {
+    provider: 'user-recording',
+    status: 'ready',
+    audioUrl: voice.audioUrl,
+    durationSeconds: voice.durationSeconds,
+    mimeType: voice.mimeType,
+    transcriptStatus: voice.transcriptStatus,
+  }
+}
+
+const parseMessageVoice = (value: unknown) => (
+  parseAssistantVoiceMessage(value) || parseUserVoiceMessage(value)
+)
+
 const mapMessages = (messages: ServerMessage[]): ChatMessage[] => messages
   .filter(message => message.senderRole !== 'system')
   .flatMap(message => {
@@ -318,7 +349,7 @@ const mapMessages = (messages: ServerMessage[]): ChatMessage[] => messages
     const englishTranslations = translations && typeof translations === 'object'
       ? (translations as Record<string, unknown>).en
       : undefined
-    const voice = parseAssistantVoiceMessage(message.contentJson?.voice)
+    const voice = parseMessageVoice(message.contentJson?.voice)
     return segments.map((text, index) => ({
       id: segments.length === 1 ? message.id : `${message.id}:segment:${index}`,
       sourceMessageId: message.id,
@@ -334,7 +365,12 @@ const mapMessages = (messages: ServerMessage[]): ChatMessage[] => messages
         englishTranslations && typeof englishTranslations === 'object'
           && typeof (englishTranslations as Record<string, unknown>)[String(index)] === 'string'
       ),
-      voice: voice?.segmentIndex === index ? voice : undefined,
+      voice: voice && (
+        voice.provider === 'user-recording' || voice.segmentIndex === index
+      ) ? voice : undefined,
+      voiceTranscriptVisible: voice?.provider === 'user-recording'
+        && voice.transcriptStatus === 'ready'
+        && Boolean(text.trim()),
       groupIndex: index,
       groupSize: segments.length,
       createdAt: message.createdAt,
@@ -364,6 +400,10 @@ const responseMessages = (response: ChatResponse): ChatMessage[] => {
     voice: response.voice?.segmentIndex === index ? response.voice : undefined,
   }))
 }
+
+const isUserVoiceMessage = (message: ChatMessage): message is ChatMessage & { voice: UserVoiceMessage } => (
+  message.sender === 'user' && message.voice?.provider === 'user-recording'
+)
 
 const simulatedTypingDuration = (text: string) => {
   const characters = Array.from(text.trim()).length
@@ -496,8 +536,7 @@ function MessageBubbleContent({
   onSelectionTouchEnd: () => void
 }) {
   const isLoading = Boolean(message.loading)
-  const readyVoice = !isUser
-    && message.voice?.status === 'ready'
+  const readyVoice = message.voice?.status === 'ready'
     && Boolean(message.voice.audioUrl)
   const revealProgress = useRef(new RNAnimated.Value(isLoading ? 0 : 1)).current
   const wasLoadingRef = useRef(isLoading)
@@ -594,7 +633,7 @@ function MessageBubbleContent({
       )}
     >
       {readyVoice && !selecting && message.voice && (
-        <VoiceMessageBubble voice={message.voice} onLongPress={onVoiceLongPress} />
+        <VoiceMessageBubble voice={message.voice} isUser={isUser} onLongPress={onVoiceLongPress} />
       )}
       {!isLoading && !selecting && !readyVoice && (
         <RNAnimated.Text
@@ -919,6 +958,7 @@ export default function ChatScreen() {
   const [loadingHistory, setLoadingHistory] = useState(!initialCacheRef.current)
   const [sending, setSending] = useState(false)
   const [voiceMetadata, setVoiceMetadata] = useState<VoiceTranscriptMetadata | undefined>()
+  const [composerMode, setComposerMode] = useState<'text' | 'voice'>('text')
   const [error, setError] = useState<string | null>(null)
   const [showScrollToLatest, setShowScrollToLatest] = useState(false)
   const [unseenLatestCount, setUnseenLatestCount] = useState(0)
@@ -1006,6 +1046,28 @@ export default function ChatScreen() {
       setVoiceMetadata(metadata)
     },
   })
+  const voiceMessageRecorder = useVoiceMessageRecorder({
+    userId: userId || undefined,
+    characterId: character?.id,
+    conversationId,
+    onConvertedToText: (text, metadata) => {
+      if (!character) return
+      setDraft(character.id, text)
+      setVoiceMetadata(metadata)
+      setComposerMode('text')
+      requestAnimationFrame(() => composerInputRef.current?.focus())
+    },
+    onSent: result => {
+      setConversationId(result.conversationId)
+      markConversationActive(characterId)
+      const incoming = mapMessages([
+        ...(result.starterMessage ? [result.starterMessage] : []),
+        result.message,
+      ])
+      setMessages(current => mergeMessagePage(current, incoming, 'append'))
+      requestAnimationFrame(() => startLatestScroll(true))
+    },
+  })
 
   useEffect(() => {
     if (!voiceInput.error) {
@@ -1016,6 +1078,11 @@ export default function ChatScreen() {
     lastVoiceErrorRef.current = voiceInput.error
     Alert.alert('Voice input unavailable', voiceInput.error)
   }, [voiceInput.error])
+
+  useEffect(() => {
+    if (!voiceMessageRecorder.error) return
+    Alert.alert('Voice message unavailable', voiceMessageRecorder.error)
+  }, [voiceMessageRecorder.error])
 
   const closeMessageActionMenu = useCallback(() => {
     const session = messageActionSessionRef.current
@@ -1838,6 +1905,7 @@ export default function ChatScreen() {
   }
 
   const translateMessage = async (message: ChatMessage) => {
+    if (isUserVoiceMessage(message)) return
     closeMessageActionMenu()
     if (message.translationVisible) {
       setMessages(current => current.map(item => (
@@ -1896,6 +1964,67 @@ export default function ChatScreen() {
             }
           : item
       )))
+    }
+  }
+
+  const convertVoiceMessageToText = async (message: ChatMessage) => {
+    if (!userId || !message.sourceMessageId || !isUserVoiceMessage(message)) return
+    closeMessageActionMenu()
+    if (message.voiceTranscriptionLoading) return
+    setMessages(current => current.map(item => (
+      item.id === message.id
+        ? { ...item, voiceTranscriptionLoading: true }
+        : item
+    )))
+    try {
+      const result = await api.convertVoiceMessageToText(userId, message.sourceMessageId)
+      const mapped = mapMessages([result.message])[0]
+      if (!mapped) throw new Error('The converted voice message could not be displayed.')
+      setMessages(current => current.map(item => (
+        item.id === message.id
+          ? {
+              ...item,
+              ...mapped,
+              renderKey: item.renderKey || mapped.renderKey,
+              voiceTranscriptVisible: true,
+              voiceTranscriptionLoading: false,
+            }
+          : item
+      )))
+    } catch (conversionError) {
+      setMessages(current => current.map(item => (
+        item.id === message.id
+          ? { ...item, voiceTranscriptionLoading: false }
+          : item
+      )))
+      setError(conversionError instanceof Error
+        ? conversionError.message
+        : 'Could not convert this voice message to text.')
+    }
+  }
+
+  const discardVoiceMessageText = async (message: ChatMessage) => {
+    if (!userId || !message.sourceMessageId || !isUserVoiceMessage(message)) return
+    closeMessageActionMenu()
+    try {
+      const result = await api.discardVoiceMessageText(userId, message.sourceMessageId)
+      const mapped = mapMessages([result.message])[0]
+      if (!mapped) throw new Error('The voice message could not be updated.')
+      setMessages(current => current.map(item => (
+        item.id === message.id
+          ? {
+              ...item,
+              ...mapped,
+              renderKey: item.renderKey || mapped.renderKey,
+              voiceTranscriptVisible: false,
+              voiceTranscriptionLoading: false,
+            }
+          : item
+      )))
+    } catch (discardError) {
+      setError(discardError instanceof Error
+        ? discardError.message
+        : 'Could not discard the converted text.')
     }
   }
 
@@ -2340,6 +2469,19 @@ export default function ChatScreen() {
     voiceInput.toggle(draft)
   }
 
+  const switchToVoiceComposer = () => {
+    if (voiceInput.status === 'recording' || voiceInput.status === 'processing') return
+    Keyboard.dismiss()
+    voiceInput.reset()
+    setComposerMode('voice')
+  }
+
+  const switchToTextComposer = () => {
+    voiceMessageRecorder.reset()
+    setComposerMode('text')
+    requestAnimationFrame(() => composerInputRef.current?.focus())
+  }
+
   const messageActionMessage = messageActionSession
     ? messages.find(message => (
         (message.renderKey || message.id) === messageActionSession.messageKey
@@ -2549,71 +2691,125 @@ export default function ChatScreen() {
                 styles.composer,
                 { paddingBottom: Math.max(8, insets.bottom) },
               ]}>
-                <View style={styles.composerInputRow}>
-                  <TextInput
-                    ref={composerInputRef}
-                    value={draft}
-                    onChangeText={handleComposerTextChange}
-                    placeholder="Type your message..."
-                    placeholderTextColor="#8A94A3"
-                    multiline
-                    maxLength={20_000}
-                    style={styles.composerInput}
-                    textAlignVertical="center"
-                    onFocus={handleComposerFocus}
-                    onBlur={handleComposerBlur}
-                  />
-                  <Pressable
-                    onPress={handleVoicePress}
-                    disabled={voiceInput.status === 'processing'}
-                    accessibilityRole="button"
-                    accessibilityLabel={voiceInput.error
-                      ? `Voice input unavailable: ${voiceInput.error}`
-                      : voiceInput.status === 'recording' ? 'Stop voice input' : 'Start voice input'}
-                    accessibilityState={{
-                      busy: voiceInput.status === 'processing',
-                      selected: voiceInput.status === 'recording',
-                    }}
-                    style={({ pressed }) => [
-                      styles.voiceButton,
-                      voiceInput.status === 'recording' && styles.voiceButtonRecording,
-                      voiceInput.status === 'error' && styles.voiceButtonError,
-                      voiceInput.status === 'processing' && styles.voiceButtonDisabled,
-                      pressed && voiceInput.status !== 'processing' && styles.voiceButtonPressed,
-                    ]}
-                  >
-                    <Ionicons
-                      name={voiceInput.status === 'recording'
-                        ? 'stop'
-                        : voiceInput.status === 'processing'
-                          ? 'ellipsis-horizontal'
-                          : 'mic-outline'}
-                      size={21}
-                      color={voiceInput.status === 'error' ? palette.danger : palette.accent}
+                {composerMode === 'text' ? (
+                  <View style={styles.composerInputRow}>
+                    <Pressable
+                      onPress={switchToVoiceComposer}
+                      accessibilityRole="button"
+                      accessibilityLabel="Switch to voice message"
+                      style={({ pressed }) => [styles.composerModeButton, pressed && styles.voiceButtonPressed]}
+                    >
+                      <Ionicons name="volume-high-outline" size={22} color={palette.text} />
+                    </Pressable>
+                    <TextInput
+                      ref={composerInputRef}
+                      value={draft}
+                      onChangeText={handleComposerTextChange}
+                      placeholder="Type your message..."
+                      placeholderTextColor="#8A94A3"
+                      multiline
+                      maxLength={20_000}
+                      style={styles.composerInput}
+                      textAlignVertical="center"
+                      onFocus={handleComposerFocus}
+                      onBlur={handleComposerBlur}
                     />
-                  </Pressable>
-                  <Pressable
-                    onPress={() => void sendMessage()}
-                    disabled={
-                      !draft.trim()
-                      || sending
-                      || voiceInput.status === 'recording'
-                      || voiceInput.status === 'processing'
-                    }
-                    accessibilityRole="button"
-                    accessibilityLabel="Send message"
-                    style={({ pressed }) => [
-                      styles.sendButton,
-                      (!draft.trim() || sending || voiceInput.status === 'recording' || voiceInput.status === 'processing')
-                        && styles.sendButtonDisabled,
-                      pressed && draft.trim() && !sending && voiceInput.status === 'idle' && styles.sendButtonPressed,
-                    ]}
-                  >
-                    {sending
-                      ? <ActivityIndicator size="small" color="#FFFFFF" />
-                      : <Ionicons name="arrow-up" size={22} color="#FFFFFF" />}
-                  </Pressable>
-                </View>
+                    <Pressable
+                      onPress={handleVoicePress}
+                      disabled={voiceInput.status === 'processing'}
+                      accessibilityRole="button"
+                      accessibilityLabel={voiceInput.error
+                        ? `Voice input unavailable: ${voiceInput.error}`
+                        : voiceInput.status === 'recording' ? 'Stop cloud transcription' : 'Start cloud transcription'}
+                      accessibilityState={{
+                        busy: voiceInput.status === 'processing',
+                        selected: voiceInput.status === 'recording',
+                      }}
+                      style={({ pressed }) => [
+                        styles.voiceButton,
+                        voiceInput.status === 'recording' && styles.voiceButtonRecording,
+                        voiceInput.status === 'error' && styles.voiceButtonError,
+                        voiceInput.status === 'processing' && styles.voiceButtonDisabled,
+                        pressed && voiceInput.status !== 'processing' && styles.voiceButtonPressed,
+                      ]}
+                    >
+                      <Ionicons
+                        name={voiceInput.status === 'recording'
+                          ? 'stop'
+                          : voiceInput.status === 'processing'
+                            ? 'ellipsis-horizontal'
+                            : 'mic-outline'}
+                        size={21}
+                        color={voiceInput.status === 'error' ? palette.danger : palette.accent}
+                      />
+                    </Pressable>
+                    <Pressable
+                      onPress={() => void sendMessage()}
+                      disabled={
+                        !draft.trim()
+                        || sending
+                        || voiceInput.status === 'recording'
+                        || voiceInput.status === 'processing'
+                      }
+                      accessibilityRole="button"
+                      accessibilityLabel="Send message"
+                      style={({ pressed }) => [
+                        styles.sendButton,
+                        (!draft.trim() || sending || voiceInput.status === 'recording' || voiceInput.status === 'processing')
+                          && styles.sendButtonDisabled,
+                        pressed && draft.trim() && !sending && voiceInput.status === 'idle' && styles.sendButtonPressed,
+                      ]}
+                    >
+                      {sending
+                        ? <ActivityIndicator size="small" color="#FFFFFF" />
+                        : <Ionicons name="arrow-up" size={22} color="#FFFFFF" />}
+                    </Pressable>
+                  </View>
+                ) : (
+                  <View style={styles.composerInputRow}>
+                    <Pressable
+                      onPress={switchToTextComposer}
+                      disabled={voiceMessageRecorder.status === 'recording' || voiceMessageRecorder.status === 'processing'}
+                      accessibilityRole="button"
+                      accessibilityLabel="Switch to text input"
+                      style={({ pressed }) => [
+                        styles.composerModeButton,
+                        (voiceMessageRecorder.status === 'recording' || voiceMessageRecorder.status === 'processing')
+                          && styles.voiceButtonDisabled,
+                        pressed && styles.voiceButtonPressed,
+                      ]}
+                    >
+                      <Ionicons name="keypad-outline" size={22} color={palette.text} />
+                    </Pressable>
+                    <Pressable
+                      delayLongPress={0}
+                      disabled={voiceMessageRecorder.status === 'processing'}
+                      onPressIn={event => void voiceMessageRecorder.start(event.nativeEvent.pageX)}
+                      onTouchMove={event => voiceMessageRecorder.updateActionForPosition(event.nativeEvent.pageX)}
+                      onPressOut={event => {
+                        voiceMessageRecorder.updateActionForPosition(event.nativeEvent.pageX)
+                        void voiceMessageRecorder.finish()
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel="Hold to record and send a voice message"
+                      style={({ pressed }) => [
+                        styles.holdToTalkButton,
+                        voiceMessageRecorder.status === 'recording' && styles.holdToTalkButtonRecording,
+                        voiceMessageRecorder.status === 'error' && styles.holdToTalkButtonError,
+                        voiceMessageRecorder.status === 'processing' && styles.voiceButtonDisabled,
+                        pressed && voiceMessageRecorder.status !== 'processing' && styles.holdToTalkButtonPressed,
+                      ]}
+                    >
+                      <Text style={styles.holdToTalkText}>
+                        {voiceMessageRecorder.status === 'recording'
+                          ? 'Release to send'
+                          : voiceMessageRecorder.status === 'processing'
+                            ? 'Preparing...'
+                            : 'Hold to Talk'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                )}
                 {quotedMessage && (
                   <View style={styles.composerQuote}>
                     <Text style={styles.composerQuoteText} numberOfLines={2}>
@@ -2639,6 +2835,29 @@ export default function ChatScreen() {
           </Reanimated.View>
         </View>
       </View>
+
+      {voiceMessageRecorder.status === 'recording' && (
+        <View pointerEvents="none" style={styles.voiceRecordingOverlay}>
+          <View style={styles.voiceRecordingPreview}>
+            <View style={styles.voiceRecordingWave}>
+              {[8, 14, 22, 30, 18, 26, 12, 24, 16, 28, 20, 10].map((height, index) => (
+                <View key={index} style={[styles.voiceRecordingBar, { height }]} />
+              ))}
+            </View>
+          </View>
+          <View style={styles.voiceRecordingActions}>
+            <Text style={styles.voiceRecordingActionLabel}>Cancel</Text>
+            <Text style={styles.voiceRecordingActionLabel}>Convert to Text</Text>
+          </View>
+          <Text style={styles.voiceRecordingInstruction}>
+            {voiceMessageRecorder.action === 'cancel'
+              ? 'Release to cancel'
+              : voiceMessageRecorder.action === 'convert'
+                ? 'Release to convert to text'
+                : 'Release to send'}
+          </Text>
+        </View>
+      )}
 
       {messageActionSession && messageActionMessage && messageActionLayout && messageSelectionHole && (
         <View pointerEvents="box-none" style={styles.messageActionOverlay}>
@@ -2741,25 +2960,64 @@ export default function ChatScreen() {
               <Text style={styles.messageActionLabel}>Quote</Text>
             </Pressable>
             <View style={styles.messageActionDivider} />
-            <Pressable
-              onPressIn={() => {
-                messageActionPressRef.current = true
-              }}
-              onPressOut={() => {
-                messageActionPressRef.current = false
-              }}
-              onPress={() => void translateMessage(messageActionMessage)}
-              style={({ pressed }) => [
-                styles.messageAction,
-                pressed && styles.messageActionPressed,
-              ]}
-            >
-              <Ionicons name="language-outline" size={18} color="#FFFFFF" />
-              <Text style={styles.messageActionLabel}>
-                {messageActionMessage.translationVisible ? 'Hide' : 'Translate'}
-              </Text>
-            </Pressable>
-            {messageActionMessage.voice?.status === 'ready' && (
+            {isUserVoiceMessage(messageActionMessage) ? (
+              <Pressable
+                disabled={messageActionMessage.voiceTranscriptionLoading}
+                onPressIn={() => {
+                  messageActionPressRef.current = true
+                }}
+                onPressOut={() => {
+                  messageActionPressRef.current = false
+                }}
+                onPress={() => {
+                  if (messageActionMessage.voice?.transcriptStatus === 'ready') {
+                    void discardVoiceMessageText(messageActionMessage)
+                    return
+                  }
+                  void convertVoiceMessageToText(messageActionMessage)
+                }}
+                style={({ pressed }) => [
+                  styles.messageAction,
+                  messageActionMessage.voiceTranscriptionLoading && styles.messageActionDisabled,
+                  pressed && styles.messageActionPressed,
+                ]}
+              >
+                <Ionicons
+                  name={messageActionMessage.voice?.transcriptStatus === 'ready'
+                    ? 'trash-outline'
+                    : 'document-text-outline'}
+                  size={18}
+                  color="#FFFFFF"
+                />
+                <Text style={styles.messageActionLabel}>
+                  {messageActionMessage.voiceTranscriptionLoading
+                    ? 'Converting'
+                    : messageActionMessage.voice?.transcriptStatus === 'ready'
+                      ? 'Discard converted'
+                      : 'Convert to Text'}
+                </Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                onPressIn={() => {
+                  messageActionPressRef.current = true
+                }}
+                onPressOut={() => {
+                  messageActionPressRef.current = false
+                }}
+                onPress={() => void translateMessage(messageActionMessage)}
+                style={({ pressed }) => [
+                  styles.messageAction,
+                  pressed && styles.messageActionPressed,
+                ]}
+              >
+                <Ionicons name="language-outline" size={18} color="#FFFFFF" />
+                <Text style={styles.messageActionLabel}>
+                  {messageActionMessage.translationVisible ? 'Hide' : 'Translate'}
+                </Text>
+              </Pressable>
+            )}
+            {messageActionMessage.voice?.provider === 'qwen3-tts' && messageActionMessage.voice.status === 'ready' && (
               <>
                 <View style={styles.messageActionDivider} />
                 <Pressable
@@ -3150,6 +3408,16 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     gap: 8,
   },
+  composerModeButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#C9D1DC',
+    backgroundColor: '#FFFFFF',
+  },
   composerInput: {
     flex: 1,
     minHeight: 44,
@@ -3196,6 +3464,33 @@ const styles = StyleSheet.create({
   },
   voiceButtonPressed: {
     backgroundColor: '#F2F4F7',
+  },
+  holdToTalkButton: {
+    flex: 1,
+    height: 44,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#C9D1DC',
+  },
+  holdToTalkButtonPressed: {
+    backgroundColor: '#EEF7EA',
+    borderColor: '#7CC85D',
+  },
+  holdToTalkButtonRecording: {
+    backgroundColor: '#EAF7E4',
+    borderColor: '#7CC85D',
+  },
+  holdToTalkButtonError: {
+    borderColor: '#FDA29B',
+    backgroundColor: '#FFF3F1',
+  },
+  holdToTalkText: {
+    color: palette.text,
+    fontSize: 17,
+    fontWeight: '600',
   },
   sendButtonDisabled: {
     backgroundColor: '#9BD49D',
@@ -3299,6 +3594,51 @@ const styles = StyleSheet.create({
     width: StyleSheet.hairlineWidth,
     height: 38,
     backgroundColor: '#5A5D62',
+  },
+  voiceRecordingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 80,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    paddingBottom: 46,
+    backgroundColor: 'rgba(16, 24, 40, 0.66)',
+  },
+  voiceRecordingPreview: {
+    width: 230,
+    height: 124,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#8DDE62',
+    marginBottom: 46,
+  },
+  voiceRecordingWave: {
+    height: 38,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  voiceRecordingBar: {
+    width: 4,
+    borderRadius: 2,
+    backgroundColor: '#3C7A2A',
+  },
+  voiceRecordingActions: {
+    width: '100%',
+    paddingHorizontal: 42,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  voiceRecordingActionLabel: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  voiceRecordingInstruction: {
+    marginTop: 26,
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '700',
   },
   errorTitle: {
     color: palette.text,

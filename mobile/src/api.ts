@@ -10,6 +10,7 @@ import {
   ProactiveDelivery,
   PublicCharacterState,
   MessageTranslationResponse,
+  ServerMessage,
   SyncSnapshot,
   VoiceTranscriptMetadata,
 } from './types'
@@ -203,6 +204,46 @@ export const api = {
       body: input.audio,
     }, 60_000)
     return result.transcription
+  },
+
+  async sendVoiceMessage(input: {
+    userId: string
+    characterId: string
+    conversationId?: string
+    audio: Blob
+    durationMilliseconds: number
+    mimeType: string
+  }) {
+    return request<{
+      conversation: Conversation
+      message: ServerMessage
+      starterMessage?: ServerMessage
+    }>('/api/voice/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': input.mimeType,
+        'X-Chatterra-User-Id': input.userId,
+        'X-Chatterra-Character-Id': input.characterId,
+        ...(input.conversationId ? { 'X-Chatterra-Conversation-Id': input.conversationId } : {}),
+        'X-Chatterra-Voice-Duration-Ms': String(Math.round(input.durationMilliseconds)),
+      },
+      body: input.audio,
+    }, 60_000)
+  },
+
+  async convertVoiceMessageToText(userId: string, messageId: string) {
+    return request<{ message: ServerMessage }>(
+      `/api/voice/messages/${encodeURIComponent(messageId)}/transcription`,
+      { method: 'POST', body: JSON.stringify({ userId }) },
+      60_000
+    )
+  },
+
+  async discardVoiceMessageText(userId: string, messageId: string) {
+    return request<{ message: ServerMessage }>(
+      `/api/voice/messages/${encodeURIComponent(messageId)}/transcription`,
+      { method: 'DELETE', body: JSON.stringify({ userId }) }
+    )
   },
 
   async getCharacterState(userId: string, characterId: string) {
