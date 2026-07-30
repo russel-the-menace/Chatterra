@@ -51,10 +51,12 @@ const createTranscriptionForm = (input: {
   mimeType: string
   extension: string
   model: string
+  prompt?: string
 }) => {
   const form = new FormData()
   form.append('model', input.model)
   form.append('response_format', 'json')
+  if (input.prompt) form.append('prompt', input.prompt)
   form.append(
     'file',
     new Blob([Uint8Array.from(input.audio)], { type: input.mimeType }),
@@ -69,6 +71,7 @@ const requestTranscription = async (input: {
   extension: string
   mimeType: string
   model: string
+  prompt?: string
   route: GroqRoute
   url: string
   proxyUrl?: string
@@ -91,6 +94,7 @@ const shouldRetryViaMihomo = (status: number) => status === 403 || status >= 500
 export const transcribeWithGroq = async (input: {
   audio: Buffer
   mimeType: string
+  prompt?: string
 }): Promise<GroqTranscriptionResult> => {
   const mimeType = normalizedMimeType(input.mimeType)
   const extension = AUDIO_EXTENSIONS[mimeType]
@@ -115,6 +119,7 @@ export const transcribeWithGroq = async (input: {
       extension,
       mimeType,
       model,
+      prompt: input.prompt,
       route,
       url,
     })
@@ -141,6 +146,7 @@ export const transcribeWithGroq = async (input: {
         extension,
         mimeType,
         model,
+        prompt: input.prompt,
         route,
         url,
         proxyUrl,

@@ -219,6 +219,7 @@ export const api = {
 
   async transcribeVoice(input: {
     userId: string
+    characterId?: string
     fileUri: string
     mimeType: string
     byteLength: number
@@ -238,6 +239,7 @@ export const api = {
         headers: {
           'Content-Type': input.mimeType,
           'X-Chatterra-User-Id': input.userId,
+          ...(input.characterId ? { 'X-Chatterra-Character-Id': input.characterId } : {}),
           ...(input.requestId ? { 'X-Chatterra-Voice-Request-Id': input.requestId } : {}),
         },
       })

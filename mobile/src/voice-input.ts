@@ -23,6 +23,7 @@ export type VoiceInputStatus = 'idle' | 'recording' | 'processing' | 'error'
 export type VoiceInputMode = 'cloud' | 'local'
 
 type VoiceInputOptions = {
+  characterId?: string
   language?: string
   mode?: VoiceInputMode
   onCloudUnavailable?: () => void
@@ -157,6 +158,7 @@ const cloudVoiceErrorMessage = (error: unknown) => {
 }
 
 export const useVoiceInput = ({
+  characterId,
   language,
   mode = 'local',
   onCloudUnavailable,
@@ -261,6 +263,7 @@ export const useVoiceInput = ({
       })
       const transcription = await api.transcribeVoice({
         userId: userId || '',
+        characterId,
         fileUri: upload.fileUri,
         mimeType: recordingMimeType(),
         byteLength: upload.byteLength,
@@ -289,7 +292,7 @@ export const useVoiceInput = ({
       if (session === sessionRef.current) activeModeRef.current = null
       resetAudioMode()
     }
-  }, [clearRecordingTimer, recorder, resetAudioMode, updateSnapshot, userId])
+  }, [characterId, clearRecordingTimer, recorder, resetAudioMode, updateSnapshot, userId])
 
   const startCloud = useCallback(async (initialText: string) => {
     if (!userId) {

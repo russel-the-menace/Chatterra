@@ -14,6 +14,7 @@
     "test:model-gateway": "ts-node --transpile-only model-gateway.test.ts",
     "test:message-page-merge": "ts-node --skip-project --transpile-only --compiler-options '{\"module\":\"CommonJS\",\"moduleResolution\":\"Node\"}' ../mobile/src/message-page-merge.test.ts",
     "test:groq-transcription": "ts-node --transpile-only groq-transcription.test.ts",
+    "test:voice-transcription-context": "ts-node --transpile-only voice-transcription-context.test.ts",
     "test:voice-capability": "ts-node --transpile-only voice-capability.test.ts",
     "test:user-voice-message": "ts-node --transpile-only user-voice-message.test.ts",
     "test:translation": "ts-node --transpile-only translation-service.test.ts",

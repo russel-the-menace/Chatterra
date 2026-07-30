@@ -26,11 +26,13 @@ const run = async () => {
     const result = await transcribeWithGroq({
       audio: Buffer.from('audio-bytes'),
       mimeType: 'audio/mp4; charset=binary',
+      prompt: 'Bilingual English and Argentine Spanish. Prefer gracias.',
     })
     assert.equal(result.text, '今日は meeting がある。')
     assert.equal(result.model, 'whisper-large-v3-turbo')
     assert.equal(requestBody?.get('model'), 'whisper-large-v3-turbo')
     assert.equal(requestBody?.get('response_format'), 'json')
+    assert.equal(requestBody?.get('prompt'), 'Bilingual English and Argentine Spanish. Prefer gracias.')
     assert.ok(requestBody?.get('file') instanceof Blob)
     assert.equal(isSupportedTranscriptionAudioType('audio/mp4'), true)
     assert.equal(isSupportedTranscriptionAudioType('audio/wav'), false)

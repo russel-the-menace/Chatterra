@@ -1038,6 +1038,7 @@ export default function ChatScreen() {
   const voiceInput = useVoiceInput({
     mode: voiceInputMode,
     userId: userId || undefined,
+    characterId: character?.id,
     language: character?.language,
     onCloudUnavailable: markCloudVoiceUnavailable,
     onTranscriptChange: (text, metadata) => {

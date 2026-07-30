@@ -35,6 +35,7 @@ import {
   transcribeWithGroq,
 } from './groq-transcription'
 import { getVoiceCapability } from './voice-capability'
+import { voiceTranscriptionContextForCharacter } from './voice-transcription-context'
 import {
   isSupportedUserVoiceMessageType,
   MAX_USER_VOICE_MESSAGE_BYTES,
@@ -524,7 +525,20 @@ app.post('/api/voice/messages/:id/transcription', asyncRoute(async (req, res) =>
   } catch {
     return res.status(404).json({ error: 'voice message audio not found' })
   }
-  const transcription = await transcribeWithGroq({ audio, mimeType: voice.mimeType })
+  const conversation = await getConversation(message.conversationId)
+  const character = conversation?.userId === userId
+    ? await getCharacterForUser(userId, conversation.characterId)
+    : undefined
+  const transcriptionContext = voiceTranscriptionContextForCharacter(character)
+  console.info('Voice message transcription context selected', {
+    messageId: message.id,
+    context: transcriptionContext?.id || 'generic',
+  })
+  const transcription = await transcribeWithGroq({
+    audio,
+    mimeType: voice.mimeType,
+    prompt: transcriptionContext?.prompt,
+  })
   const updated = await updateUserVoiceMessageTranscript(message.id, transcription.text)
   if (!updated) return res.status(404).json({ error: 'voice message not found' })
   return res.json({ message: updated })
@@ -553,6 +567,9 @@ app.post(
     const userId = typeof req.headers['x-chatterra-user-id'] === 'string'
       ? req.headers['x-chatterra-user-id'].trim()
       : ''
+    const characterId = typeof req.headers['x-chatterra-character-id'] === 'string'
+      ? req.headers['x-chatterra-character-id'].trim()
+      : ''
     const mimeType = req.headers['content-type'] || ''
     const logDetails = voiceRequestLogDetails(req, { hasUserId: Boolean(userId) })
     console.info('Voice transcription received', logDetails)
@@ -574,8 +591,20 @@ app.post(
       return res.status(429).json({ error: 'voice transcription rate limit reached; try again shortly' })
     }
 
+    const character = characterId ? await getCharacterForUser(userId, characterId) : undefined
+    const transcriptionContext = voiceTranscriptionContextForCharacter(character)
+    console.info('Voice transcription context selected', {
+      ...logDetails,
+      context: transcriptionContext?.id || 'generic',
+      hasKnownCharacter: Boolean(character),
+    })
+
     try {
-      const transcription = await transcribeWithGroq({ audio: req.body, mimeType })
+      const transcription = await transcribeWithGroq({
+        audio: req.body,
+        mimeType,
+        prompt: transcriptionContext?.prompt,
+      })
       console.info('Voice transcription succeeded', {
         ...logDetails,
         provider: transcription.provider,

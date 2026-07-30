@@ -150,6 +150,7 @@ export const useVoiceMessageRecorder = ({
         }
         const transcription = await api.transcribeVoice({
           userId: userId || '',
+          characterId,
           fileUri: upload.fileUri,
           mimeType,
           byteLength: upload.byteLength,
