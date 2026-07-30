@@ -8,6 +8,7 @@ import { MessageVoice } from '@/src/types'
 import { palette } from '@/src/theme'
 
 const displayDuration = (duration?: number) => `${Math.max(1, Math.round(duration || 1))}\"`
+const VOICE_WAVE_ICON_SIZE = 18
 
 export function VoiceMessageBubble({
   voice,
@@ -121,7 +122,7 @@ export function VoiceMessageBubble({
           { opacity: waveOpacity },
         ]}
       >
-        <Ionicons name="wifi-outline" size={24} color={isUser ? '#FFFFFF' : palette.text} />
+        <Ionicons name="wifi" size={VOICE_WAVE_ICON_SIZE} color={isUser ? '#FFFFFF' : palette.text} />
       </RNAnimated.View>
       <Text style={[styles.duration, isUser && styles.durationUser]}>{displayDuration(voice.durationSeconds)}</Text>
     </Pressable>
@@ -143,8 +144,8 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   soundWaves: {
-    width: 24,
-    height: 24,
+    width: VOICE_WAVE_ICON_SIZE,
+    height: VOICE_WAVE_ICON_SIZE,
     alignItems: 'center',
     justifyContent: 'center',
   },
