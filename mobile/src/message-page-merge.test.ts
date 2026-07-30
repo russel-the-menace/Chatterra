@@ -1,5 +1,5 @@
 import { mergeMessagePage } from './message-page-merge'
-import { ChatMessage } from './types'
+import { ChatMessage, UserVoiceMessage } from './types'
 
 const expect = (condition: unknown, message: string) => {
   if (!condition) throw new Error(message)
@@ -60,6 +60,41 @@ const run = () => {
   }]
   const prepended = mergeMessagePage([userMessage], older, 'prepend')
   expect(sameIds(prepended, ['older-message', 'server-user']), 'older history should prepend')
+
+  const convertedVoice: UserVoiceMessage = {
+    provider: 'user-recording',
+    status: 'ready',
+    audioUrl: '/voice-message.m4a',
+    durationSeconds: 4,
+    mimeType: 'audio/m4a',
+    transcriptStatus: 'ready',
+  }
+  const locallyConvertedVoice: ChatMessage = {
+    id: 'voice-message',
+    sourceMessageId: 'voice-message',
+    sender: 'user',
+    text: 'What does gracias mean?',
+    voice: convertedVoice,
+    voiceTranscriptVisible: true,
+  }
+  const staleVoiceSnapshot: ChatMessage = {
+    ...locallyConvertedVoice,
+    text: '',
+    voice: { ...convertedVoice, transcriptStatus: 'none' },
+    voiceTranscriptVisible: false,
+  }
+  const protectedVoiceTranscript = mergeMessagePage(
+    [locallyConvertedVoice],
+    [staleVoiceSnapshot],
+    'append'
+  )[0]
+  expect(protectedVoiceTranscript.text === locallyConvertedVoice.text,
+    'a stale sync must not clear a converted voice transcript')
+  expect(protectedVoiceTranscript.voice?.provider === 'user-recording'
+    && protectedVoiceTranscript.voice.transcriptStatus === 'ready',
+  'a stale sync must not reset a converted voice transcript status')
+  expect(protectedVoiceTranscript.voiceTranscriptVisible === true,
+    'a stale sync must retain the visible converted transcript')
   console.log('message page merge checks passed')
 }
 

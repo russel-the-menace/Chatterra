@@ -2087,6 +2087,9 @@ export default function ChatScreen() {
       message.voiceTranscriptionLoading
       || voiceTranscriptionRequestsRef.current.has(message.sourceMessageId)
     ) return
+    // A message-list request can have captured this message before transcription.
+    // Reject that stale snapshot so it cannot reset the local ready state afterward.
+    messageSyncRequestRef.current += 1
     const conversionStartedAt = Date.now()
     if (message.text.trim()) {
       console.info('[voice] voice_transcript_revealed_from_message', {

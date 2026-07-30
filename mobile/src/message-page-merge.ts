@@ -5,8 +5,18 @@ const mergeMessageUiState = (current: ChatMessage[], incoming: ChatMessage[]) =>
   return incoming.map(message => {
     const existing = currentById.get(message.id)
     if (!existing) return message
+    const preserveReadyVoiceTranscript = (
+      existing.voice?.provider === 'user-recording'
+      && message.voice?.provider === 'user-recording'
+      && existing.voice.transcriptStatus === 'ready'
+      && message.voice.transcriptStatus === 'none'
+    )
+    const mergedVoice = preserveReadyVoiceTranscript ? existing.voice : message.voice
     return {
       ...message,
+      ...(preserveReadyVoiceTranscript
+        ? { text: existing.text || message.text, voice: existing.voice }
+        : {}),
       renderKey: existing.renderKey || message.renderKey,
       translation: existing.translation || message.translation,
       translationVisible: existing.translation !== undefined
@@ -17,7 +27,7 @@ const mergeMessageUiState = (current: ChatMessage[], incoming: ChatMessage[]) =>
       translationLoading: existing.translationLoading,
       translationError: existing.translationError,
       voiceTranscriptionLoading: existing.voiceTranscriptionLoading,
-      voiceTranscriptVisible: existing.voiceTranscriptVisible && Boolean(message.voice),
+      voiceTranscriptVisible: existing.voiceTranscriptVisible && Boolean(mergedVoice),
     }
   })
 }
