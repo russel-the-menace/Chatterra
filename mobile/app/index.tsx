@@ -16,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 
 import { Avatar } from '@/components/avatar'
 import { useChat } from '@/src/chat-context'
+import { starterMessageForCharacter } from '@/src/starter-message'
 import { layout, palette } from '@/src/theme'
 import { Character } from '@/src/types'
 
@@ -51,7 +52,7 @@ function ContactRow({ character, pinned }: { character: Character; pinned: boole
           )}
         </View>
         <Text style={styles.contactPreview} numberOfLines={1}>
-          {proactivePreviews[character.id] || character.personality || character.role || 'Conversation partner'}
+          {proactivePreviews[character.id] || starterMessageForCharacter(character)}
         </Text>
       </View>
       <Ionicons name="chevron-forward" size={18} color="#98A2B3" />

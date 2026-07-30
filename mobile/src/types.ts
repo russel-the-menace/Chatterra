@@ -161,6 +161,13 @@ export type ConversationHistoryCache = {
   cachedAt: number
 }
 
+export type ContactPreviewCache = {
+  previews: Record<string, string>
+  conversationIdsByCharacter: Record<string, string | null>
+  lastMessageAtByCharacter: Record<string, string>
+  cachedAt: number
+}
+
 export type PublicCharacterState = {
   instanceId: string
   currentActivity: string

@@ -17,10 +17,12 @@ import { API_BASE_URL, api, setApiAccessToken } from './api'
 import {
   clearStoredAuthSession,
   getStoredAuthSession,
+  getStoredContactPreviewCache,
   getStoredComposerQuoteDrafts,
   getStoredConversationCache,
   removeStoredConversationCache,
   saveStoredAuthSession,
+  saveStoredContactPreviewCache,
   saveStoredComposerQuoteDrafts,
   saveStoredConversationCache,
   StoredAuthSession,
@@ -29,8 +31,10 @@ import {
   Character,
   ChatMessage,
   ComposerQuoteDraft,
+  ContactPreviewCache,
   ConversationHistoryCache,
 } from './types'
+import { buildContactPreviewState } from './contact-preview'
 
 type ConversationCacheEntry = ConversationHistoryCache
 
@@ -131,6 +135,22 @@ const persistentConversationEntry = (entry: ConversationCacheEntry): Conversatio
   }
 }
 
+const sameStringRecord = (
+  left: Record<string, string | null>,
+  right: Record<string, string | null>
+) => {
+  const leftKeys = Object.keys(left)
+  const rightKeys = Object.keys(right)
+  return leftKeys.length === rightKeys.length
+    && leftKeys.every(key => left[key] === right[key])
+}
+
+const sameContactPreviewCache = (left: ContactPreviewCache, right: ContactPreviewCache) => (
+  sameStringRecord(left.previews, right.previews)
+  && sameStringRecord(left.conversationIdsByCharacter, right.conversationIdsByCharacter)
+  && sameStringRecord(left.lastMessageAtByCharacter, right.lastMessageAtByCharacter)
+)
+
 export function ChatProvider({ children }: PropsWithChildren) {
   const [ready, setReady] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
@@ -154,6 +174,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const conversationCacheDirtyRef = useRef<Map<string, ConversationCacheEntry>>(new Map())
   const conversationCacheTimerRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
   const conversationCacheWriteRef = useRef<Map<string, Promise<void>>>(new Map())
+  const contactPreviewCacheWriteRef = useRef<Promise<void>>(Promise.resolve())
+  const contactPreviewCacheRef = useRef<ContactPreviewCache | null>(null)
   const pollingRef = useRef(false)
   const workspaceSyncingRef = useRef(false)
   const hasWorkspaceSnapshotRef = useRef(false)
@@ -170,6 +192,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
     conversationCacheDirtyRef.current.clear()
     conversationCacheTimerRef.current.clear()
     conversationCacheWriteRef.current.clear()
+    contactPreviewCacheWriteRef.current = Promise.resolve()
+    contactPreviewCacheRef.current = null
     conversationMetadataRef.current.clear()
     quoteDraftsRef.current = {}
     quoteDraftDirtyRef.current = null
@@ -201,10 +225,31 @@ export function ChatProvider({ children }: PropsWithChildren) {
       }
     }))
 
+    const warmedCaches = new Map<string, ConversationCacheEntry>()
     cachedEntries.forEach(entry => {
-      if (!entry || conversationCacheRef.current.has(entry[0])) return
-      conversationCacheRef.current.set(entry[0], entry[1])
+      if (!entry) return
+      const current = conversationCacheRef.current.get(entry[0]) || entry[1]
+      if (!conversationCacheRef.current.has(entry[0])) {
+        conversationCacheRef.current.set(entry[0], current)
+      }
+      warmedCaches.set(entry[0], current)
     })
+    return warmedCaches
+  }, [])
+
+  const persistContactPreviewCache = useCallback((accountId: string, cache: ContactPreviewCache) => {
+    if (
+      contactPreviewCacheRef.current
+      && sameContactPreviewCache(contactPreviewCacheRef.current, cache)
+    ) return
+    contactPreviewCacheRef.current = cache
+    const write = contactPreviewCacheWriteRef.current
+      .catch(() => undefined)
+      .then(() => saveStoredContactPreviewCache(API_BASE_URL, accountId, cache))
+      .catch(error => {
+        console.warn('Could not persist contact previews.', error)
+      })
+    contactPreviewCacheWriteRef.current = write
   }, [])
 
   const refreshVoiceInputCapability = useCallback(async () => {
@@ -274,29 +319,45 @@ export function ChatProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     let cancelled = false
     void (async () => {
+      let storedSession: StoredAuthSession | undefined
+      let sessionInvalid = false
       try {
-        const storedSession = await getStoredAuthSession()
+        storedSession = await getStoredAuthSession()
         if (!storedSession) return
         if (cancelled) return
         setApiAccessToken(storedSession.accessToken)
         sessionRef.current = storedSession
-        setUserId(storedSession.user.id)
-        setUsername(storedSession.user.username)
-        setUserName(storedSession.user.displayName)
-        const [storedQuoteDrafts, pinnedIds, nextCharacters] = await Promise.all([
+        const [storedQuoteDrafts, pinnedIds, nextCharacters, storedContactPreviews] = await Promise.all([
           getStoredComposerQuoteDrafts(storedSession.user.id).catch(() => ({})),
           api.listPinnedCharacterIds(storedSession.user.id),
           api.listCharacters(storedSession.user.id),
+          getStoredContactPreviewCache(API_BASE_URL, storedSession.user.id).catch(() => undefined),
         ])
-        await prewarmConversationCaches(storedSession.user.id, nextCharacters)
+        const warmedConversationCaches = await prewarmConversationCaches(
+          storedSession.user.id,
+          nextCharacters
+        )
         if (cancelled) return
+        const contactPreviewState = buildContactPreviewState(
+          nextCharacters,
+          storedContactPreviews,
+          warmedConversationCaches
+        )
         quoteDraftsRef.current = storedQuoteDrafts
         setQuoteDrafts(storedQuoteDrafts)
         setCharacters(nextCharacters)
         setPinnedCharacterIds(new Set(pinnedIds))
         setPinnedCharacterOrder(pinnedIds)
+        setProactivePreviews(contactPreviewState.previews)
+        setConversationIdsByCharacter(contactPreviewState.conversationIdsByCharacter)
+        setLastMessageAtByCharacter(contactPreviewState.lastMessageAtByCharacter)
+        persistContactPreviewCache(storedSession.user.id, {
+          ...contactPreviewState,
+          cachedAt: Date.now(),
+        })
       } catch (error) {
         if (error instanceof Error && 'status' in error && error.status === 401) {
+          sessionInvalid = true
           setApiAccessToken()
           sessionRef.current = null
           await clearStoredAuthSession()
@@ -307,6 +368,11 @@ export function ChatProvider({ children }: PropsWithChildren) {
           setConnectionError(messageForError(error))
         }
       } finally {
+        if (!cancelled && storedSession && !sessionInvalid) {
+          setUserId(storedSession.user.id)
+          setUsername(storedSession.user.username)
+          setUserName(storedSession.user.displayName)
+        }
         if (!cancelled) setReady(true)
       }
     })()
@@ -314,7 +380,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     return () => {
       cancelled = true
     }
-  }, [prewarmConversationCaches])
+  }, [persistContactPreviewCache, prewarmConversationCaches])
 
   const login = useCallback(async (nextUsername: string, password: string) => {
     const session = await api.login(nextUsername, password)
@@ -326,29 +392,46 @@ export function ChatProvider({ children }: PropsWithChildren) {
     setApiAccessToken(storedSession.accessToken)
     sessionRef.current = storedSession
     resetWorkspaceState()
-    setUserId(storedSession.user.id)
-    setUsername(storedSession.user.username)
-    setUserName(storedSession.user.displayName)
     setUserAvatar(undefined)
     setConnectionError(null)
     await saveStoredAuthSession(storedSession)
 
     try {
-      const [storedQuoteDrafts, pinnedIds, nextCharacters] = await Promise.all([
+      const [storedQuoteDrafts, pinnedIds, nextCharacters, storedContactPreviews] = await Promise.all([
         getStoredComposerQuoteDrafts(storedSession.user.id).catch(() => ({})),
         api.listPinnedCharacterIds(storedSession.user.id),
         api.listCharacters(storedSession.user.id),
+        getStoredContactPreviewCache(API_BASE_URL, storedSession.user.id).catch(() => undefined),
       ])
-      await prewarmConversationCaches(storedSession.user.id, nextCharacters)
+      const warmedConversationCaches = await prewarmConversationCaches(
+        storedSession.user.id,
+        nextCharacters
+      )
+      const contactPreviewState = buildContactPreviewState(
+        nextCharacters,
+        storedContactPreviews,
+        warmedConversationCaches
+      )
       quoteDraftsRef.current = storedQuoteDrafts
       setQuoteDrafts(storedQuoteDrafts)
       setPinnedCharacterIds(new Set(pinnedIds))
       setPinnedCharacterOrder(pinnedIds)
       setCharacters(nextCharacters)
+      setProactivePreviews(contactPreviewState.previews)
+      setConversationIdsByCharacter(contactPreviewState.conversationIdsByCharacter)
+      setLastMessageAtByCharacter(contactPreviewState.lastMessageAtByCharacter)
+      persistContactPreviewCache(storedSession.user.id, {
+        ...contactPreviewState,
+        cachedAt: Date.now(),
+      })
     } catch (error) {
       setConnectionError(messageForError(error))
+    } finally {
+      setUserId(storedSession.user.id)
+      setUsername(storedSession.user.username)
+      setUserName(storedSession.user.displayName)
     }
-  }, [prewarmConversationCaches, resetWorkspaceState])
+  }, [persistContactPreviewCache, prewarmConversationCaches, resetWorkspaceState])
 
   const logout = useCallback(async () => {
     try {
@@ -387,11 +470,16 @@ export function ChatProvider({ children }: PropsWithChildren) {
         }
       })
 
-      const nextConversationIds: Record<string, string | null> = {}
+      const defaultContactPreviewState = buildContactPreviewState(snapshot.characters)
+      const nextConversationIds: Record<string, string | null> = {
+        ...defaultContactPreviewState.conversationIdsByCharacter,
+      }
       const nextMetadata = new Map<string, string>()
       const changedCharacterIds = new Set<string>()
-      const nextPreviews: Record<string, string> = {}
-      const nextLastMessageAtByCharacter: Record<string, string> = {}
+      const nextPreviews: Record<string, string> = { ...defaultContactPreviewState.previews }
+      const nextLastMessageAtByCharacter: Record<string, string> = {
+        ...defaultContactPreviewState.lastMessageAtByCharacter,
+      }
 
       snapshot.characters.forEach(character => {
         const conversation = newestConversationByCharacter.get(character.id)
@@ -420,6 +508,12 @@ export function ChatProvider({ children }: PropsWithChildren) {
       setConversationIdsByCharacter(nextConversationIds)
       setProactivePreviews(nextPreviews)
       setLastMessageAtByCharacter(nextLastMessageAtByCharacter)
+      persistContactPreviewCache(userId, {
+        previews: nextPreviews,
+        conversationIdsByCharacter: nextConversationIds,
+        lastMessageAtByCharacter: nextLastMessageAtByCharacter,
+        cachedAt: Date.now(),
+      })
 
       if (hasWorkspaceSnapshotRef.current && changedCharacterIds.size > 0) {
         changedCharacterIds.forEach(characterId => {
@@ -450,7 +544,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     } finally {
       workspaceSyncingRef.current = false
     }
-  }, [characters.length, userId])
+  }, [characters.length, persistContactPreviewCache, userId])
 
   useEffect(() => {
     if (!userId) return

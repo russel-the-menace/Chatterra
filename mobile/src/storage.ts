@@ -5,6 +5,7 @@ import {
   AssistantVoiceMessage,
   MessageVoice,
   ComposerQuoteDraft,
+  ContactPreviewCache,
   ConversationHistoryCache,
   MessageHistoryCursor,
   MessageQuote,
@@ -14,6 +15,7 @@ const LEGACY_USER_ID_KEY = 'chatterra.mobile.userId'
 const AUTH_SESSION_KEY = 'chatterra.mobile.authSession.v1'
 const COMPOSER_QUOTE_DRAFTS_PREFIX = 'chatterra.mobile.composerQuoteDrafts.v2'
 const CONVERSATION_CACHE_PREFIX = 'chatterra.mobile.conversationCache.v1'
+const CONTACT_PREVIEW_CACHE_PREFIX = 'chatterra.mobile.contactPreviewCache.v1'
 
 export type StoredAuthSession = {
   accessToken: string
@@ -240,6 +242,49 @@ const conversationCacheKey = (apiBaseUrl: string, userId: string, characterId: s
   `${CONVERSATION_CACHE_PREFIX}.${encodeURIComponent(apiBaseUrl)}.${encodeURIComponent(userId)}.${encodeURIComponent(characterId)}`
 )
 
+const contactPreviewCacheKey = (apiBaseUrl: string, userId: string) => (
+  `${CONTACT_PREVIEW_CACHE_PREFIX}.${encodeURIComponent(apiBaseUrl)}.${encodeURIComponent(userId)}`
+)
+
+const stringRecord = (value: unknown) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([key, item]) => (
+      typeof item === 'string' ? [[key, item]] : []
+    ))
+  ) as Record<string, string>
+}
+
+const nullableStringRecord = (value: unknown) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([key, item]) => (
+      typeof item === 'string' || item === null ? [[key, item]] : []
+    ))
+  ) as Record<string, string | null>
+}
+
+const parseContactPreviewCache = (value: unknown): ContactPreviewCache | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const cache = value as Record<string, unknown>
+  const previews = stringRecord(cache.previews)
+  const conversationIdsByCharacter = nullableStringRecord(cache.conversationIdsByCharacter)
+  const lastMessageAtByCharacter = stringRecord(cache.lastMessageAtByCharacter)
+  if (
+    !previews
+    || !conversationIdsByCharacter
+    || !lastMessageAtByCharacter
+    || !Number.isFinite(cache.cachedAt)
+    || Number(cache.cachedAt) <= 0
+  ) return undefined
+  return {
+    previews,
+    conversationIdsByCharacter,
+    lastMessageAtByCharacter,
+    cachedAt: Number(cache.cachedAt),
+  }
+}
+
 export const getStoredConversationCache = async (
   apiBaseUrl: string,
   userId: string,
@@ -273,6 +318,27 @@ export const removeStoredConversationCache = async (
   characterId: string
 ) => {
   await AsyncStorage.removeItem(conversationCacheKey(apiBaseUrl, userId, characterId))
+}
+
+export const getStoredContactPreviewCache = async (apiBaseUrl: string, userId: string) => {
+  const stored = await AsyncStorage.getItem(contactPreviewCacheKey(apiBaseUrl, userId))
+  if (!stored) return undefined
+  try {
+    return parseContactPreviewCache(JSON.parse(stored) as unknown)
+  } catch {
+    return undefined
+  }
+}
+
+export const saveStoredContactPreviewCache = async (
+  apiBaseUrl: string,
+  userId: string,
+  cache: ContactPreviewCache
+) => {
+  await AsyncStorage.setItem(
+    contactPreviewCacheKey(apiBaseUrl, userId),
+    JSON.stringify(cache)
+  )
 }
 
 const composerQuoteDraftsKey = (userId: string) => (
