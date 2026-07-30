@@ -1,6 +1,7 @@
+import Ionicons from '@expo/vector-icons/Ionicons'
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from 'expo-audio'
 import { useCallback, useEffect, useRef } from 'react'
-import { Animated as RNAnimated, Pressable, StyleSheet, Text, View } from 'react-native'
+import { Animated as RNAnimated, Pressable, StyleSheet, Text } from 'react-native'
 
 import { mediaUrl } from '@/src/api'
 import { MessageVoice } from '@/src/types'
@@ -24,11 +25,7 @@ export function VoiceMessageBubble({
   const status = useAudioPlayerStatus(player)
   const playWhenLoadedRef = useRef(false)
   const suppressPlaybackUntilRef = useRef(0)
-  const waveOpacities = useRef([
-    new RNAnimated.Value(1),
-    new RNAnimated.Value(1),
-    new RNAnimated.Value(1),
-  ]).current
+  const waveOpacity = useRef(new RNAnimated.Value(1)).current
 
   useEffect(() => {
     if (!status.didJustFinish) return
@@ -36,23 +33,26 @@ export function VoiceMessageBubble({
   }, [player, status.didJustFinish])
 
   useEffect(() => {
-    if (!status.playing) return
-    const frame = (visible: number) => RNAnimated.parallel(
-      waveOpacities.map((opacity, index) => RNAnimated.timing(opacity, {
-        toValue: index < visible ? 1 : 0.22,
-        duration: 170,
-        useNativeDriver: true,
-      }))
-    )
+    if (!status.playing) {
+      waveOpacity.stopAnimation()
+      waveOpacity.setValue(1)
+      return
+    }
     const animation = RNAnimated.loop(RNAnimated.sequence([
-      frame(1),
-      frame(2),
-      frame(3),
-      frame(1),
+      RNAnimated.timing(waveOpacity, {
+        toValue: 0.42,
+        duration: 220,
+        useNativeDriver: true,
+      }),
+      RNAnimated.timing(waveOpacity, {
+        toValue: 1,
+        duration: 220,
+        useNativeDriver: true,
+      }),
     ]))
     animation.start()
     return () => animation.stop()
-  }, [status.playing, waveOpacities])
+  }, [status.playing, waveOpacity])
 
   const startPlayback = useCallback(async () => {
     if (status.didJustFinish) await player.seekTo(0)
@@ -114,23 +114,15 @@ export function VoiceMessageBubble({
         pressed && styles.voiceMessagePressed,
       ]}
     >
-      <View style={[styles.soundWaves, isUser && styles.soundWavesUser]}>
-        {waveOpacities.map((opacity, index) => (
-          <RNAnimated.View
-            key={index}
-            style={[
-              index === 0 ? styles.soundWaveDot : styles.soundWaveArc,
-              index === 1 && styles.soundWaveArcShort,
-              index === 2 && styles.soundWaveArcLong,
-              {
-                backgroundColor: index === 0 ? (isUser ? '#FFFFFF' : palette.text) : undefined,
-                borderColor: isUser ? '#FFFFFF' : palette.text,
-                opacity,
-              },
-            ]}
-          />
-        ))}
-      </View>
+      <RNAnimated.View
+        style={[
+          styles.soundWaves,
+          isUser ? styles.soundWavesUser : styles.soundWavesAssistant,
+          { opacity: waveOpacity },
+        ]}
+      >
+        <Ionicons name="wifi-outline" size={24} color={isUser ? '#FFFFFF' : palette.text} />
+      </RNAnimated.View>
       <Text style={[styles.duration, isUser && styles.durationUser]}>{displayDuration(voice.durationSeconds)}</Text>
     </Pressable>
   )
@@ -151,43 +143,16 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   soundWaves: {
-    width: 22,
-    height: 20,
-    position: 'relative',
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   soundWavesUser: {
-    transform: [{ scaleX: -1 }],
+    transform: [{ rotate: '90deg' }],
   },
-  soundWaveArc: {
-    position: 'absolute',
-    borderLeftWidth: 0,
-    borderRightWidth: 1.8,
-    borderTopWidth: 1.8,
-    borderBottomWidth: 1.8,
-  },
-  soundWaveDot: {
-    position: 'absolute',
-    width: 4,
-    height: 4,
-    top: 8,
-    left: 1,
-    borderRadius: 2,
-  },
-  soundWaveArcShort: {
-    width: 6,
-    height: 10,
-    top: 5,
-    left: 7,
-    borderTopRightRadius: 6,
-    borderBottomRightRadius: 6,
-  },
-  soundWaveArcLong: {
-    width: 8,
-    height: 18,
-    top: 1,
-    left: 13,
-    borderTopRightRadius: 10,
-    borderBottomRightRadius: 10,
+  soundWavesAssistant: {
+    transform: [{ rotate: '-90deg' }],
   },
   duration: {
     color: palette.text,
