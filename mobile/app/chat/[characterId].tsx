@@ -1,4 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons'
+import { FlashList, FlashListRef } from '@shopify/flash-list'
 import * as Clipboard from 'expo-clipboard'
 import { router, useLocalSearchParams } from 'expo-router'
 import {
@@ -14,7 +15,6 @@ import {
   Animated as RNAnimated,
   BackHandler,
   Easing,
-  FlatList,
   Keyboard,
   LayoutChangeEvent,
   NativeScrollEvent,
@@ -29,16 +29,10 @@ import {
   View,
 } from 'react-native'
 import Reanimated, {
-  cancelAnimation,
-  Easing as ReanimatedEasing,
-  scrollTo,
   useAnimatedKeyboard,
-  useAnimatedReaction,
-  useAnimatedRef,
   useAnimatedStyle,
   useDerivedValue,
   useSharedValue,
-  withTiming,
 } from 'react-native-reanimated'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
@@ -66,7 +60,6 @@ import {
 
 const createLocalId = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`
 
-const LATEST_SCROLL_DURATION_MS = 280
 const MESSAGE_REVEAL_DURATION_MS = 220
 const OUTGOING_DELIVERY_INDICATOR_DELAY_MS = 3_000
 const OUTGOING_DELIVERY_TIMEOUT_MS = 60_000
@@ -88,10 +81,9 @@ const MESSAGE_ACTION_FADE_IN_MS = 90
 const MESSAGE_ACTION_REAPPEAR_DELAY_MS = 120
 const MESSAGE_SELECTION_INITIALIZE_MS = 180
 const HISTORY_PAGE_SIZE = 20
-const OLDER_HISTORY_TRIGGER_OFFSET = 80
-// The final row margin and list padding together form the visible composer gap.
-const MESSAGE_LIST_BOTTOM_PADDING = LATEST_MESSAGE_COMPOSER_GAP - MESSAGE_ROW_GAP
+const NEAR_LATEST_THRESHOLD = 96
 const CLOUD_WAVEFORM_SAMPLE_COUNT = 30
+const CHAT_MAINTAIN_VISIBLE_CONTENT_POSITION = Object.freeze({ disabled: false })
 
 const cloudWaveformHeight = (metering?: number) => {
   const decibels = Number.isFinite(metering) ? Number(metering) : -58
@@ -102,6 +94,15 @@ const cloudWaveformHeight = (metering?: number) => {
 const visibleHistoryWindow = (messages: ChatMessage[], messageCount = HISTORY_PAGE_SIZE) => (
   messages.slice(-Math.max(1, messageCount))
 )
+
+const chatMessageItemType = (message: ChatMessage) => {
+  if (message.loading) return 'loading'
+  if (message.voice) return `${message.sender}-voice`
+  if (message.quote || message.voiceTranscriptVisible || message.translationVisible) {
+    return `${message.sender}-supplement`
+  }
+  return message.sender
+}
 
 const cursorForMessage = (message?: ChatMessage): MessageHistoryCursor | undefined => (
   message?.createdAt
@@ -595,10 +596,12 @@ function MessageBubbleContent({
   onSelectionOutsideTap: () => void
   onSelectionTouchEnd: () => void
 }) {
+  const messageKey = message.renderKey || message.id
   const isLoading = Boolean(message.loading)
   const readyVoice = message.voice?.status === 'ready'
     && Boolean(message.voice.audioUrl)
   const revealProgress = useRef(new RNAnimated.Value(isLoading ? 0 : 1)).current
+  const renderedMessageKeyRef = useRef(messageKey)
   const wasLoadingRef = useRef(isLoading)
   const [showTypingIndicator, setShowTypingIndicator] = useState(isLoading)
   const [selectionLines, setSelectionLines] = useState<MessageTextLine[]>([])
@@ -651,6 +654,16 @@ function MessageBubbleContent({
     return true
   }, [onSelectionOutsideTap, selectionDismissTargets])
   useEffect(() => {
+    if (renderedMessageKeyRef.current !== messageKey) {
+      renderedMessageKeyRef.current = messageKey
+      revealProgress.stopAnimation()
+      revealProgress.setValue(isLoading ? 0 : 1)
+      wasLoadingRef.current = isLoading
+      setShowTypingIndicator(isLoading)
+      setSelectionLines([])
+      return
+    }
+
     if (isLoading) {
       revealProgress.stopAnimation()
       revealProgress.setValue(0)
@@ -678,7 +691,7 @@ function MessageBubbleContent({
       if (finished) setShowTypingIndicator(false)
     })
     return () => animation.stop()
-  }, [isLoading, revealProgress])
+  }, [isLoading, messageKey, revealProgress])
 
   return (
     <View
@@ -797,6 +810,7 @@ function MessageRow({
   onSelectionOutsideTap,
   onSelectionTouchEnd,
   onRetryMessage,
+  isOldest,
 }: {
   message: ChatMessage
   characterName: string
@@ -814,10 +828,11 @@ function MessageRow({
   onSelectionOutsideTap: () => void
   onSelectionTouchEnd: () => void
   onRetryMessage: (message: ChatMessage) => void
+  isOldest: boolean
 }) {
+  const messageKey = message.renderKey || message.id
   const isUser = message.sender === 'user'
   const isContinuation = !isUser && (message.groupIndex || 0) > 0
-  const hasFollowingSegment = (message.groupIndex || 0) < (message.groupSize || 1) - 1
   const readyVoice = message.voice?.status === 'ready' && Boolean(message.voice.audioUrl)
   const entryProgress = useRef(new RNAnimated.Value(message.animateEntry ? 0 : 1)).current
   const bubbleRef = useRef<View>(null)
@@ -830,20 +845,25 @@ function MessageRow({
   }
 
   useEffect(() => {
+    entryProgress.stopAnimation()
+    entryProgress.setValue(message.animateEntry ? 0 : 1)
     if (!message.animateEntry) return
-    RNAnimated.timing(entryProgress, {
+    const animation = RNAnimated.timing(entryProgress, {
       toValue: 1,
       duration: 230,
       delay: message.animationDelayMs || 0,
       useNativeDriver: false,
-    }).start()
-  }, [entryProgress, message.animateEntry, message.animationDelayMs])
+    })
+    animation.start()
+    return () => animation.stop()
+  }, [entryProgress, message.animateEntry, message.animationDelayMs, messageKey])
 
   return (
     <RNAnimated.View
       style={[
         styles.messageRow,
-        hasFollowingSegment && styles.messageRowGrouped,
+        isOldest && styles.messageRowOldest,
+        isContinuation && styles.messageRowGrouped,
         {
           opacity: entryProgress,
           transform: [{
@@ -1031,15 +1051,12 @@ export default function ChatScreen() {
     )
   )
   const initialContentOffsetRef = useRef<{ x: number; y: number } | undefined>(
-    hasInitialListViewState && initialListViewStateRef.current
+    hasInitialListViewState
+      && initialListViewStateRef.current
+      && !initialListViewStateRef.current.followLatest
       ? { x: 0, y: initialListViewStateRef.current.offsetY }
       : undefined
   )
-  const restoredLatestAlignmentPendingRef = useRef(Boolean(
-    hasInitialListViewState
-    && initialListViewState?.followLatest
-    && initialListViewState.withinImmersiveRange
-  ))
   const initialDisplayMessageCount = hasInitialListViewState && initialListViewState
     ? initialListViewState.messageCount
     : HISTORY_PAGE_SIZE
@@ -1049,6 +1066,7 @@ export default function ChatScreen() {
   )
   const initialDisplayCursor = cursorForMessage(initialDisplayMessages[0])
   const [messages, setMessages] = useState<ChatMessage[]>(() => initialDisplayMessages)
+  const displayMessages = useMemo(() => [...messages].reverse(), [messages])
   const [conversationId, setConversationId] = useState<string | null>(
     initialCacheRef.current?.conversationId || null
   )
@@ -1061,7 +1079,6 @@ export default function ChatScreen() {
   const [oldestMessageCursor, setOldestMessageCursor] = useState<MessageHistoryCursor | undefined>(
     () => initialDisplayCursor || initialCacheRef.current?.oldestMessageCursor
   )
-  const [initialPositionReady, setInitialPositionReady] = useState(Boolean(initialCacheRef.current))
   const [activity, setActivity] = useState('Online')
   const [loadingHistory, setLoadingHistory] = useState(!initialCacheRef.current)
   // AsyncStorage is checked after the route mounts. Do not present that short
@@ -1076,7 +1093,7 @@ export default function ChatScreen() {
   const [loadingOlderHistory, setLoadingOlderHistory] = useState(false)
   const [messageActionSession, setMessageActionSession] = useState<MessageActionSession | null>(null)
   const [messageActionMenuInteractive, setMessageActionMenuInteractive] = useState(true)
-  const listRef = useAnimatedRef<FlatList<ChatMessage>>()
+  const listRef = useRef<FlashListRef<ChatMessage>>(null)
   const composerInputRef = useRef<TextInput>(null)
   const composerRegionRef = useRef<View>(null)
   const messagesRef = useRef(messages)
@@ -1107,13 +1124,7 @@ export default function ChatScreen() {
   const unseenLatestRef = useRef(false)
   const manualScrollRef = useRef(false)
   const initialScrollRef = useRef(!hasInitialListViewState)
-  const initialScrollScheduledRef = useRef(false)
-  const initialScrollFrameRef = useRef<number | null>(null)
   const loadingOlderHistoryRef = useRef(false)
-  const prependHistoryAnchorRef = useRef<{
-    contentHeight: number
-    offsetY: number
-  } | null>(null)
   const scrollMetricsRef = useRef({
     contentHeight: 0,
     offsetY: 0,
@@ -1122,10 +1133,6 @@ export default function ChatScreen() {
   const keyboard = useAnimatedKeyboard()
   const scrollContentHeight = useSharedValue(0)
   const scrollViewportHeight = useSharedValue(0)
-  const latestScrollStartOffset = useSharedValue(0)
-  const latestScrollProgress = useSharedValue(1)
-  const latestScrollActive = useSharedValue(false)
-  const latestScrollPinned = useSharedValue(false)
   const keyboardLift = useDerivedValue(
     () => Math.max(0, keyboard.height.value - insets.bottom + 8),
     [insets.bottom]
@@ -1380,27 +1387,6 @@ export default function ChatScreen() {
     return () => subscription.remove()
   }, [closeMessageActionMenu, messageActionSession])
 
-  useAnimatedReaction(
-    () => ({
-      active: latestScrollActive.value,
-      contentHeight: scrollContentHeight.value,
-      pinned: latestScrollPinned.value,
-      progress: latestScrollProgress.value,
-      startOffset: latestScrollStartOffset.value,
-      viewportHeight: scrollViewportHeight.value,
-    }),
-    state => {
-      if (!state.active || state.viewportHeight <= 0) return
-      const latestOffset = Math.max(0, state.contentHeight - state.viewportHeight)
-      const animatedOffset = state.startOffset
-        + (latestOffset - state.startOffset) * state.progress
-      const targetOffset = state.pinned
-        ? latestOffset
-        : Math.max(0, Math.min(latestOffset, animatedOffset))
-      scrollTo(listRef, 0, targetOffset, false)
-    }
-  )
-
   const hideScrollToLatest = useCallback(() => {
     unseenLatestRef.current = false
     setShowScrollToLatest(false)
@@ -1416,23 +1402,16 @@ export default function ChatScreen() {
   const startLatestScroll = useCallback((pinToLatest = false) => {
     manualScrollRef.current = false
     followLatestRef.current = true
+    withinImmersiveRangeRef.current = true
+    scrollMetricsRef.current.offsetY = 0
     hideScrollToLatest()
-    latestScrollStartOffset.value = Math.max(0, scrollMetricsRef.current.offsetY)
-    latestScrollPinned.value = pinToLatest
-    latestScrollActive.value = true
-    cancelAnimation(latestScrollProgress)
-    latestScrollProgress.value = 0
-    latestScrollProgress.value = withTiming(1, {
-      duration: LATEST_SCROLL_DURATION_MS,
-      easing: ReanimatedEasing.out(ReanimatedEasing.cubic),
+    const scroll = () => listRef.current?.scrollToOffset({
+      offset: 0,
+      animated: !pinToLatest,
     })
-  }, [
-    hideScrollToLatest,
-    latestScrollActive,
-    latestScrollPinned,
-    latestScrollProgress,
-    latestScrollStartOffset,
-  ])
+    scroll()
+    if (pinToLatest) requestAnimationFrame(scroll)
+  }, [hideScrollToLatest])
 
   const prepareForIncomingMessage = useCallback((count = 1) => {
     // The initial page load can race the workspace sync. Until the first
@@ -1447,15 +1426,8 @@ export default function ChatScreen() {
   }, [closeMessageActionMenu, showLatestMessageButton, startLatestScroll])
 
   const handleComposerFocus = useCallback(() => {
-    if (initialScrollRef.current) return
     composerFocusedRef.current = true
-    if (initialScrollFrameRef.current !== null) {
-      cancelAnimationFrame(initialScrollFrameRef.current)
-      initialScrollFrameRef.current = null
-    }
     initialScrollRef.current = false
-    initialScrollScheduledRef.current = false
-    setInitialPositionReady(true)
     startLatestScroll(withinImmersiveRangeRef.current)
   }, [startLatestScroll])
 
@@ -1463,46 +1435,20 @@ export default function ChatScreen() {
     composerFocusedRef.current = false
   }, [])
 
-  const scrollToExactLatest = useCallback(() => {
-    const { contentHeight, viewportHeight } = scrollMetricsRef.current
-    if (contentHeight <= 0 || viewportHeight <= 0) return false
-    // VirtualizedList.scrollToEnd approximates dynamic cell frames and can overscroll on mount.
-    const offset = Math.max(0, contentHeight - viewportHeight)
-    listRef.current?.scrollToOffset({ offset, animated: false })
-    scrollMetricsRef.current.offsetY = offset
-    return true
-  }, [listRef])
-
   const resetInitialScroll = useCallback(() => {
-    if (initialScrollFrameRef.current !== null) {
-      cancelAnimationFrame(initialScrollFrameRef.current)
-      initialScrollFrameRef.current = null
-    }
     initialScrollRef.current = true
-    initialScrollScheduledRef.current = false
     initialContentOffsetRef.current = undefined
-    setInitialPositionReady(false)
-  }, [])
+    followLatestRef.current = true
+    withinImmersiveRangeRef.current = true
+    scrollMetricsRef.current.offsetY = 0
+    hideScrollToLatest()
+  }, [hideScrollToLatest])
 
   const settleInitialScroll = useCallback(() => {
-    if (!initialScrollRef.current || initialScrollScheduledRef.current) return
-    if (!scrollToExactLatest()) return
-    initialScrollScheduledRef.current = true
-    initialScrollFrameRef.current = requestAnimationFrame(() => {
-      if (!initialScrollRef.current) return
-      // Variable-height rows continue to mount after the first content-size
-      // callback. Align across two frames before exposing the virtualized list.
-      scrollToExactLatest()
-      initialScrollFrameRef.current = requestAnimationFrame(() => {
-        if (!initialScrollRef.current) return
-        scrollToExactLatest()
-        initialScrollRef.current = false
-        initialScrollScheduledRef.current = false
-        initialScrollFrameRef.current = null
-        setInitialPositionReady(true)
-      })
-    })
-  }, [scrollToExactLatest])
+    if (!initialScrollRef.current) return
+    initialScrollRef.current = false
+    if (followLatestRef.current) startLatestScroll(true)
+  }, [startLatestScroll])
 
   const scheduleDeliveryTask = useCallback((task: () => void, delay: number) => {
     const timer = setTimeout(() => {
@@ -1583,11 +1529,6 @@ export default function ChatScreen() {
   }, [prepareForIncomingMessage, scheduleDeliveryTask])
 
   useEffect(() => () => {
-    if (initialScrollFrameRef.current !== null) {
-      cancelAnimationFrame(initialScrollFrameRef.current)
-    }
-    latestScrollActive.value = false
-    cancelAnimation(latestScrollProgress)
     stagedDeliveryTimersRef.current.forEach(timer => clearTimeout(timer))
     stagedDeliveryTimersRef.current.clear()
     Array.from(deliveryStatusPollCancelsRef.current).forEach(cancel => cancel())
@@ -1599,7 +1540,7 @@ export default function ChatScreen() {
       clearTimeout(messageSelectionBlurTimerRef.current)
     }
     messageActionMenuOpacity.stopAnimation()
-  }, [latestScrollActive, latestScrollProgress, messageActionMenuOpacity])
+  }, [messageActionMenuOpacity])
 
   useEffect(() => {
     messagesRef.current = messages
@@ -1611,10 +1552,9 @@ export default function ChatScreen() {
     const { contentHeight, offsetY, viewportHeight } = scrollMetricsRef.current
     const latestMessageKey = latestMessage?.renderKey || latestMessage?.id
     if (!latestMessageKey || contentHeight <= 0 || viewportHeight <= 0) return
-    const exactBottomOffset = Math.max(0, contentHeight - viewportHeight)
     setConversationListViewState(characterId, {
       offsetY: followLatestRef.current && withinImmersiveRangeRef.current
-        ? exactBottomOffset
+        ? 0
         : Math.max(0, offsetY),
       messageCount: messagesRef.current.length,
       latestMessageKey,
@@ -1696,19 +1636,13 @@ export default function ChatScreen() {
       if (!requestIsCurrent()) return
       if (quiet && hasPendingLocalDelivery()) return
       if (!quiet) {
-        latestScrollActive.value = false
-        cancelAnimation(latestScrollProgress)
         resetInitialScroll()
-        followLatestRef.current = true
-        withinImmersiveRangeRef.current = true
-        hideScrollToLatest()
       }
 
       if (!matching) {
         const cachedHistory = getConversationCache(character.id)
         if (cachedHistory?.messages.length) {
           const cachedMessages = visibleHistoryWindow(cachedHistory.messages)
-          setInitialPositionReady(true)
           setConversationId(cachedHistory.conversationId)
           setHasMoreHistory(Boolean(
             cachedHistory.hasMoreHistory || cachedMessages.length < cachedHistory.messages.length
@@ -1779,9 +1713,6 @@ export default function ChatScreen() {
   }, [
     character,
     getConversationCache,
-    hideScrollToLatest,
-    latestScrollActive,
-    latestScrollProgress,
     prepareForIncomingMessage,
     resetInitialScroll,
     setConversationCache,
@@ -1820,13 +1751,12 @@ export default function ChatScreen() {
         setHistoryCacheResolved(true)
         void loadConversationRef.current(false)
       } else {
-        // Cached history can be painted immediately; exact bottom alignment
-        // continues through the normal layout callbacks without a blank frame.
+        // Cached history can be painted immediately. The inverted list starts
+        // at its latest edge without waiting for dynamic row measurement.
         const cachedMessages = visibleHistoryWindow(
           cachedHistory.messages,
           hasInitialListViewState ? initialDisplayMessageCount : HISTORY_PAGE_SIZE
         )
-        setInitialPositionReady(true)
         messagesRef.current = cachedMessages
         setMessages(cachedMessages)
         setConversationId(cachedHistory.conversationId)
@@ -1951,7 +1881,6 @@ export default function ChatScreen() {
     historyPageRequestRef.current = pageRequestId
     const historyRequestId = historyRequestRef.current
     const deliveryGeneration = localDeliveryGenerationRef.current
-    const anchor = { ...scrollMetricsRef.current }
 
     try {
       const cachedHistory = characterId ? getConversationCache(characterId) : undefined
@@ -1965,10 +1894,6 @@ export default function ChatScreen() {
           Math.max(0, cachedOldestIndex - HISTORY_PAGE_SIZE),
           cachedOldestIndex
         )
-        prependHistoryAnchorRef.current = {
-          contentHeight: anchor.contentHeight,
-          offsetY: anchor.offsetY,
-        }
         setMessages(current => mergeMessagePage(current, localOlderMessages, 'prepend'))
         const nextOldestIndex = cachedOldestIndex - localOlderMessages.length
         const nextOldest = cachedHistory.messages[nextOldestIndex]
@@ -1986,10 +1911,6 @@ export default function ChatScreen() {
 
       const olderMessages = mapMessages(messagePage.messages)
       if (olderMessages.length > 0) {
-        prependHistoryAnchorRef.current = {
-          contentHeight: anchor.contentHeight,
-          offsetY: anchor.offsetY,
-        }
         setMessages(current => mergeMessagePage(current, olderMessages, 'prepend'))
       }
       setHasMoreHistory(messagePage.hasMore)
@@ -2031,21 +1952,16 @@ export default function ChatScreen() {
       historyPageRequestRef.current += 1
       messageSyncRequestRef.current += 1
       loadingOlderHistoryRef.current = false
-      prependHistoryAnchorRef.current = null
       clearConversationCache(character.id)
       setConversationId(null)
       setHasMoreHistory(false)
       setOldestMessageCursor(undefined)
-      setInitialPositionReady(false)
       setMessages([{
         id: `starter-${character.id}-${Date.now()}`,
         sender: 'assistant',
         text: starterMessageForCharacter(character),
       }])
       resetInitialScroll()
-      latestScrollActive.value = false
-      cancelAnimation(latestScrollProgress)
-      hideScrollToLatest()
       quoteDraftRevisionRef.current += 1
       setQuoteDraft(character.id, null)
       closeMessageActionMenu()
@@ -2673,22 +2589,16 @@ export default function ChatScreen() {
 
   const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
+    const offsetFromLatest = Math.max(0, contentOffset.y)
     scrollMetricsRef.current = {
       contentHeight: contentSize.height,
-      offsetY: contentOffset.y,
+      offsetY: offsetFromLatest,
       viewportHeight: layoutMeasurement.height,
     }
-    const distanceFromBottom = Math.max(
-      0,
-      contentSize.height - layoutMeasurement.height - contentOffset.y
-    )
-    const withinImmersiveRange = distanceFromBottom <= layoutMeasurement.height / 2
+    const withinImmersiveRange = offsetFromLatest <= NEAR_LATEST_THRESHOLD
     withinImmersiveRangeRef.current = withinImmersiveRange
     if (manualScrollRef.current) followLatestRef.current = withinImmersiveRange
     if (withinImmersiveRange) hideScrollToLatest()
-    if (manualScrollRef.current && contentOffset.y <= OLDER_HISTORY_TRIGGER_OFFSET) {
-      void loadOlderHistory()
-    }
   }
 
   const handleListLayout = (event: LayoutChangeEvent) => {
@@ -2696,40 +2606,17 @@ export default function ChatScreen() {
     const viewportHeight = event.nativeEvent.layout.height
     scrollMetricsRef.current.viewportHeight = viewportHeight
     scrollViewportHeight.value = viewportHeight
-    if (restoredLatestAlignmentPendingRef.current
-      && scrollMetricsRef.current.contentHeight > 0) {
-      restoredLatestAlignmentPendingRef.current = false
-      scrollToExactLatest()
-      return
-    }
-    settleInitialScroll()
   }
 
   const handleContentSizeChange = (_width: number, height: number) => {
     scrollMetricsRef.current.contentHeight = height
     scrollContentHeight.value = height
-    if (restoredLatestAlignmentPendingRef.current
-      && scrollMetricsRef.current.viewportHeight > 0) {
-      restoredLatestAlignmentPendingRef.current = false
-      scrollToExactLatest()
-      return
-    }
-    const prependAnchor = prependHistoryAnchorRef.current
-    if (prependAnchor && height > prependAnchor.contentHeight) {
-      const offset = Math.max(0, prependAnchor.offsetY + height - prependAnchor.contentHeight)
-      listRef.current?.scrollToOffset({ offset, animated: false })
-      scrollMetricsRef.current.offsetY = offset
-      prependHistoryAnchorRef.current = null
-      return
-    }
     if (initialScrollRef.current) {
       settleInitialScroll()
       return
     }
     if (followLatestRef.current) {
-      if (!latestScrollActive.value) {
-        scrollToExactLatest()
-      }
+      requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: 0, animated: false }))
     }
   }
 
@@ -2863,15 +2750,17 @@ export default function ChatScreen() {
       <View style={styles.keyboardViewport}>
         <View style={styles.keyboardArea}>
           <Reanimated.View style={[styles.messageListArea, messageListKeyboardAnimatedStyle]}>
-            <Reanimated.FlatList
+            <FlashList
               ref={listRef}
-              data={messages}
+              data={displayMessages}
+              inverted
               contentOffset={initialContentOffsetRef.current}
-              disableVirtualization={!initialPositionReady}
-              initialNumToRender={Math.max(1, messages.length)}
-              maxToRenderPerBatch={Math.max(1, messages.length)}
+              maintainVisibleContentPosition={CHAT_MAINTAIN_VISIBLE_CONTENT_POSITION}
               keyExtractor={item => item.renderKey || item.id}
-              renderItem={({ item }) => {
+              getItemType={chatMessageItemType}
+              drawDistance={window.height}
+              extraData={messageActionSession}
+              renderItem={({ item, index }) => {
                 const messageKey = item.renderKey || item.id
                 const selectionSession = messageActionSession?.messageKey === messageKey
                   ? messageActionSession
@@ -2913,26 +2802,24 @@ export default function ChatScreen() {
                       }
                     }}
                     onRetryMessage={message => void sendMessage(message)}
+                    isOldest={index === displayMessages.length - 1}
                   />
                 )
               }}
-              style={[
-                styles.messageList,
-                !initialPositionReady && styles.messageListPositioning,
-              ]}
+              style={styles.messageList}
               contentContainerStyle={styles.messageListContent}
-              removeClippedSubviews={!messageActionSession}
               scrollEnabled={!messageActionSession}
+              automaticallyAdjustContentInsets={false}
+              contentInsetAdjustmentBehavior="never"
               keyboardShouldPersistTaps={messageActionSession ? 'always' : 'handled'}
               keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
               onLayout={handleListLayout}
+              onLoad={settleInitialScroll}
               onScroll={handleScroll}
               onScrollBeginDrag={() => {
                 closeMessageActionMenu()
                 manualScrollRef.current = true
                 followLatestRef.current = false
-                latestScrollActive.value = false
-                cancelAnimation(latestScrollProgress)
               }}
               onScrollEndDrag={() => {
                 manualScrollRef.current = false
@@ -2947,6 +2834,8 @@ export default function ChatScreen() {
                 manualScrollRef.current = false
                 followLatestRef.current = withinImmersiveRangeRef.current
               }}
+              onEndReached={() => void loadOlderHistory()}
+              onEndReachedThreshold={0.15}
               onContentSizeChange={handleContentSizeChange}
               scrollEventThrottle={16}
             />
@@ -2979,7 +2868,7 @@ export default function ChatScreen() {
                 >
                   <Ionicons name="arrow-down" size={18} color={palette.text} />
                   <Text style={styles.scrollToLatestLabel}>
-                    {unseenLatestCount > 1 ? `${unseenLatestCount} new messages` : 'New message'}
+                    {unseenLatestCount > 1 ? `${unseenLatestCount} new messages` : 'New messages'}
                   </Text>
                 </Pressable>
               )}
@@ -3488,13 +3377,11 @@ const styles = StyleSheet.create({
   messageList: {
     flex: 1,
   },
-  messageListPositioning: {
-    opacity: 0,
-  },
   messageListContent: {
     paddingHorizontal: 12,
-    paddingTop: 18,
-    paddingBottom: MESSAGE_LIST_BOTTOM_PADDING,
+    // Inversion swaps the physical content edges: top is the visual composer edge.
+    paddingTop: LATEST_MESSAGE_COMPOSER_GAP,
+    paddingBottom: 18,
   },
   olderHistoryLoading: {
     position: 'absolute',
@@ -3511,6 +3398,9 @@ const styles = StyleSheet.create({
     width: '100%',
     marginBottom: MESSAGE_ROW_GAP,
     flexDirection: 'column',
+  },
+  messageRowOldest: {
+    marginBottom: 0,
   },
   messagePrimaryRow: {
     width: '100%',
