@@ -94,6 +94,7 @@ const SYNC_PROTOCOL_VERSION = 1
 const TRANSCRIPTION_RATE_LIMIT_WINDOW_MS = 60_000
 const TRANSCRIPTION_RATE_LIMIT_MAX_REQUESTS = 6
 const transcriptionRequests = new Map<string, number[]>()
+const voiceMessageTranscriptionInFlight = new Map<string, Promise<Message>>()
 app.use(cors())
 app.use(express.json({ limit: '2mb' }))
 app.use('/media/voice', express.static(voiceMediaDirectory, {
@@ -545,7 +546,12 @@ app.get('/api/voice/messages/:id/audio', asyncRoute(async (req, res) => {
     return res.status(404).json({ error: 'voice message not found' })
   }
   try {
-    const audio = await readUserVoiceMessage(voice)
+    let audio: Buffer
+    try {
+      audio = await readUserVoiceMessage(voice)
+    } catch {
+      throw new GroqTranscriptionError('voice message audio not found', 404)
+    }
     res.set('Cache-Control', 'private, max-age=3600')
     res.type(voice.mimeType)
     return res.send(audio)
@@ -570,33 +576,44 @@ app.post('/api/voice/messages/:id/transcription', asyncRoute(async (req, res) =>
     if (!updated) return res.status(404).json({ error: 'voice message not found' })
     return res.json({ message: updated })
   }
-  const rateLimitKey = `${req.ip}:${userId}`
-  if (!canTranscribe(rateLimitKey)) {
-    return res.status(429).json({ error: 'voice transcription rate limit reached; try again shortly' })
+  const inFlight = voiceMessageTranscriptionInFlight.get(message.id)
+  if (inFlight) {
+    console.info('Voice message transcription joined existing request', { messageId: message.id })
+    return res.json({ message: await inFlight })
   }
-  let audio: Buffer
+
+  const transcriptionPromise = (async () => {
+    const rateLimitKey = `${req.ip}:${userId}`
+    if (!canTranscribe(rateLimitKey)) {
+      throw new GroqTranscriptionError('voice transcription rate limit reached; try again shortly', 429)
+    }
+    const audio = await readUserVoiceMessage(voice)
+    const conversation = await getConversation(message.conversationId)
+    const character = conversation?.userId === userId
+      ? await getCharacterForUser(userId, conversation.characterId)
+      : undefined
+    const transcriptionContext = voiceTranscriptionContextForCharacter(character)
+    console.info('Voice message transcription context selected', {
+      messageId: message.id,
+      context: transcriptionContext?.id || 'generic',
+    })
+    const transcription = await transcribeWithGroq({
+      audio,
+      mimeType: voice.mimeType,
+      prompt: transcriptionContext?.prompt,
+    })
+    const updated = await updateUserVoiceMessageTranscript(message.id, transcription.text)
+    if (!updated) throw new GroqTranscriptionError('voice message not found', 404)
+    return updated
+  })()
+  voiceMessageTranscriptionInFlight.set(message.id, transcriptionPromise)
   try {
-    audio = await readUserVoiceMessage(voice)
-  } catch {
-    return res.status(404).json({ error: 'voice message audio not found' })
+    return res.json({ message: await transcriptionPromise })
+  } finally {
+    if (voiceMessageTranscriptionInFlight.get(message.id) === transcriptionPromise) {
+      voiceMessageTranscriptionInFlight.delete(message.id)
+    }
   }
-  const conversation = await getConversation(message.conversationId)
-  const character = conversation?.userId === userId
-    ? await getCharacterForUser(userId, conversation.characterId)
-    : undefined
-  const transcriptionContext = voiceTranscriptionContextForCharacter(character)
-  console.info('Voice message transcription context selected', {
-    messageId: message.id,
-    context: transcriptionContext?.id || 'generic',
-  })
-  const transcription = await transcribeWithGroq({
-    audio,
-    mimeType: voice.mimeType,
-    prompt: transcriptionContext?.prompt,
-  })
-  const updated = await updateUserVoiceMessageTranscript(message.id, transcription.text)
-  if (!updated) return res.status(404).json({ error: 'voice message not found' })
-  return res.json({ message: updated })
 }))
 
 app.delete('/api/voice/messages/:id/transcription', asyncRoute(async (req, res) => {

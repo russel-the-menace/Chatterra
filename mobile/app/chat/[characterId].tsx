@@ -1119,6 +1119,7 @@ export default function ChatScreen() {
   })
   const stagedDeliveryTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set())
   const deliveryStatusPollCancelsRef = useRef<Set<() => void>>(new Set())
+  const voiceTranscriptionRequestsRef = useRef<Set<string>>(new Set())
   const lastVoiceErrorRef = useRef<string | null>(null)
   const voiceInput = useVoiceInput({
     mode: voiceInputMode,
@@ -2082,7 +2083,10 @@ export default function ChatScreen() {
   const convertVoiceMessageToText = async (message: ChatMessage) => {
     if (!userId || !message.sourceMessageId || !isUserVoiceMessage(message)) return
     closeMessageActionMenu()
-    if (message.voiceTranscriptionLoading) return
+    if (
+      message.voiceTranscriptionLoading
+      || voiceTranscriptionRequestsRef.current.has(message.sourceMessageId)
+    ) return
     const conversionStartedAt = Date.now()
     if (message.text.trim()) {
       console.info('[voice] voice_transcript_revealed_from_message', {
@@ -2126,6 +2130,7 @@ export default function ChatScreen() {
       messageId: message.sourceMessageId,
       transcriptStatus: message.voice.transcriptStatus,
     })
+    voiceTranscriptionRequestsRef.current.add(message.sourceMessageId)
     setMessages(current => current.map(item => (
       item.id === message.id
         ? { ...item, voiceTranscriptionLoading: true }
@@ -2159,6 +2164,8 @@ export default function ChatScreen() {
       setError(conversionError instanceof Error
         ? conversionError.message
         : 'Could not convert this voice message to text.')
+    } finally {
+      voiceTranscriptionRequestsRef.current.delete(message.sourceMessageId)
     }
   }
 
