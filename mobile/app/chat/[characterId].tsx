@@ -3154,7 +3154,9 @@ export default function ChatScreen() {
                 pressed && styles.messageActionPressed,
               ]}
             >
-              <Ionicons name="copy-outline" size={18} color="#FFFFFF" />
+              <View style={styles.messageActionIconSlot}>
+                <Ionicons name="copy-outline" size={18} color="#FFFFFF" />
+              </View>
               <Text style={styles.messageActionLabel}>Copy</Text>
               </Pressable>
               <View style={styles.messageActionDivider} />
@@ -3169,7 +3171,9 @@ export default function ChatScreen() {
               onPress={() => quoteMessage(messageActionMessage)}
               style={({ pressed }) => [styles.messageAction, pressed && styles.messageActionPressed]}
             >
-              <Ionicons name="return-up-back-outline" size={19} color="#FFFFFF" />
+              <View style={styles.messageActionIconSlot}>
+                <Ionicons name="return-up-back-outline" size={19} color="#FFFFFF" />
+              </View>
               <Text style={styles.messageActionLabel}>Quote</Text>
             </Pressable>
             <View style={styles.messageActionDivider} />
@@ -3193,16 +3197,18 @@ export default function ChatScreen() {
                   styles.messageAction,
                   messageActionMessage.voiceTranscriptionLoading && styles.messageActionDisabled,
                   pressed && styles.messageActionPressed,
-                ]}
-              >
-                {messageActionMessage.voice?.transcriptStatus === 'ready' ? (
-                  <View style={styles.messageActionDocumentDiscardIcon}>
-                    <Ionicons name="document-text-outline" size={18} color="#FFFFFF" />
-                    <View style={styles.messageActionDocumentDiscardMark}>
-                      <Ionicons name="close" size={7} color="#FFFFFF" />
+              ]}
+            >
+                <View style={styles.messageActionIconSlot}>
+                  {messageActionMessage.voice?.transcriptStatus === 'ready' ? (
+                    <View style={styles.messageActionDocumentDiscardIcon}>
+                      <Ionicons name="document-text-outline" size={18} color="#FFFFFF" />
+                      <View style={styles.messageActionDocumentDiscardMark}>
+                        <Ionicons name="close" size={7} color="#FFFFFF" />
+                      </View>
                     </View>
-                  </View>
-                ) : <Ionicons name="document-text-outline" size={18} color="#FFFFFF" />}
+                  ) : <Ionicons name="document-text-outline" size={18} color="#FFFFFF" />}
+                </View>
                 <Text style={styles.messageActionLabel}>
                   {messageActionMessage.voiceTranscriptionLoading
                     ? 'Converting'
@@ -3223,9 +3229,11 @@ export default function ChatScreen() {
                 style={({ pressed }) => [
                   styles.messageAction,
                   pressed && styles.messageActionPressed,
-                ]}
-              >
-                <Ionicons name="language-outline" size={18} color="#FFFFFF" />
+              ]}
+            >
+                <View style={styles.messageActionIconSlot}>
+                  <Ionicons name="language-outline" size={18} color="#FFFFFF" />
+                </View>
                 <Text style={styles.messageActionLabel}>
                   {messageActionMessage.translationVisible ? 'Hide' : 'Translate'}
                 </Text>
@@ -3244,7 +3252,9 @@ export default function ChatScreen() {
                   onPress={() => toggleVoiceTranscript(messageActionMessage)}
                   style={({ pressed }) => [styles.messageAction, pressed && styles.messageActionPressed]}
                 >
-                  <Ionicons name="document-text-outline" size={18} color="#FFFFFF" />
+                  <View style={styles.messageActionIconSlot}>
+                    <Ionicons name="document-text-outline" size={18} color="#FFFFFF" />
+                  </View>
                   <Text style={styles.messageActionLabel}>
                     {messageActionMessage.voiceTranscriptVisible ? 'Hide text' : 'Show text'}
                   </Text>
@@ -3837,7 +3847,8 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     height: 56,
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
+    paddingTop: 3,
     gap: 3,
   },
   messageActionPressed: {
@@ -3851,6 +3862,12 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 14,
     textAlign: 'center',
+  },
+  messageActionIconSlot: {
+    width: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   messageActionDocumentDiscardIcon: {
     width: 18,
