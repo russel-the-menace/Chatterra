@@ -16,6 +16,7 @@ import { Platform } from 'react-native'
 
 import { api, ApiError } from './api'
 import { DetectedLanguage, VoiceTranscriptMetadata } from './types'
+import { createVoiceRequestId, logVoiceDiagnostic, prepareVoiceUpload } from './voice-upload'
 import { requestGroqTranscriptionConsent } from './voice-transcription-consent'
 
 export type VoiceInputStatus = 'idle' | 'recording' | 'processing' | 'error'
@@ -250,10 +251,20 @@ export const useVoiceInput = ({
       if (!recorder.uri) throw new Error('The recording could not be read.')
 
       recording = new File(recorder.uri)
+      const requestId = createVoiceRequestId('dictation')
+      const upload = await prepareVoiceUpload(recording, recordingMimeType())
+      logVoiceDiagnostic('dictation_recording_ready', {
+        requestId,
+        fileBytes: recording.size,
+        uploadBytes: upload.byteLength,
+        mimeType: recordingMimeType(),
+      })
       const transcription = await api.transcribeVoice({
         userId: userId || '',
-        audio: recording,
+        audio: upload.audio,
         mimeType: recordingMimeType(),
+        byteLength: upload.byteLength,
+        requestId,
       })
       if (session !== sessionRef.current || !mountedRef.current) return
       const spoken = transcription.text.trim()

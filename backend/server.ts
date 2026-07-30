@@ -117,6 +117,21 @@ const canTranscribe = (key: string) => {
   return true
 }
 
+const voiceRequestId = (req: Request) => {
+  const value = typeof req.headers['x-chatterra-voice-request-id'] === 'string'
+    ? req.headers['x-chatterra-voice-request-id'].trim()
+    : ''
+  return value.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 96) || 'untracked'
+}
+
+const voiceRequestLogDetails = (req: Request, details: Record<string, unknown> = {}) => ({
+  requestId: voiceRequestId(req),
+  contentLength: req.headers['content-length'] || undefined,
+  contentType: req.headers['content-type'] || undefined,
+  receivedBytes: Buffer.isBuffer(req.body) ? req.body.length : 0,
+  ...details,
+})
+
 const voiceMetadataFromPayload = (payload: any): VoiceTranscriptMetadata | undefined => {
   if (!payload || typeof payload.originalText !== 'string') return undefined
   const originalText = payload.originalText.trim().slice(0, 20000)
@@ -371,16 +386,29 @@ app.post(
       : ''
     const mimeType = req.headers['content-type'] || ''
     const durationMilliseconds = Number(req.headers['x-chatterra-voice-duration-ms'])
+    const logDetails = voiceRequestLogDetails(req, {
+      durationMilliseconds: Number.isFinite(durationMilliseconds)
+        ? Math.round(durationMilliseconds)
+        : undefined,
+      hasCharacterId: Boolean(characterId),
+      hasConversationId: Boolean(requestedConversationId),
+      hasUserId: Boolean(userId),
+    })
+    console.info('Voice message upload received', logDetails)
     if (!userId || !characterId) {
+      console.warn('Voice message upload rejected', { ...logDetails, reason: 'missing_identity' })
       return res.status(400).json({ error: 'user ID and character ID are required' })
     }
     if (!isSupportedUserVoiceMessageType(mimeType)) {
+      console.warn('Voice message upload rejected', { ...logDetails, reason: 'unsupported_format' })
       return res.status(415).json({ error: 'unsupported voice message format' })
     }
     if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+      console.warn('Voice message upload rejected', { ...logDetails, reason: 'missing_audio' })
       return res.status(400).json({ error: 'voice message audio is required' })
     }
     if (!Number.isFinite(durationMilliseconds) || durationMilliseconds < 250) {
+      console.warn('Voice message upload rejected', { ...logDetails, reason: 'invalid_duration' })
       return res.status(400).json({ error: 'voice message is too short' })
     }
 
@@ -447,6 +475,10 @@ app.post(
       })
       return res.status(201).json({ conversation, message, starterMessage })
     } catch (error) {
+      console.error('Voice message upload failed', {
+        ...logDetails,
+        error: error instanceof Error ? error.name : 'unknown_error',
+      })
       await removeUserVoiceMessage(voice).catch(() => undefined)
       throw error
     }
@@ -522,26 +554,48 @@ app.post(
       ? req.headers['x-chatterra-user-id'].trim()
       : ''
     const mimeType = req.headers['content-type'] || ''
-    if (!userId) return res.status(400).json({ error: 'user ID is required' })
+    const logDetails = voiceRequestLogDetails(req, { hasUserId: Boolean(userId) })
+    console.info('Voice transcription received', logDetails)
+    if (!userId) {
+      console.warn('Voice transcription rejected', { ...logDetails, reason: 'missing_user' })
+      return res.status(400).json({ error: 'user ID is required' })
+    }
     if (!isSupportedTranscriptionAudioType(mimeType)) {
+      console.warn('Voice transcription rejected', { ...logDetails, reason: 'unsupported_format' })
       return res.status(415).json({ error: 'unsupported audio format' })
     }
     if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+      console.warn('Voice transcription rejected', { ...logDetails, reason: 'missing_audio' })
       return res.status(400).json({ error: 'audio is required' })
     }
     const rateLimitKey = `${req.ip}:${userId}`
     if (!canTranscribe(rateLimitKey)) {
+      console.warn('Voice transcription rejected', { ...logDetails, reason: 'rate_limited' })
       return res.status(429).json({ error: 'voice transcription rate limit reached; try again shortly' })
     }
 
-    const transcription = await transcribeWithGroq({ audio: req.body, mimeType })
-    return res.status(201).json({
-      transcription: {
-        text: transcription.text,
+    try {
+      const transcription = await transcribeWithGroq({ audio: req.body, mimeType })
+      console.info('Voice transcription succeeded', {
+        ...logDetails,
         provider: transcription.provider,
         model: transcription.model,
-      },
-    })
+        transcriptLength: transcription.text.length,
+      })
+      return res.status(201).json({
+        transcription: {
+          text: transcription.text,
+          provider: transcription.provider,
+          model: transcription.model,
+        },
+      })
+    } catch (error) {
+      console.error('Voice transcription failed', {
+        ...logDetails,
+        error: error instanceof Error ? error.name : 'unknown_error',
+      })
+      throw error
+    }
   })
 )
 

@@ -192,18 +192,44 @@ export const api = {
     return result.translation
   },
 
-  async transcribeVoice(input: { userId: string; audio: Blob; mimeType: string }) {
-    const result = await request<{
-      transcription: { text: string; provider: 'groq'; model: string }
-    }>('/api/voice/transcriptions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': input.mimeType,
-        'X-Chatterra-User-Id': input.userId,
-      },
-      body: input.audio,
-    }, 60_000)
-    return result.transcription
+  async transcribeVoice(input: {
+    userId: string
+    audio: Blob
+    mimeType: string
+    byteLength?: number
+    requestId?: string
+  }) {
+    console.info('[voice] transcription_upload_started', {
+      requestId: input.requestId,
+      mimeType: input.mimeType,
+      byteLength: input.byteLength ?? input.audio.size,
+    })
+    try {
+      const result = await request<{
+        transcription: { text: string; provider: 'groq'; model: string }
+      }>('/api/voice/transcriptions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': input.mimeType,
+          'X-Chatterra-User-Id': input.userId,
+          ...(input.requestId ? { 'X-Chatterra-Voice-Request-Id': input.requestId } : {}),
+        },
+        body: input.audio,
+      }, 60_000)
+      console.info('[voice] transcription_upload_succeeded', {
+        requestId: input.requestId,
+        transcriptLength: result.transcription.text.length,
+      })
+      return result.transcription
+    } catch (error) {
+      console.warn('[voice] transcription_upload_failed', {
+        requestId: input.requestId,
+        mimeType: input.mimeType,
+        byteLength: input.byteLength ?? input.audio.size,
+        error: error instanceof Error ? error.message : 'unknown_error',
+      })
+      throw error
+    }
   },
 
   async sendVoiceMessage(input: {
@@ -213,22 +239,43 @@ export const api = {
     audio: Blob
     durationMilliseconds: number
     mimeType: string
+    byteLength?: number
+    requestId?: string
   }) {
-    return request<{
-      conversation: Conversation
-      message: ServerMessage
-      starterMessage?: ServerMessage
-    }>('/api/voice/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': input.mimeType,
-        'X-Chatterra-User-Id': input.userId,
-        'X-Chatterra-Character-Id': input.characterId,
-        ...(input.conversationId ? { 'X-Chatterra-Conversation-Id': input.conversationId } : {}),
-        'X-Chatterra-Voice-Duration-Ms': String(Math.round(input.durationMilliseconds)),
-      },
-      body: input.audio,
-    }, 60_000)
+    console.info('[voice] voice_message_upload_started', {
+      requestId: input.requestId,
+      mimeType: input.mimeType,
+      byteLength: input.byteLength ?? input.audio.size,
+      durationMilliseconds: Math.round(input.durationMilliseconds),
+    })
+    try {
+      const result = await request<{
+        conversation: Conversation
+        message: ServerMessage
+        starterMessage?: ServerMessage
+      }>('/api/voice/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': input.mimeType,
+          'X-Chatterra-User-Id': input.userId,
+          'X-Chatterra-Character-Id': input.characterId,
+          ...(input.conversationId ? { 'X-Chatterra-Conversation-Id': input.conversationId } : {}),
+          'X-Chatterra-Voice-Duration-Ms': String(Math.round(input.durationMilliseconds)),
+          ...(input.requestId ? { 'X-Chatterra-Voice-Request-Id': input.requestId } : {}),
+        },
+        body: input.audio,
+      }, 60_000)
+      console.info('[voice] voice_message_upload_succeeded', { requestId: input.requestId })
+      return result
+    } catch (error) {
+      console.warn('[voice] voice_message_upload_failed', {
+        requestId: input.requestId,
+        mimeType: input.mimeType,
+        byteLength: input.byteLength ?? input.audio.size,
+        error: error instanceof Error ? error.message : 'unknown_error',
+      })
+      throw error
+    }
   },
 
   async convertVoiceMessageToText(userId: string, messageId: string) {

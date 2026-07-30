@@ -10,6 +10,7 @@ import { Platform } from 'react-native'
 
 import { api, ApiError } from './api'
 import { DetectedLanguage, ServerMessage, VoiceTranscriptMetadata } from './types'
+import { createVoiceRequestId, logVoiceDiagnostic, prepareVoiceUpload } from './voice-upload'
 import { requestGroqTranscriptionConsent } from './voice-transcription-consent'
 import { requestVoiceMessageConsent } from './voice-message-consent'
 
@@ -129,6 +130,16 @@ export const useVoiceMessageRecorder = ({
       if (!recorder.uri) throw new Error('The recording could not be read.')
       recording = new File(recorder.uri)
       const mimeType = recordingMimeType()
+      const requestId = createVoiceRequestId('voice-message')
+      const upload = await prepareVoiceUpload(recording, mimeType)
+      logVoiceDiagnostic('voice_message_recording_ready', {
+        requestId,
+        action,
+        fileBytes: recording.size,
+        uploadBytes: upload.byteLength,
+        mimeType,
+        durationMilliseconds,
+      })
 
       if (action === 'convert') {
         const hasConsent = await requestGroqTranscriptionConsent()
@@ -137,7 +148,13 @@ export const useVoiceMessageRecorder = ({
           updateSnapshot(initialSnapshot)
           return
         }
-        const transcription = await api.transcribeVoice({ userId: userId || '', audio: recording, mimeType })
+        const transcription = await api.transcribeVoice({
+          userId: userId || '',
+          audio: upload.audio,
+          mimeType,
+          byteLength: upload.byteLength,
+          requestId,
+        })
         const text = transcription.text.trim()
         if (!text) throw new Error('No speech was detected.')
         onConvertedToTextRef.current?.(text, {
@@ -151,9 +168,11 @@ export const useVoiceMessageRecorder = ({
           userId,
           characterId,
           conversationId: conversationId || undefined,
-          audio: recording,
+          audio: upload.audio,
           durationMilliseconds,
           mimeType,
+          byteLength: upload.byteLength,
+          requestId,
         })
         onSentRef.current?.({
           conversationId: result.conversation.id,
