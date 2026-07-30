@@ -3293,7 +3293,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   voiceBubble: {
-    minHeight: 46,
+    minHeight: 38,
     paddingHorizontal: 0,
     paddingVertical: 0,
   },

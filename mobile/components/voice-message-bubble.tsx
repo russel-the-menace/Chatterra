@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons'
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from 'expo-audio'
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Pressable, StyleSheet, Text, View } from 'react-native'
 
 import { mediaUrl } from '@/src/api'
@@ -18,31 +18,62 @@ export function VoiceMessageBubble({
   isUser?: boolean
   onLongPress?: () => void
 }) {
-  const player = useAudioPlayer(mediaUrl(voice.audioUrl || ''), { updateInterval: 150 })
+  const player = useAudioPlayer(mediaUrl(voice.audioUrl || ''), {
+    downloadFirst: true,
+    updateInterval: 150,
+  })
   const status = useAudioPlayerStatus(player)
+  const [waveCount, setWaveCount] = useState(3)
+  const playWhenLoadedRef = useRef(false)
   const suppressPlaybackUntilRef = useRef(0)
-
-  useEffect(() => {
-    void setAudioModeAsync({
-      playsInSilentMode: true,
-      shouldPlayInBackground: false,
-    })
-  }, [])
 
   useEffect(() => {
     if (!status.didJustFinish) return
     void player.seekTo(0)
   }, [player, status.didJustFinish])
 
-  const togglePlayback = () => {
+  useEffect(() => {
+    if (!status.playing) return
+    setWaveCount(1)
+    const interval = setInterval(() => {
+      setWaveCount(current => current === 3 ? 1 : current + 1)
+    }, 230)
+    return () => clearInterval(interval)
+  }, [status.playing])
+
+  const startPlayback = useCallback(async () => {
+    if (status.didJustFinish) await player.seekTo(0)
+    player.play()
+  }, [player, status.didJustFinish])
+
+  useEffect(() => {
+    if (!status.isLoaded || !playWhenLoadedRef.current) return
+    playWhenLoadedRef.current = false
+    void startPlayback().catch(error => {
+      console.warn('[voice] voice_message_playback_failed', {
+        error: error instanceof Error ? error.message : 'unknown_error',
+      })
+    })
+  }, [startPlayback, status.isLoaded])
+
+  const togglePlayback = async () => {
     if (Date.now() < suppressPlaybackUntilRef.current) return
     try {
+      await setAudioModeAsync({
+        allowsRecording: false,
+        playsInSilentMode: true,
+        shouldPlayInBackground: false,
+      })
       if (status.playing) {
+        playWhenLoadedRef.current = false
         player.pause()
         return
       }
-      if (status.didJustFinish) void player.seekTo(0)
-      player.play()
+      if (!status.isLoaded) {
+        playWhenLoadedRef.current = !playWhenLoadedRef.current
+        return
+      }
+      await startPlayback()
     } catch (error) {
       console.warn('[voice] voice_message_playback_failed', {
         error: error instanceof Error ? error.message : 'unknown_error',
@@ -60,33 +91,23 @@ export function VoiceMessageBubble({
       }}
       accessibilityRole="button"
       accessibilityLabel={status.playing ? 'Pause voice message' : 'Play voice message'}
-      accessibilityHint={`${displayDuration(voice.durationSeconds)} voice message`}
+      accessibilityHint={status.isLoaded
+        ? `${displayDuration(voice.durationSeconds)} voice message`
+        : 'Loading voice message'}
       style={({ pressed }) => [
         styles.voiceMessage,
-        { width: Math.min(128, Math.max(102, 74 + (voice.durationSeconds || 4) * 7)) },
+        { width: Math.min(100, Math.max(78, 64 + (voice.durationSeconds || 4) * 4)) },
         pressed && styles.voiceMessagePressed,
       ]}
     >
-      <View style={styles.waveIcon}>
+      <View style={styles.speakerIcon}>
         <Ionicons
-          name={status.playing ? 'pause' : 'volume-high-outline'}
-          size={25}
+          name="volume-low-outline"
+          size={21}
           color={isUser ? '#FFFFFF' : palette.text}
         />
       </View>
-      <View style={styles.waveBars}>
-        {[0, 1, 2, 3].map(index => (
-          <View
-            key={index}
-            style={[
-              styles.waveBar,
-              { height: 6 + index * 3 },
-              isUser && styles.waveBarUser,
-              status.playing && styles.waveBarPlaying,
-            ]}
-          />
-        ))}
-      </View>
+      <Text style={[styles.soundWaves, isUser && styles.soundWavesUser]}>{')'.repeat(waveCount)}</Text>
       <Text style={[styles.duration, isUser && styles.durationUser]}>{displayDuration(voice.durationSeconds)}</Text>
     </Pressable>
   )
@@ -94,41 +115,33 @@ export function VoiceMessageBubble({
 
 const styles = StyleSheet.create({
   voiceMessage: {
-    minHeight: 46,
-    paddingHorizontal: 11,
+    minHeight: 38,
+    paddingHorizontal: 8,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 3,
   },
   voiceMessagePressed: {
     opacity: 0.6,
   },
-  waveIcon: {
-    width: 25,
+  speakerIcon: {
+    width: 21,
     alignItems: 'center',
   },
-  waveBars: {
-    flex: 1,
-    height: 24,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: 2,
+  soundWaves: {
+    minWidth: 11,
+    color: palette.text,
+    fontSize: 14,
+    fontWeight: '700',
+    lineHeight: 18,
   },
-  waveBar: {
-    width: 2,
-    borderRadius: 1,
-    backgroundColor: '#A0A8B4',
-  },
-  waveBarPlaying: {
-    backgroundColor: palette.accent,
-  },
-  waveBarUser: {
-    backgroundColor: 'rgba(255, 255, 255, 0.68)',
+  soundWavesUser: {
+    color: '#FFFFFF',
   },
   duration: {
     color: palette.text,
-    fontSize: 16,
+    fontSize: 14,
+    lineHeight: 18,
     fontVariant: ['tabular-nums'],
   },
   durationUser: {
