@@ -568,6 +568,7 @@ export const getSyncSnapshot = async (userId: string): Promise<SyncSnapshot> => 
          latest_message.id AS latest_message_id,
          latest_message.sender_role AS latest_message_sender_role,
          latest_message.content AS latest_message_content,
+         latest_message.content_json AS latest_message_content_json,
          latest_message.created_at AS latest_message_created_at
        FROM conversations
        LEFT JOIN LATERAL (
@@ -599,6 +600,7 @@ export const getSyncSnapshot = async (userId: string): Promise<SyncSnapshot> => 
               id: String(row.latest_message_id),
               senderRole: row.latest_message_sender_role,
               content: String(row.latest_message_content || ''),
+              contentJson: row.latest_message_content_json || undefined,
               createdAt: iso(row.latest_message_created_at)!
             }
           : undefined

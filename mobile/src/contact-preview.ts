@@ -3,6 +3,7 @@ import {
   ChatMessage,
   ContactPreviewCache,
   ConversationHistoryCache,
+  ServerMessage,
 } from './types'
 import { starterMessageForCharacter } from './starter-message'
 
@@ -31,6 +32,20 @@ export const contactPreviewForMessage = (message?: ChatMessage) => {
     return `[Audio] ${duration}\"`
   }
   return message.text.trim() || undefined
+}
+
+export const contactPreviewForServerMessage = (
+  message?: Pick<ServerMessage, 'content' | 'contentJson'>
+) => {
+  if (!message) return undefined
+  const segments = message.contentJson?.deliverySegments
+  if (Array.isArray(segments)) {
+    const latestSegment = segments.findLast(segment => (
+      typeof segment === 'string' && Boolean(segment.trim())
+    ))
+    if (typeof latestSegment === 'string') return latestSegment.trim()
+  }
+  return message.content.trim() || undefined
 }
 
 export const applyContactPreviewUpdates = (

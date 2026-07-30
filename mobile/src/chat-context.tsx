@@ -37,6 +37,7 @@ import {
   applyContactPreviewUpdates,
   buildContactPreviewState,
   contactPreviewForMessage,
+  contactPreviewForServerMessage,
   ContactPreviewUpdate,
   latestDisplayableMessage,
 } from './contact-preview'
@@ -509,8 +510,9 @@ export function ChatProvider({ children }: PropsWithChildren) {
         const serverMessageIsCurrent = !currentLastMessageAt
           || !lastMessageAt
           || lastMessageAt >= currentLastMessageAt
-        if (serverMessageIsCurrent && conversation?.latestMessage?.content) {
-          nextPreviews[character.id] = conversation.latestMessage.content
+        const serverPreview = contactPreviewForServerMessage(conversation?.latestMessage)
+        if (serverMessageIsCurrent && serverPreview) {
+          nextPreviews[character.id] = serverPreview
         }
         if (serverMessageIsCurrent && lastMessageAt) {
           nextLastMessageAtByCharacter[character.id] = lastMessageAt

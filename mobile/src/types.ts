@@ -80,7 +80,7 @@ export type Conversation = {
 }
 
 export type SyncConversation = Conversation & {
-  latestMessage?: Pick<ServerMessage, 'id' | 'senderRole' | 'content' | 'createdAt'>
+  latestMessage?: Pick<ServerMessage, 'id' | 'senderRole' | 'content' | 'contentJson' | 'createdAt'>
 }
 
 export type SyncSnapshot = {

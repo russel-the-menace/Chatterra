@@ -1,4 +1,8 @@
-import { applyContactPreviewUpdates, buildContactPreviewState } from './contact-preview'
+import {
+  applyContactPreviewUpdates,
+  buildContactPreviewState,
+  contactPreviewForServerMessage,
+} from './contact-preview'
 import { Character, ConversationHistoryCache } from './types'
 
 const expect = (condition: unknown, message: string) => {
@@ -71,4 +75,15 @@ const voiceCache: ConversationHistoryCache = {
 const voiceState = buildContactPreviewState([maya], undefined, new Map([[maya.id, voiceCache]]))
 expect(voiceState.previews[maya.id] === '[Audio] 18\"',
   'a latest voice message should display its rounded audio duration')
+
+expect(contactPreviewForServerMessage({
+  content: 'hey, i am just lying here.\nmy brain is finally quiet for once 🥺💕\nwhat are you up to?',
+  contentJson: {
+    deliverySegments: [
+      'hey, i am just lying here.',
+      'my brain is finally quiet for once 🥺💕\nwhat are you up to?',
+    ],
+  },
+}) === 'my brain is finally quiet for once 🥺💕\nwhat are you up to?',
+'a sync snapshot should use the final delivery segment as its contact preview')
 console.log('contact preview checks passed')
