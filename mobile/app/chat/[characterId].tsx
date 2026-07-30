@@ -425,7 +425,7 @@ function TypingIndicator() {
       toValue: 1,
       duration: 900,
       easing: Easing.linear,
-      useNativeDriver: true,
+      useNativeDriver: false,
     }))
     animation.start()
     return () => animation.stop()
@@ -612,7 +612,7 @@ function MessageBubbleContent({
       toValue: 1,
       duration: MESSAGE_REVEAL_DURATION_MS,
       easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
+      useNativeDriver: false,
     })
     animation.start(({ finished }) => {
       if (finished) setShowTypingIndicator(false)
@@ -772,7 +772,7 @@ function MessageRow({
       toValue: 1,
       duration: 230,
       delay: message.animationDelayMs || 0,
-      useNativeDriver: true,
+      useNativeDriver: false,
     }).start()
   }, [entryProgress, message.animateEntry, message.animationDelayMs])
 
@@ -1121,7 +1121,7 @@ export default function ChatScreen() {
       toValue: 0,
       duration: MESSAGE_ACTION_FADE_OUT_MS,
       easing: Easing.out(Easing.quad),
-      useNativeDriver: true,
+      useNativeDriver: false,
     }).start()
   }, [messageActionMenuOpacity])
 
@@ -1144,7 +1144,7 @@ export default function ChatScreen() {
         toValue: 1,
         duration: MESSAGE_ACTION_FADE_IN_MS,
         easing: Easing.out(Easing.quad),
-        useNativeDriver: true,
+        useNativeDriver: false,
       }).start()
     }, delay)
   }, [messageActionMenuOpacity])
