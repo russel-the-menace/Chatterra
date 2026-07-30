@@ -3571,7 +3571,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#E9ECEF',
   },
   voiceTranscriptBox: {
-    width: '100%',
+    maxWidth: '100%',
     minHeight: 38,
     paddingHorizontal: 13,
     paddingVertical: 9,
