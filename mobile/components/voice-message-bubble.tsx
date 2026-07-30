@@ -1,4 +1,3 @@
-import Ionicons from '@expo/vector-icons/Ionicons'
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from 'expo-audio'
 import { useCallback, useEffect, useRef } from 'react'
 import { Animated as RNAnimated, Pressable, StyleSheet, Text, View } from 'react-native'
@@ -110,18 +109,12 @@ export function VoiceMessageBubble({
         : 'Loading voice message'}
       style={({ pressed }) => [
         styles.voiceMessage,
-        { width: Math.min(100, Math.max(78, 64 + (voice.durationSeconds || 4) * 4)) },
+        isUser && styles.voiceMessageUser,
+        { width: Math.min(146, Math.max(92, 76 + (voice.durationSeconds || 4) * 8)) },
         pressed && styles.voiceMessagePressed,
       ]}
     >
-      <View style={styles.speakerIcon}>
-        <Ionicons
-          name="volume-mute-outline"
-          size={21}
-          color={isUser ? '#FFFFFF' : palette.text}
-        />
-      </View>
-      <View style={styles.soundWaves}>
+      <View style={[styles.soundWaves, isUser && styles.soundWavesUser]}>
         {waveOpacities.map((opacity, index) => (
           <RNAnimated.View
             key={index}
@@ -146,19 +139,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
+    gap: 7,
+  },
+  voiceMessageUser: {
+    flexDirection: 'row-reverse',
   },
   voiceMessagePressed: {
     opacity: 0.6,
   },
-  speakerIcon: {
-    width: 21,
-    alignItems: 'center',
-  },
   soundWaves: {
-    width: 16,
+    width: 20,
     height: 20,
     position: 'relative',
+  },
+  soundWavesUser: {
+    transform: [{ scaleX: -1 }],
   },
   soundWaveArc: {
     position: 'absolute',
@@ -171,7 +166,7 @@ const styles = StyleSheet.create({
     width: 4,
     height: 8,
     top: 6,
-    left: 0,
+    left: 1,
     borderTopRightRadius: 5,
     borderBottomRightRadius: 5,
   },
@@ -179,7 +174,7 @@ const styles = StyleSheet.create({
     width: 5,
     height: 13,
     top: 3.5,
-    left: 5,
+    left: 7,
     borderTopRightRadius: 7,
     borderBottomRightRadius: 7,
   },
@@ -187,7 +182,7 @@ const styles = StyleSheet.create({
     width: 5,
     height: 18,
     top: 1,
-    left: 11,
+    left: 14,
     borderTopRightRadius: 10,
     borderBottomRightRadius: 10,
   },
