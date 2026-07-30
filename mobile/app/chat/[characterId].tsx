@@ -68,8 +68,10 @@ const createLocalId = () => `${Date.now()}-${Math.random().toString(36).slice(2)
 
 const LATEST_SCROLL_DURATION_MS = 280
 const MESSAGE_REVEAL_DURATION_MS = 220
-const OUTGOING_DELIVERY_INDICATOR_DELAY_MS = 1_000
+const OUTGOING_DELIVERY_INDICATOR_DELAY_MS = 3_000
 const OUTGOING_DELIVERY_TIMEOUT_MS = 60_000
+const OUTGOING_DELIVERY_STATUS_POLL_INITIAL_DELAY_MS = 250
+const OUTGOING_DELIVERY_STATUS_POLL_INTERVAL_MS = 500
 const MESSAGE_ROW_GAP = 14
 const LATEST_MESSAGE_COMPOSER_GAP = 15
 const MESSAGE_ACTION_MENU_MAX_WIDTH = 308
@@ -1116,6 +1118,7 @@ export default function ChatScreen() {
     }
   })
   const stagedDeliveryTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set())
+  const deliveryStatusPollCancelsRef = useRef<Set<() => void>>(new Set())
   const lastVoiceErrorRef = useRef<string | null>(null)
   const voiceInput = useVoiceInput({
     mode: voiceInputMode,
@@ -1535,6 +1538,8 @@ export default function ChatScreen() {
     cancelAnimation(latestScrollProgress)
     stagedDeliveryTimersRef.current.forEach(timer => clearTimeout(timer))
     stagedDeliveryTimersRef.current.clear()
+    Array.from(deliveryStatusPollCancelsRef.current).forEach(cancel => cancel())
+    deliveryStatusPollCancelsRef.current.clear()
     if (messageActionReappearTimerRef.current) {
       clearTimeout(messageActionReappearTimerRef.current)
     }
@@ -2374,9 +2379,19 @@ export default function ChatScreen() {
     })
     let userMessageConfirmed = false
     let deliveryTimeout: ReturnType<typeof setTimeout> | undefined
+    let deliveryStatusPollTimer: ReturnType<typeof setTimeout> | undefined
+    let deliveryStatusPollingCancelled = false
+
+    const cancelDeliveryStatusPolling = () => {
+      deliveryStatusPollingCancelled = true
+      if (deliveryStatusPollTimer) clearTimeout(deliveryStatusPollTimer)
+      deliveryStatusPollCancelsRef.current.delete(cancelDeliveryStatusPolling)
+    }
+    deliveryStatusPollCancelsRef.current.add(cancelDeliveryStatusPolling)
 
     const confirmUserMessage = (sourceMessageId: string) => {
       userMessageConfirmed = true
+      cancelDeliveryStatusPolling()
       setQuoteDraft(character.id, current => (
         current && current.sourceRenderKey === userMessage.renderKey
           ? { ...current, sourceMessageId }
@@ -2395,8 +2410,39 @@ export default function ChatScreen() {
       )))
     }
 
+    const scheduleDeliveryStatusPoll = (delay: number) => {
+      if (deliveryStatusPollingCancelled || userMessageConfirmed || !isCurrentDelivery()) return
+      deliveryStatusPollTimer = setTimeout(() => {
+        deliveryStatusPollTimer = undefined
+        void checkDeliveryStatus()
+      }, delay)
+    }
+
+    const checkDeliveryStatus = async () => {
+      if (deliveryStatusPollingCancelled || userMessageConfirmed || !isCurrentDelivery()) {
+        cancelDeliveryStatusPolling()
+        return
+      }
+      try {
+        const status = await api.getMessageDeliveryStatus(userId, userMessageId)
+        if (deliveryStatusPollingCancelled || userMessageConfirmed || !isCurrentDelivery()) {
+          cancelDeliveryStatusPolling()
+          return
+        }
+        if (status.persisted) {
+          confirmUserMessage(status.userMessageId || userMessageId)
+          if (status.conversationId) setConversationId(status.conversationId)
+          return
+        }
+      } catch {
+        // The chat request remains authoritative; transient status failures are retried.
+      }
+      scheduleDeliveryStatusPoll(OUTGOING_DELIVERY_STATUS_POLL_INTERVAL_MS)
+    }
+
     deliveryTimeout = setTimeout(() => {
       if (!isCurrentDelivery() || userMessageConfirmed) return
+      cancelDeliveryStatusPolling()
       setMessages(current => current.map(message => (
         message.id === userMessage.id && message.deliveryState === 'sending'
           ? { ...message, deliveryState: 'failed' }
@@ -2409,7 +2455,7 @@ export default function ChatScreen() {
     }, OUTGOING_DELIVERY_TIMEOUT_MS)
 
     try {
-      const response = await api.sendMessage({
+      const sendRequest = api.sendMessage({
         message: text,
         clientMessageId: userMessageId,
         conversationId: conversationIdForSend,
@@ -2418,6 +2464,8 @@ export default function ChatScreen() {
         quote,
         voice,
       })
+      scheduleDeliveryStatusPoll(OUTGOING_DELIVERY_STATUS_POLL_INITIAL_DELAY_MS)
+      const response = await sendRequest
       if (!isCurrentDelivery()) return
       if (response.userMessageId) {
         confirmUserMessage(response.userMessageId)
@@ -2477,6 +2525,7 @@ export default function ChatScreen() {
       }
     } finally {
       if (deliveryTimeout) clearTimeout(deliveryTimeout)
+      cancelDeliveryStatusPolling()
       if (isCurrentDelivery()) {
         sendingRef.current = false
         setSending(false)
