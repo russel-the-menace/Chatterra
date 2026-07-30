@@ -1,4 +1,4 @@
-import { buildContactPreviewState } from './contact-preview'
+import { applyContactPreviewUpdates, buildContactPreviewState } from './contact-preview'
 import { Character, ConversationHistoryCache } from './types'
 
 const expect = (condition: unknown, message: string) => {
@@ -26,4 +26,49 @@ expect(
   state.previews[sofia.id].startsWith("Hi, I'm Sofía."),
   'a character without a conversation should show its greeting instead of personality'
 )
+
+const updated = applyContactPreviewUpdates({
+  ...state,
+  cachedAt: Date.now(),
+}, [{
+  characterId: sofia.id,
+  conversationId: 'sofia-conversation',
+  preview: 'gracias means thank you',
+  timestamp: '2026-07-30T13:00:00.000Z',
+}])
+expect(updated.previews[sofia.id] === 'gracias means thank you',
+  'a latest message should replace the contact preview')
+expect(updated.lastMessageAtByCharacter[sofia.id] === '2026-07-30T13:00:00.000Z',
+  'a latest message should update contact ordering time')
+expect(updated.conversationIdsByCharacter[sofia.id] === 'sofia-conversation',
+  'a latest message should persist the conversation identity')
+
+const afterOlderUpdate = applyContactPreviewUpdates(updated, [{
+  characterId: sofia.id,
+  preview: 'older text',
+  timestamp: '2026-07-30T12:00:00.000Z',
+}])
+expect(afterOlderUpdate.previews[sofia.id] === 'gracias means thank you',
+  'an older server update must not overwrite a newer local preview')
+
+const voiceCache: ConversationHistoryCache = {
+  conversationId: 'voice-conversation',
+  messages: [{
+    id: 'voice-last',
+    sender: 'user',
+    text: 'the transcript should not be shown in the contact list',
+    voice: {
+      provider: 'user-recording',
+      status: 'ready',
+      audioUrl: '/voice.m4a',
+      durationSeconds: 18.2,
+      mimeType: 'audio/m4a',
+      transcriptStatus: 'ready',
+    },
+  }],
+  cachedAt: Date.now(),
+}
+const voiceState = buildContactPreviewState([maya], undefined, new Map([[maya.id, voiceCache]]))
+expect(voiceState.previews[maya.id] === '[Audio] 18\"',
+  'a latest voice message should display its rounded audio duration')
 console.log('contact preview checks passed')

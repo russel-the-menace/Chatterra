@@ -28,9 +28,9 @@ const run = () => {
   const dateItems = timeline.filter(item => item.kind === 'date')
   expect(timelineMessages[0]?.kind === 'message' && timelineMessages[0].message.id === 'next-day',
     'the inverted display should expose the newest message first')
-  expect(timelineMessages[2]?.kind === 'message' && timelineMessages[2].assistantContinuation,
+  expect(timelineMessages[2]?.kind === 'message' && timelineMessages[2].continuation,
     'same-sender messages within five minutes should continue an assistant cluster')
-  expect(timelineMessages[1]?.kind === 'message' && !timelineMessages[1].assistantContinuation,
+  expect(timelineMessages[1]?.kind === 'message' && !timelineMessages[1].continuation,
     'a new day should start a new assistant cluster')
   expect(dateItems.length === 2, 'each calendar day should add one date divider')
   expect(dateItems.every(item => item.kind === 'date' && /\d{2}:\d{2}$/.test(item.label)),
@@ -40,6 +40,13 @@ const run = () => {
   const segmentedSecond: ChatMessage = { id: 'segment-b', sourceMessageId: 'reply', sender: 'assistant', text: 'b' }
   expect(belongsToSameMessageCluster(segmentedFirst, segmentedSecond),
     'segments from one assistant reply should remain in one cluster without timestamps')
+
+  const userFirst = message('user-first', 'user', '2026-07-31T10:00:00.000Z')
+  const userSecond = message('user-second', 'user', '2026-07-31T10:01:00.000Z')
+  const userTimeline = chatTimeline([userFirst, userSecond])
+  const userTimelineMessages = userTimeline.filter(item => item.kind === 'message')
+  expect(userTimelineMessages[0]?.kind === 'message' && userTimelineMessages[0].continuation,
+    'same-sender user messages should use the same continuation rule')
   console.log('chat timeline checks passed')
 }
 

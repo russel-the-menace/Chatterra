@@ -12,7 +12,7 @@ import {
   TextInput,
   View,
 } from 'react-native'
-import { SafeAreaView } from 'react-native-safe-area-context'
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { Avatar } from '@/components/avatar'
 import { pickSquareAvatar } from '@/src/avatar-upload'
@@ -45,6 +45,7 @@ const createCharacterDraft = (): Character => ({
 })
 
 export default function CharacterEditorScreen() {
+  const insets = useSafeAreaInsets()
   const params = useLocalSearchParams<{ characterId: string | string[] }>()
   const characterId = Array.isArray(params.characterId) ? params.characterId[0] : params.characterId
   const isNew = characterId === 'new'
@@ -144,7 +145,7 @@ export default function CharacterEditorScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right', 'bottom']}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
         <Pressable onPress={() => router.back()} hitSlop={10} style={styles.headerCommand}>
           <Text style={styles.cancelLabel}>Cancel</Text>
@@ -167,7 +168,8 @@ export default function CharacterEditorScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <ScrollView
-          contentContainerStyle={styles.form}
+          style={styles.formScroll}
+          contentContainerStyle={[styles.form, { paddingBottom: Math.max(16, insets.bottom) }]}
           keyboardShouldPersistTaps="handled"
           automaticallyAdjustKeyboardInsets
         >
@@ -238,6 +240,7 @@ const styles = StyleSheet.create({
   },
   keyboardArea: {
     flex: 1,
+    backgroundColor: palette.background,
   },
   header: {
     height: 56,
@@ -275,8 +278,10 @@ const styles = StyleSheet.create({
   form: {
     paddingHorizontal: layout.horizontalPadding,
     paddingTop: 18,
-    paddingBottom: 36,
     gap: 14,
+    backgroundColor: palette.background,
+  },
+  formScroll: {
     backgroundColor: palette.background,
   },
   avatarSection: {

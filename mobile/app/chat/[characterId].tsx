@@ -1,4 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons'
+import { Image } from 'expo-image'
 import { FlashList, FlashListRef } from '@shopify/flash-list'
 import * as Clipboard from 'expo-clipboard'
 import { router, useLocalSearchParams } from 'expo-router'
@@ -17,6 +18,7 @@ import {
   Easing,
   Keyboard,
   LayoutChangeEvent,
+  Modal,
   NativeScrollEvent,
   NativeSyntheticEvent,
   Platform,
@@ -47,6 +49,7 @@ import {
   chatTimelineItemType,
   messageRenderKey,
 } from '@/src/chat-timeline'
+import { contactPreviewForMessage } from '@/src/contact-preview'
 import { mergeMessagePage } from '@/src/message-page-merge'
 import { starterMessageForCharacter } from '@/src/starter-message'
 import { palette } from '@/src/theme'
@@ -130,6 +133,12 @@ type MessageAnchor = {
   y: number
   width: number
   height: number
+}
+
+type AvatarPreview = {
+  avatar?: string
+  muted?: boolean
+  name: string
 }
 
 type MessageSelectionRange = {
@@ -821,12 +830,71 @@ function DateDivider({ label }: { label: string }) {
   )
 }
 
+const isImageAvatar = (avatar?: string) => Boolean(
+  avatar && /^(data:image\/|https?:\/\/|file:|content:)/i.test(avatar)
+)
+
+function AvatarPreviewModal({
+  preview,
+  onClose,
+}: {
+  preview: AvatarPreview | null
+  onClose: () => void
+}) {
+  const { width } = useWindowDimensions()
+  if (!preview) return null
+  const showImage = isImageAvatar(preview.avatar)
+  const previewSize = Math.min(320, width * 0.78)
+
+  return (
+    <Modal
+      transparent
+      animationType="fade"
+      visible
+      statusBarTranslucent
+      onRequestClose={onClose}
+    >
+      <View style={styles.avatarPreviewOverlay}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Close avatar preview"
+          onPress={onClose}
+          style={StyleSheet.absoluteFill}
+        />
+        <View style={styles.avatarPreviewContent}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Close avatar preview"
+            onPress={onClose}
+            hitSlop={10}
+            style={styles.avatarPreviewClose}
+          >
+            <Ionicons name="close" size={26} color="#FFFFFF" />
+          </Pressable>
+          <View style={styles.avatarPreviewFrame}>
+            {showImage ? (
+              <Image
+                source={{ uri: preview.avatar }}
+                contentFit="contain"
+                cachePolicy="memory-disk"
+                style={styles.avatarPreviewImage}
+              />
+            ) : (
+              <Avatar avatar={preview.avatar} name={preview.name} size={previewSize} muted={preview.muted} />
+            )}
+          </View>
+        </View>
+      </View>
+    </Modal>
+  )
+}
+
 function MessageRow({
   message,
   characterName,
   characterAvatar,
   userAvatar,
-  onEditCharacter,
+  onPreviewAvatar,
   onLongPress,
   selecting,
   selection,
@@ -838,13 +906,14 @@ function MessageRow({
   onSelectionOutsideTap,
   onSelectionTouchEnd,
   onRetryMessage,
-  assistantContinuation,
+  continuation,
+  atLatestEdge,
 }: {
   message: ChatMessage
   characterName: string
   characterAvatar?: string
   userAvatar?: string
-  onEditCharacter: () => void
+  onPreviewAvatar: (preview: AvatarPreview) => void
   onLongPress: (message: ChatMessage, anchor: MessageAnchor) => void
   selecting: boolean
   selection?: MessageSelectionRange
@@ -856,11 +925,12 @@ function MessageRow({
   onSelectionOutsideTap: () => void
   onSelectionTouchEnd: () => void
   onRetryMessage: (message: ChatMessage) => void
-  assistantContinuation: boolean
+  continuation: boolean
+  atLatestEdge: boolean
 }) {
   const messageKey = message.renderKey || message.id
   const isUser = message.sender === 'user'
-  const isContinuation = !isUser && assistantContinuation
+  const isContinuation = continuation
   const readyVoice = message.voice?.status === 'ready' && Boolean(message.voice.audioUrl)
   const entryProgress = useRef(new RNAnimated.Value(message.animateEntry ? 0 : 1)).current
   const bubbleRef = useRef<View>(null)
@@ -890,6 +960,7 @@ function MessageRow({
     <RNAnimated.View
       style={[
         styles.messageRow,
+        atLatestEdge && styles.messageRowLatest,
         {
           opacity: entryProgress,
           transform: [{
@@ -904,14 +975,14 @@ function MessageRow({
       ]}>
         {!isUser && !isContinuation && (
           <Pressable
-            onPress={onEditCharacter}
-            accessibilityLabel={`Edit ${characterName}`}
+            onPress={() => onPreviewAvatar({ avatar: characterAvatar, name: characterName })}
+            accessibilityLabel={`Preview ${characterName}'s avatar`}
             style={styles.assistantAvatar}
           >
             <Avatar avatar={characterAvatar} name={characterName} size={40} />
           </Pressable>
         )}
-        {isContinuation && <View style={styles.avatarSpacer} />}
+        {!isUser && isContinuation && <View style={styles.avatarSpacer} />}
         <View style={[styles.messageContent, isUser && styles.messageContentUser]}>
           {isUser && (
             <MessageDeliveryIndicator
@@ -979,7 +1050,19 @@ function MessageRow({
             </View>
           )}
         </View>
-        {isUser && <Avatar name="Me" avatar={userAvatar || 'Me'} size={40} muted />}
+        {isUser && (
+          isContinuation
+            ? <View style={styles.avatarSpacer} />
+            : (
+                <Pressable
+                  onPress={() => onPreviewAvatar({ avatar: userAvatar, muted: true, name: 'Me' })}
+                  accessibilityLabel="Preview your avatar"
+                  style={styles.userAvatar}
+                >
+                  <Avatar name="Me" avatar={userAvatar || 'Me'} size={40} muted />
+                </Pressable>
+              )
+        )}
       </View>
       {(message.quote || message.voiceTranscriptVisible || (
         message.translationVisible
@@ -1118,6 +1201,7 @@ export default function ChatScreen() {
   const [loadingOlderHistory, setLoadingOlderHistory] = useState(false)
   const [messageActionSession, setMessageActionSession] = useState<MessageActionSession | null>(null)
   const [messageActionMenuInteractive, setMessageActionMenuInteractive] = useState(true)
+  const [avatarPreview, setAvatarPreview] = useState<AvatarPreview | null>(null)
   const listRef = useRef<FlashListRef<ChatTimelineItem>>(null)
   const composerInputRef = useRef<TextInput>(null)
   const composerRegionRef = useRef<View>(null)
@@ -1208,11 +1292,16 @@ export default function ChatScreen() {
     },
     onSent: result => {
       setConversationId(result.conversationId)
-      markConversationActive(characterId)
       const incoming = mapMessages([
         ...(result.starterMessage ? [result.starterMessage] : []),
         result.message,
       ])
+      const latestIncoming = incoming.at(-1)
+      markConversationActive(
+        characterId,
+        latestIncoming?.createdAt || new Date().toISOString(),
+        contactPreviewForMessage(latestIncoming)
+      )
       const assistant = result.response
         ? responseMessages({ ...result.response, conversationId: result.conversationId })
         : []
@@ -1492,6 +1581,14 @@ export default function ChatScreen() {
     if (!firstMessage) return
 
     const followIncoming = () => prepareForIncomingMessage()
+    const updateContactPreview = (message: ChatMessage) => {
+      if (!characterId) return
+      markConversationActive(
+        characterId,
+        message.createdAt || new Date().toISOString(),
+        contactPreviewForMessage(message)
+      )
+    }
 
     const queueMessage = (index: number) => {
       const nextMessage = incomingMessages[index]
@@ -1531,6 +1628,7 @@ export default function ChatScreen() {
               ? { ...nextMessage, renderKey: typingId }
               : message
           )))
+          updateContactPreview(nextMessage)
           queueMessage(index + 1)
         }, simulatedTypingDuration(nextMessage.text))
       }, 220)
@@ -1543,6 +1641,7 @@ export default function ChatScreen() {
           ? [{ ...firstMessage, renderKey: loadingId }]
           : [message]
       )))
+      updateContactPreview(firstMessage)
       queueMessage(1)
     }
 
@@ -1552,7 +1651,7 @@ export default function ChatScreen() {
     } else {
       revealFirstMessage()
     }
-  }, [prepareForIncomingMessage, scheduleDeliveryTask])
+  }, [characterId, markConversationActive, prepareForIncomingMessage, scheduleDeliveryTask])
 
   useEffect(() => () => {
     stagedDeliveryTimersRef.current.forEach(timer => clearTimeout(timer))
@@ -2435,7 +2534,7 @@ export default function ChatScreen() {
       voiceInput.reset()
     }
     closeMessageActionMenu()
-    markConversationActive(character.id)
+    markConversationActive(character.id, messageCreatedAt, text)
     const assistantTypingStartedAt = Date.now()
     setMessages(current => {
       const hasExistingUserMessage = current.some(message => message.id === userMessage.id)
@@ -2542,7 +2641,7 @@ export default function ChatScreen() {
       if (response.userMessageId) {
         confirmUserMessage(response.userMessageId)
       }
-      markConversationActive(character.id)
+      markConversationActive(character.id, messageCreatedAt, text)
       setConversationId(response.conversationId)
       if (response.behavior?.activity) setActivity(formatActivity(response.behavior.activity))
 
@@ -2787,7 +2886,7 @@ export default function ChatScreen() {
               getItemType={chatTimelineItemType}
               drawDistance={window.height}
               extraData={messageActionSession}
-              renderItem={({ item }) => {
+              renderItem={({ item, index }) => {
                 if (item.kind === 'date') return <DateDivider label={item.label} />
                 const message = item.message
                 const messageKey = messageRenderKey(message)
@@ -2800,7 +2899,7 @@ export default function ChatScreen() {
                     characterName={character.name}
                     characterAvatar={character.avatar}
                     userAvatar={userAvatar}
-                    onEditCharacter={openEditor}
+                    onPreviewAvatar={setAvatarPreview}
                     onLongPress={openMessageActionMenu}
                     selecting={Boolean(selectionSession)}
                     selection={selectionSession?.selection}
@@ -2831,7 +2930,8 @@ export default function ChatScreen() {
                       }
                     }}
                     onRetryMessage={message => void sendMessage(message)}
-                    assistantContinuation={item.assistantContinuation}
+                    continuation={item.continuation}
+                    atLatestEdge={index === 0}
                   />
                 )
               }}
@@ -3329,6 +3429,7 @@ export default function ChatScreen() {
           </RNAnimated.View>
         </View>
       )}
+      <AvatarPreviewModal preview={avatarPreview} onClose={() => setAvatarPreview(null)} />
     </SafeAreaView>
   )
 }
@@ -3433,6 +3534,9 @@ const styles = StyleSheet.create({
     marginBottom: MESSAGE_ROW_GAP,
     flexDirection: 'column',
   },
+  messageRowLatest: {
+    marginBottom: 0,
+  },
   dateDivider: {
     alignItems: 'center',
     paddingTop: 3,
@@ -3458,6 +3562,42 @@ const styles = StyleSheet.create({
   },
   assistantAvatar: {
     alignSelf: 'flex-start',
+  },
+  userAvatar: {
+    alignSelf: 'flex-start',
+  },
+  avatarPreviewOverlay: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.82)',
+  },
+  avatarPreviewContent: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarPreviewClose: {
+    position: 'absolute',
+    top: -58,
+    right: 22,
+    width: 42,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarPreviewFrame: {
+    width: '78%',
+    maxWidth: 320,
+    aspectRatio: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    borderRadius: 8,
+  },
+  avatarPreviewImage: {
+    width: '100%',
+    height: '100%',
   },
   messageContent: {
     maxWidth: '76%',

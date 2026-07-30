@@ -33,7 +33,13 @@ import {
   ContactPreviewCache,
   ConversationHistoryCache,
 } from './types'
-import { buildContactPreviewState } from './contact-preview'
+import {
+  applyContactPreviewUpdates,
+  buildContactPreviewState,
+  contactPreviewForMessage,
+  ContactPreviewUpdate,
+  latestDisplayableMessage,
+} from './contact-preview'
 import { mergeMessagePage } from './message-page-merge'
 
 type ConversationCacheEntry = ConversationHistoryCache
@@ -85,7 +91,7 @@ type ChatContextValue = {
   markCharacterRead: (characterId: string) => void
   setActiveCharacter: (characterId: string | null) => void
   setCharacterPinned: (characterId: string, pinned: boolean) => Promise<void>
-  markConversationActive: (characterId: string, timestamp?: string) => void
+  markConversationActive: (characterId: string, timestamp?: string, preview?: string) => void
   getConversationCache: (characterId: string) => ConversationCacheEntry | undefined
   hydrateConversationCache: (characterId: string) => Promise<ConversationCacheEntry | undefined>
   setConversationCache: (characterId: string, entry: ConversationCacheEntry) => void
@@ -251,6 +257,15 @@ export function ChatProvider({ children }: PropsWithChildren) {
       })
     contactPreviewCacheWriteRef.current = write
   }, [])
+
+  const updateContactPreviews = useCallback((updates: ContactPreviewUpdate[]) => {
+    if (!userId || updates.length === 0) return
+    const next = applyContactPreviewUpdates(contactPreviewCacheRef.current || undefined, updates)
+    setProactivePreviews(next.previews)
+    setConversationIdsByCharacter(next.conversationIdsByCharacter)
+    setLastMessageAtByCharacter(next.lastMessageAtByCharacter)
+    persistContactPreviewCache(userId, next)
+  }, [persistContactPreviewCache, userId])
 
   const refreshVoiceInputCapability = useCallback(async () => {
     try {
@@ -470,7 +485,10 @@ export function ChatProvider({ children }: PropsWithChildren) {
         }
       })
 
-      const defaultContactPreviewState = buildContactPreviewState(snapshot.characters)
+      const defaultContactPreviewState = buildContactPreviewState(
+        snapshot.characters,
+        contactPreviewCacheRef.current || undefined
+      )
       const nextConversationIds: Record<string, string | null> = {
         ...defaultContactPreviewState.conversationIdsByCharacter,
       }
@@ -483,12 +501,20 @@ export function ChatProvider({ children }: PropsWithChildren) {
 
       snapshot.characters.forEach(character => {
         const conversation = newestConversationByCharacter.get(character.id)
-        nextConversationIds[character.id] = conversation?.id || null
-        if (conversation?.latestMessage?.content) {
+        nextConversationIds[character.id] = conversation?.id
+          || nextConversationIds[character.id]
+          || null
+        const lastMessageAt = conversation?.lastMessageAt || conversation?.latestMessage?.createdAt
+        const currentLastMessageAt = nextLastMessageAtByCharacter[character.id]
+        const serverMessageIsCurrent = !currentLastMessageAt
+          || !lastMessageAt
+          || lastMessageAt >= currentLastMessageAt
+        if (serverMessageIsCurrent && conversation?.latestMessage?.content) {
           nextPreviews[character.id] = conversation.latestMessage.content
         }
-        const lastMessageAt = conversation?.lastMessageAt || conversation?.latestMessage?.createdAt
-        if (lastMessageAt) nextLastMessageAtByCharacter[character.id] = lastMessageAt
+        if (serverMessageIsCurrent && lastMessageAt) {
+          nextLastMessageAtByCharacter[character.id] = lastMessageAt
+        }
         if (!conversation) return
         const version = [
           conversation.id,
@@ -565,26 +591,15 @@ export function ChatProvider({ children }: PropsWithChildren) {
       const deliveries = await api.pollProactive(userId)
       if (!deliveries.length) return
 
-      setProactivePreviews(current => {
-        const next = { ...current }
-        deliveries.forEach(delivery => {
-          if (delivery.characterId && delivery.content) {
-            next[delivery.characterId] = delivery.content
-          }
-        })
-        return next
-      })
-      setLastMessageAtByCharacter(current => {
-        const next = { ...current }
-        deliveries.forEach(delivery => {
-          if (!delivery.characterId) return
-          const timestamp = delivery.createdAt || new Date().toISOString()
-          if ((next[delivery.characterId] || '') < timestamp) {
-            next[delivery.characterId] = timestamp
-          }
-        })
-        return next
-      })
+      updateContactPreviews(deliveries.flatMap(delivery => (
+        delivery.characterId
+          ? [{
+              characterId: delivery.characterId,
+              preview: delivery.content,
+              timestamp: delivery.createdAt || new Date().toISOString(),
+            }]
+          : []
+      )))
       setConversationVersions(current => {
         const next = { ...current }
         deliveries.forEach(delivery => {
@@ -606,7 +621,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     } finally {
       pollingRef.current = false
     }
-  }, [userId])
+  }, [updateContactPreviews, userId])
 
   useEffect(() => {
     if (!userId) return
@@ -725,12 +740,19 @@ export function ChatProvider({ children }: PropsWithChildren) {
     if (characterId) markCharacterRead(characterId)
   }, [markCharacterRead])
 
-  const markConversationActive = useCallback((characterId: string, timestamp = new Date().toISOString()) => {
-    setLastMessageAtByCharacter(current => {
-      if ((current[characterId] || '') >= timestamp) return current
-      return { ...current, [characterId]: timestamp }
-    })
-  }, [])
+  const markConversationActive = useCallback((
+    characterId: string,
+    timestamp = new Date().toISOString(),
+    preview?: string
+  ) => {
+    const cachedConversation = conversationCacheRef.current.get(characterId)
+    updateContactPreviews([{
+      characterId,
+      conversationId: cachedConversation?.conversationId || undefined,
+      preview: preview || latestDisplayableMessage(cachedConversation)?.text,
+      timestamp,
+    }])
+  }, [updateContactPreviews])
 
   const setCharacterPinned = useCallback(async (characterId: string, pinned: boolean) => {
     if (!userId) throw new Error('User is not ready.')
@@ -866,7 +888,16 @@ export function ChatProvider({ children }: PropsWithChildren) {
     }
     conversationCacheRef.current.set(characterId, stableEntry)
     scheduleConversationCachePersistence(characterId, persistentConversationEntry(stableEntry))
-  }, [scheduleConversationCachePersistence])
+    const latestCachedMessage = latestDisplayableMessage(stableEntry)
+    if (latestCachedMessage) {
+      updateContactPreviews([{
+        characterId,
+        conversationId: stableEntry.conversationId || undefined,
+        preview: contactPreviewForMessage(latestCachedMessage),
+        timestamp: latestCachedMessage.createdAt || new Date(stableEntry.cachedAt).toISOString(),
+      }])
+    }
+  }, [scheduleConversationCachePersistence, updateContactPreviews])
 
   const getConversationListViewState = useCallback((characterId: string) => (
     conversationListViewStateRef.current.get(characterId)

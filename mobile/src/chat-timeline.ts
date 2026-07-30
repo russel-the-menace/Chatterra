@@ -45,7 +45,7 @@ export const belongsToSameMessageCluster = (previous: ChatMessage, message: Chat
 }
 
 export type ChatTimelineMessageItem = {
-  assistantContinuation: boolean
+  continuation: boolean
   key: string
   kind: 'message'
   message: ChatMessage
@@ -76,9 +76,8 @@ export const chatTimeline = (messages: ChatMessage[]): ChatTimelineItem[] => {
       previousDayKey = dayKey
     }
     chronologicalItems.push({
-      assistantContinuation: Boolean(
+      continuation: Boolean(
         previousMessage
-        && message.sender === 'assistant'
         && belongsToSameMessageCluster(previousMessage, message)
       ),
       key: `message-${messageRenderKey(message)}`,
