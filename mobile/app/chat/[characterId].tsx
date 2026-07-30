@@ -99,8 +99,8 @@ const cloudWaveformHeight = (metering?: number) => {
   return Math.round(4 + 25 * Math.pow(normalized, 0.62))
 }
 
-const visibleHistoryWindow = (messages: ChatMessage[], retainLoadedWindow = false) => (
-  retainLoadedWindow ? messages : messages.slice(-HISTORY_PAGE_SIZE)
+const visibleHistoryWindow = (messages: ChatMessage[], messageCount = HISTORY_PAGE_SIZE) => (
+  messages.slice(-Math.max(1, messageCount))
 )
 
 const cursorForMessage = (message?: ChatMessage): MessageHistoryCursor | undefined => (
@@ -1019,12 +1019,15 @@ export default function ChatScreen() {
   const initialListViewStateRef = useRef(
     characterId ? getConversationListViewState(characterId) : undefined
   )
-  const initialLatestMessage = initialCacheRef.current?.messages.at(-1)
+  const initialCachedMessages = initialCacheRef.current?.messages || []
+  const initialCachedLatestMessage = initialCachedMessages.at(-1)
+  const initialListViewState = initialListViewStateRef.current
   const hasInitialListViewState = Boolean(
-    initialListViewStateRef.current
-    && initialListViewStateRef.current.messageCount === initialCacheRef.current?.messages.length
-    && initialListViewStateRef.current.latestMessageKey === (
-      initialLatestMessage?.renderKey || initialLatestMessage?.id
+    initialListViewState
+    && initialListViewState.messageCount > 0
+    && initialListViewState.messageCount <= initialCachedMessages.length
+    && initialListViewState.latestMessageKey === (
+      initialCachedLatestMessage?.renderKey || initialCachedLatestMessage?.id
     )
   )
   const initialContentOffsetRef = useRef<{ x: number; y: number } | undefined>(
@@ -1032,9 +1035,17 @@ export default function ChatScreen() {
       ? { x: 0, y: initialListViewStateRef.current.offsetY }
       : undefined
   )
+  const restoredContentHeightRef = useRef(
+    hasInitialListViewState && initialListViewState
+      ? initialListViewState.contentHeight
+      : undefined
+  )
+  const initialDisplayMessageCount = hasInitialListViewState && initialListViewState
+    ? initialListViewState.messageCount
+    : HISTORY_PAGE_SIZE
   const initialDisplayMessages = visibleHistoryWindow(
-    initialCacheRef.current?.messages || [],
-    hasInitialListViewState
+    initialCachedMessages,
+    initialDisplayMessageCount
   )
   const initialDisplayCursor = cursorForMessage(initialDisplayMessages[0])
   const [messages, setMessages] = useState<ChatMessage[]>(() => initialDisplayMessages)
@@ -1601,6 +1612,7 @@ export default function ChatScreen() {
     const latestMessageKey = latestMessage?.renderKey || latestMessage?.id
     if (!latestMessageKey || contentHeight <= 0 || viewportHeight <= 0) return
     setConversationListViewState(characterId, {
+      contentHeight,
       offsetY: Math.max(0, offsetY),
       messageCount: messagesRef.current.length,
       latestMessageKey,
@@ -1810,7 +1822,7 @@ export default function ChatScreen() {
         // continues through the normal layout callbacks without a blank frame.
         const cachedMessages = visibleHistoryWindow(
           cachedHistory.messages,
-          hasInitialListViewState
+          hasInitialListViewState ? initialDisplayMessageCount : HISTORY_PAGE_SIZE
         )
         setInitialPositionReady(true)
         messagesRef.current = cachedMessages
@@ -1832,6 +1844,7 @@ export default function ChatScreen() {
   }, [
     character?.id,
     getConversationCache,
+    initialDisplayMessageCount,
     hasInitialListViewState,
     hydrateConversationCache,
     refreshState,
@@ -2687,6 +2700,11 @@ export default function ChatScreen() {
   const handleContentSizeChange = (_width: number, height: number) => {
     scrollMetricsRef.current.contentHeight = height
     scrollContentHeight.value = height
+    const restoredContentHeight = restoredContentHeightRef.current
+    if (restoredContentHeight !== undefined) {
+      restoredContentHeightRef.current = undefined
+      if (Math.abs(restoredContentHeight - height) <= 1) return
+    }
     const prependAnchor = prependHistoryAnchorRef.current
     if (prependAnchor && height > prependAnchor.contentHeight) {
       const offset = Math.max(0, prependAnchor.offsetY + height - prependAnchor.contentHeight)

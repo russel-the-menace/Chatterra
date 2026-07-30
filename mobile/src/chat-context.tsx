@@ -39,6 +39,7 @@ import { mergeMessagePage } from './message-page-merge'
 type ConversationCacheEntry = ConversationHistoryCache
 
 export type ConversationListViewState = {
+  contentHeight: number
   offsetY: number
   messageCount: number
   latestMessageKey: string
@@ -854,7 +855,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     if (
       cachedViewState
       && (
-        cachedViewState.messageCount !== mergedMessages.length
+        cachedViewState.messageCount > mergedMessages.length
         || cachedViewState.latestMessageKey !== latestMessageKey
       )
     ) {
