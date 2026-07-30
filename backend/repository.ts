@@ -572,7 +572,7 @@ export const getSyncSnapshot = async (userId: string): Promise<SyncSnapshot> => 
          latest_message.created_at AS latest_message_created_at
        FROM conversations
        LEFT JOIN LATERAL (
-         SELECT id, sender_role, content, created_at
+         SELECT id, sender_role, content, content_json, created_at
          FROM messages
          WHERE conversation_id = conversations.id
          ORDER BY created_at DESC, id DESC
