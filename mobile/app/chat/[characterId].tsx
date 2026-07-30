@@ -862,15 +862,6 @@ function AvatarPreviewModal({
           style={StyleSheet.absoluteFill}
         />
         <View style={styles.avatarPreviewContent}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Close avatar preview"
-            onPress={onClose}
-            hitSlop={10}
-            style={styles.avatarPreviewClose}
-          >
-            <Ionicons name="close" size={26} color="#FFFFFF" />
-          </Pressable>
           <View style={styles.avatarPreviewFrame}>
             {showImage ? (
               <Image
@@ -1202,7 +1193,9 @@ export default function ChatScreen() {
   const [messageActionSession, setMessageActionSession] = useState<MessageActionSession | null>(null)
   const [messageActionMenuInteractive, setMessageActionMenuInteractive] = useState(true)
   const [avatarPreview, setAvatarPreview] = useState<AvatarPreview | null>(null)
+  const [conversationActionsVisible, setConversationActionsVisible] = useState(false)
   const listRef = useRef<FlashListRef<ChatTimelineItem>>(null)
+  const timelineItemHeightsRef = useRef(new Map<string, number>())
   const composerInputRef = useRef<TextInput>(null)
   const composerRegionRef = useRef<View>(null)
   const messagesRef = useRef(messages)
@@ -1242,6 +1235,31 @@ export default function ChatScreen() {
   const keyboard = useAnimatedKeyboard()
   const scrollContentHeight = useSharedValue(0)
   const scrollViewportHeight = useSharedValue(0)
+  const timelineIntrinsicHeight = useSharedValue(0)
+  const syncTimelineIntrinsicHeight = useCallback(() => {
+    let height = MESSAGE_LIST_EDGE_GAP * 2
+    timelineItemHeightsRef.current.forEach(itemHeight => {
+      height += itemHeight
+    })
+    timelineIntrinsicHeight.value = height
+  }, [timelineIntrinsicHeight])
+  const handleTimelineItemLayout = useCallback((key: string, event: LayoutChangeEvent) => {
+    const height = event.nativeEvent.layout.height
+    const previous = timelineItemHeightsRef.current.get(key)
+    if (previous != null && Math.abs(previous - height) < 0.5) return
+    timelineItemHeightsRef.current.set(key, height)
+    syncTimelineIntrinsicHeight()
+  }, [syncTimelineIntrinsicHeight])
+  useEffect(() => {
+    const itemKeys = new Set(timelineItems.map(item => item.key))
+    let removed = false
+    timelineItemHeightsRef.current.forEach((_height, key) => {
+      if (itemKeys.has(key)) return
+      timelineItemHeightsRef.current.delete(key)
+      removed = true
+    })
+    if (removed) syncTimelineIntrinsicHeight()
+  }, [syncTimelineIntrinsicHeight, timelineItems])
   const keyboardLift = useDerivedValue(
     () => Math.max(0, keyboard.height.value - insets.bottom + 8),
     [insets.bottom]
@@ -1253,10 +1271,10 @@ export default function ChatScreen() {
   }))
   const messageListKeyboardAnimatedStyle = useAnimatedStyle(() => {
     // Keep short transcripts at the top; consume their empty space before lifting the list.
-    const unusedListSpace = Math.max(
-      0,
-      scrollViewportHeight.value - scrollContentHeight.value
-    )
+    const contentHeight = scrollContentHeight.value > scrollViewportHeight.value + 0.5
+      ? scrollContentHeight.value
+      : timelineIntrinsicHeight.value
+    const unusedListSpace = Math.max(0, scrollViewportHeight.value - contentHeight)
     return {
       transform: [{
         translateY: -Math.max(0, keyboardLift.value - unusedListSpace),
@@ -2090,29 +2108,33 @@ export default function ChatScreen() {
 
   const showConversationActions = () => {
     if (!character) return
+    setConversationActionsVisible(true)
+  }
+
+  const toggleConversationPin = () => {
+    if (!character) return
     const pinned = pinnedCharacterIds.has(character.id)
-    Alert.alert(character?.name || 'Conversation', undefined, [
-      {
-        text: pinned ? 'Unpin' : 'Pin to top',
-        onPress: () => void setCharacterPinned(character.id, !pinned).catch(pinError => {
-          Alert.alert('Could not update pin', pinError instanceof Error ? pinError.message : undefined)
-        }),
-      },
-      { text: 'Edit character', onPress: openEditor },
-      {
-        text: 'Clear history',
-        style: 'destructive',
-        onPress: () => Alert.alert(
-          'Clear conversation?',
-          'This removes the message history for this character.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Clear', style: 'destructive', onPress: () => void clearHistory() },
-          ]
-        ),
-      },
-      { text: 'Cancel', style: 'cancel' },
-    ])
+    setConversationActionsVisible(false)
+    void setCharacterPinned(character.id, !pinned).catch(pinError => {
+      Alert.alert('Could not update pin', pinError instanceof Error ? pinError.message : undefined)
+    })
+  }
+
+  const editConversationCharacter = () => {
+    setConversationActionsVisible(false)
+    openEditor()
+  }
+
+  const confirmClearConversation = () => {
+    setConversationActionsVisible(false)
+    Alert.alert(
+      'Clear conversation?',
+      'This removes the message history for this character.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Clear', style: 'destructive', onPress: () => void clearHistory() },
+      ]
+    )
   }
 
   const translateMessage = async (message: ChatMessage) => {
@@ -2887,14 +2909,21 @@ export default function ChatScreen() {
               drawDistance={window.height}
               extraData={messageActionSession}
               renderItem={({ item, index }) => {
-                if (item.kind === 'date') return <DateDivider label={item.label} />
+                if (item.kind === 'date') {
+                  return (
+                    <View onLayout={event => handleTimelineItemLayout(item.key, event)}>
+                      <DateDivider label={item.label} />
+                    </View>
+                  )
+                }
                 const message = item.message
                 const messageKey = messageRenderKey(message)
                 const selectionSession = messageActionSession?.messageKey === messageKey
                   ? messageActionSession
                   : undefined
                 return (
-                  <MessageRow
+                  <View onLayout={event => handleTimelineItemLayout(item.key, event)}>
+                    <MessageRow
                     message={message}
                     characterName={character.name}
                     characterAvatar={character.avatar}
@@ -2932,7 +2961,8 @@ export default function ChatScreen() {
                     onRetryMessage={message => void sendMessage(message)}
                     continuation={item.continuation}
                     atLatestEdge={index === 0}
-                  />
+                    />
+                  </View>
                 )
               }}
               style={styles.messageList}
@@ -3429,6 +3459,56 @@ export default function ChatScreen() {
           </RNAnimated.View>
         </View>
       )}
+      <Modal
+        transparent
+        animationType="fade"
+        visible={conversationActionsVisible}
+        onRequestClose={() => setConversationActionsVisible(false)}
+      >
+        <View style={styles.conversationActionsOverlay}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Close conversation options"
+            onPress={() => setConversationActionsVisible(false)}
+            style={StyleSheet.absoluteFill}
+          />
+          <View style={[styles.conversationActionsSheet, { paddingBottom: Math.max(12, insets.bottom) }]}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={pinnedCharacterIds.has(character.id) ? 'Unpin conversation' : 'Pin conversation'}
+              onPress={toggleConversationPin}
+              style={({ pressed }) => [styles.conversationAction, pressed && styles.conversationActionPressed]}
+            >
+              <Ionicons
+                name={pinnedCharacterIds.has(character.id) ? 'pin-outline' : 'pin'}
+                size={20}
+                color={palette.text}
+              />
+              <Text style={styles.conversationActionLabel}>
+                {pinnedCharacterIds.has(character.id) ? 'Unpin' : 'Pin to top'}
+              </Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Edit character"
+              onPress={editConversationCharacter}
+              style={({ pressed }) => [styles.conversationAction, pressed && styles.conversationActionPressed]}
+            >
+              <Ionicons name="create-outline" size={21} color={palette.text} />
+              <Text style={styles.conversationActionLabel}>Edit character</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Clear conversation"
+              onPress={confirmClearConversation}
+              style={({ pressed }) => [styles.conversationAction, pressed && styles.conversationActionPressed]}
+            >
+              <Ionicons name="trash-outline" size={20} color={palette.danger} />
+              <Text style={[styles.conversationActionLabel, styles.conversationActionDestructive]}>Clear history</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
       <AvatarPreviewModal preview={avatarPreview} onClose={() => setAvatarPreview(null)} />
     </SafeAreaView>
   )
@@ -3577,15 +3657,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarPreviewClose: {
-    position: 'absolute',
-    top: -58,
-    right: 22,
-    width: 42,
-    height: 42,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   avatarPreviewFrame: {
     width: '78%',
     maxWidth: 320,
@@ -3598,6 +3669,37 @@ const styles = StyleSheet.create({
   avatarPreviewImage: {
     width: '100%',
     height: '100%',
+  },
+  conversationActionsOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(17, 24, 39, 0.32)',
+  },
+  conversationActionsSheet: {
+    paddingTop: 8,
+    paddingHorizontal: 12,
+    borderTopLeftRadius: 8,
+    borderTopRightRadius: 8,
+    backgroundColor: palette.surface,
+  },
+  conversationAction: {
+    height: 48,
+    paddingHorizontal: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderRadius: 6,
+  },
+  conversationActionPressed: {
+    backgroundColor: palette.surfaceMuted,
+  },
+  conversationActionLabel: {
+    color: palette.text,
+    fontSize: 16,
+    lineHeight: 21,
+  },
+  conversationActionDestructive: {
+    color: palette.danger,
   },
   messageContent: {
     maxWidth: '76%',
