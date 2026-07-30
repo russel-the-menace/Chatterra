@@ -8,7 +8,8 @@ import { MessageVoice } from '@/src/types'
 import { palette } from '@/src/theme'
 
 const displayDuration = (duration?: number) => `${Math.max(1, Math.round(duration || 1))}\"`
-const VOICE_WAVE_ICON_SIZE = 24
+const VOICE_WAVE_HEIGHT = 24
+const VOICE_WAVE_WIDTH = 36
 
 function WeChatVoiceWave({
   color,
@@ -18,8 +19,8 @@ function WeChatVoiceWave({
   level: number
 }) {
   return (
-    <Svg width={VOICE_WAVE_ICON_SIZE} height={VOICE_WAVE_ICON_SIZE} viewBox="0 0 24 24">
-      <G>
+    <Svg width={VOICE_WAVE_WIDTH} height={VOICE_WAVE_HEIGHT} viewBox="0 0 36 24">
+      <G transform="scale(1.5 1)">
         <Path
           d="M4 12 L6.1 8.36 A4.2 4.2 0 0 1 6.1 15.64 Z"
           fill={color}
