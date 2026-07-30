@@ -71,8 +71,8 @@ separate HTTPS tunnel and set that URL in `EXPO_PUBLIC_API_URL`.
 ## Accounts
 
 The mobile app signs in with an internal Chatterra account. Registration is not
-exposed in the app. A successful login stores an expiring local session, so the
-user is not prompted again on normal app launches. Conversations, memories,
+exposed in the app. A successful login stores a durable local session, so the
+user is not prompted again unless they explicitly sign out. Conversations, memories,
 character settings, local message caches, and Quote drafts are isolated by the
 authenticated account.
 

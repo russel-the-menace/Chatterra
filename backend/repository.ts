@@ -1,9 +1,9 @@
 import { PoolClient } from 'pg'
 import { v4 as uuidv4 } from 'uuid'
 import {
-  AUTH_SESSION_DURATION_MS,
   createAccessToken,
   hashAccessToken,
+  PERMANENT_SESSION_EXPIRES_AT,
   verifyPasswordHash,
 } from './authentication'
 import { query, withTransaction } from './database'
@@ -156,19 +156,17 @@ export const authenticateUser = async (username: string, password: string): Prom
   }
 
   const accessToken = createAccessToken()
-  const expiresAt = new Date(Date.now() + AUTH_SESSION_DURATION_MS)
   await withTransaction(async client => {
-    await client.query('DELETE FROM auth_sessions WHERE expires_at <= NOW()')
     await client.query(
       `INSERT INTO auth_sessions (id, user_id, token_hash, expires_at)
-       VALUES ($1, $2, $3, $4)`,
-      [newId(), row.id, hashAccessToken(accessToken), expiresAt]
+       VALUES ($1, $2, $3, 'infinity')`,
+      [newId(), row.id, hashAccessToken(accessToken)]
     )
   })
 
   return {
     accessToken,
-    expiresAt: expiresAt.toISOString(),
+    expiresAt: PERMANENT_SESSION_EXPIRES_AT,
     user: {
       id: String(row.id),
       username: String(row.username),
@@ -184,7 +182,6 @@ export const getAuthenticatedUser = async (accessToken: string): Promise<Authent
      FROM auth_sessions
      JOIN users ON users.id = auth_sessions.user_id
      WHERE auth_sessions.token_hash = $1
-       AND auth_sessions.expires_at > NOW()
      LIMIT 1`,
     [hashAccessToken(accessToken)]
   )

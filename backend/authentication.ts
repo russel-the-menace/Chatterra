@@ -3,7 +3,9 @@ import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypt
 const PASSWORD_HASH_PREFIX = 'scrypt'
 const PASSWORD_HASH_LENGTH = 64
 
-export const AUTH_SESSION_DURATION_MS = 90 * 24 * 60 * 60 * 1000
+// PostgreSQL stores the session expiry as `infinity`; clients receive this
+// parseable sentinel for durable local storage.
+export const PERMANENT_SESSION_EXPIRES_AT = '9999-12-31T23:59:59.999Z'
 
 export const hashAccessToken = (accessToken: string) => (
   createHash('sha256').update(accessToken).digest('hex')

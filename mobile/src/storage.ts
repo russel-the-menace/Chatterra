@@ -37,7 +37,6 @@ const parseStoredAuthSession = (value: unknown): StoredAuthSession | undefined =
     || typeof user.username !== 'string'
     || typeof user.displayName !== 'string'
   ) return undefined
-  if (Date.parse(session.expiresAt) <= Date.now()) return undefined
   return {
     accessToken: session.accessToken,
     expiresAt: session.expiresAt,

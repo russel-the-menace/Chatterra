@@ -49,7 +49,7 @@ const validSession = (value: unknown): value is WebLoginSession => {
   return typeof session.accessToken === 'string'
     && Boolean(session.accessToken)
     && typeof session.expiresAt === 'string'
-    && Date.parse(session.expiresAt) > Date.now()
+    && !Number.isNaN(Date.parse(session.expiresAt))
     && Boolean(session.user)
     && typeof session.user?.id === 'string'
     && typeof session.user?.username === 'string'
