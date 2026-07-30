@@ -426,7 +426,7 @@ const isUserVoiceMessage = (message: ChatMessage): message is ChatMessage & { vo
 const simulatedTypingDuration = (text: string) => {
   const characters = Array.from(text.trim()).length
   const words = text.trim().split(/\s+/u).filter(Boolean).length
-  return Math.round(Math.min(3600, Math.max(850, 620 + words * 70 + characters * 12)))
+  return Math.round(Math.min(20_000, Math.max(2_000, 620 + words * 70 + characters * 12)))
 }
 
 const formatActivity = (activity?: string) => {
@@ -1471,19 +1471,13 @@ export default function ChatScreen() {
 
   const stageAssistantMessages = useCallback((
     loadingId: string,
-    incomingMessages: ChatMessage[]
+    incomingMessages: ChatMessage[],
+    initialTypingElapsedMs: number
   ) => {
     const firstMessage = incomingMessages[0]
     if (!firstMessage) return
 
     const followIncoming = () => prepareForIncomingMessage()
-
-    followIncoming()
-    setMessages(current => current.flatMap(message => (
-      message.id === loadingId
-        ? [{ ...firstMessage, renderKey: loadingId }]
-        : [message]
-    )))
 
     const queueMessage = (index: number) => {
       const nextMessage = incomingMessages[index]
@@ -1527,7 +1521,22 @@ export default function ChatScreen() {
       }, 220)
     }
 
-    queueMessage(1)
+    const revealFirstMessage = () => {
+      followIncoming()
+      setMessages(current => current.flatMap(message => (
+        message.id === loadingId
+          ? [{ ...firstMessage, renderKey: loadingId }]
+          : [message]
+      )))
+      queueMessage(1)
+    }
+
+    const initialDelay = Math.max(0, simulatedTypingDuration(firstMessage.text) - initialTypingElapsedMs)
+    if (initialDelay > 0) {
+      scheduleDeliveryTask(revealFirstMessage, initialDelay)
+    } else {
+      revealFirstMessage()
+    }
   }, [prepareForIncomingMessage, scheduleDeliveryTask])
 
   useEffect(() => () => {
@@ -2365,6 +2374,7 @@ export default function ChatScreen() {
     }
     closeMessageActionMenu()
     markConversationActive(character.id)
+    const assistantTypingStartedAt = Date.now()
     setMessages(current => {
       const hasExistingUserMessage = current.some(message => message.id === userMessage.id)
       return [
@@ -2482,7 +2492,11 @@ export default function ChatScreen() {
       } else if (typeof response.reply === 'string') {
         const incomingMessages = responseMessages(response)
         if (incomingMessages.length === 0) throw new Error('The server returned no usable response.')
-        stageAssistantMessages(loadingId, incomingMessages)
+        stageAssistantMessages(
+          loadingId,
+          incomingMessages,
+          Date.now() - assistantTypingStartedAt
+        )
       } else {
         throw new Error('The server returned no usable response.')
       }
