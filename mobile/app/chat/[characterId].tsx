@@ -2105,6 +2105,7 @@ export default function ChatScreen() {
           voiceTranscriptionLoading: false,
         }
       }))
+      if (message.voice.transcriptStatus === 'ready') return
       void api.convertVoiceMessageToText(userId, message.sourceMessageId)
         .then(result => {
           const mapped = mapMessages([result.message])[0]
@@ -2707,6 +2708,12 @@ export default function ChatScreen() {
       ))
     : undefined
   const messageActionIsVoice = Boolean(messageActionMessage?.voice)
+  const messageActionCanDiscardVoiceTranscript = Boolean(
+    messageActionMessage
+    && isUserVoiceMessage(messageActionMessage)
+    && messageActionMessage.voice.transcriptStatus === 'ready'
+    && messageActionMessage.voiceTranscriptVisible
+  )
   const messageActionItemCount = messageActionMessage
     ? (isUserVoiceMessage(messageActionMessage) ? 2 : 3)
     : 0
@@ -3255,7 +3262,7 @@ export default function ChatScreen() {
                   messageActionPressRef.current = false
                 }}
                 onPress={() => {
-                  if (messageActionMessage.voice?.transcriptStatus === 'ready') {
+                  if (messageActionCanDiscardVoiceTranscript) {
                     void discardVoiceMessageText(messageActionMessage)
                     return
                   }
@@ -3268,7 +3275,7 @@ export default function ChatScreen() {
               ]}
             >
                 <View style={styles.messageActionIconSlot}>
-                  {messageActionMessage.voice?.transcriptStatus === 'ready' ? (
+                  {messageActionCanDiscardVoiceTranscript ? (
                     <View style={styles.messageActionDocumentDiscardIcon}>
                       <Ionicons name="document-text-outline" size={18} color="#FFFFFF" />
                       <View style={styles.messageActionDocumentDiscardMark}>
@@ -3280,7 +3287,7 @@ export default function ChatScreen() {
                 <Text style={styles.messageActionLabel}>
                   {messageActionMessage.voiceTranscriptionLoading
                     ? 'Converting'
-                    : messageActionMessage.voice?.transcriptStatus === 'ready'
+                    : messageActionCanDiscardVoiceTranscript
                       ? 'Discard converted'
                       : <>Convert{'\n'}to Text</>}
                 </Text>
