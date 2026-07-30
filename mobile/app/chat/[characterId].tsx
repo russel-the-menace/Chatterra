@@ -2747,7 +2747,7 @@ export default function ChatScreen() {
       }
     : null
 
-  if (!ready || (loadingHistory && messages.length === 0)) {
+  if (!ready) {
     return (
       <SafeAreaView style={styles.loadingScreen}>
         <ActivityIndicator color={palette.accent} />
@@ -3107,6 +3107,11 @@ export default function ChatScreen() {
               </View>
             </View>
           </Reanimated.View>
+          {loadingHistory && messages.length === 0 && (
+            <View style={styles.conversationLoadingOverlay}>
+              <ActivityIndicator color={palette.accent} />
+            </View>
+          )}
         </View>
       </View>
 
@@ -3391,6 +3396,13 @@ const styles = StyleSheet.create({
   },
   keyboardArea: {
     flex: 1,
+    position: 'relative',
+  },
+  conversationLoadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: palette.background,
   },
   messageListArea: {
     flex: 1,

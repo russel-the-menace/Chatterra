@@ -22,7 +22,7 @@ export function Avatar({ avatar, name, size = 48, muted = false }: AvatarProps) 
   }
 
   if (isImageAvatar(avatar)) {
-    return <Image source={{ uri: avatar }} style={style} contentFit="cover" transition={120} />
+    return <Image source={{ uri: avatar }} style={style} contentFit="cover" cachePolicy="memory-disk" />
   }
 
   return (
