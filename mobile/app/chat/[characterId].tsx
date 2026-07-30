@@ -994,7 +994,7 @@ export default function ChatScreen() {
   const stagedDeliveryTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set())
   const lastVoiceErrorRef = useRef<string | null>(null)
   const voiceInput = useVoiceInput({
-    language: character?.language,
+    userId: userId || undefined,
     onTranscriptChange: (text, metadata) => {
       if (!character) return
       setDraft(character.id, text)

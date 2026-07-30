@@ -34,6 +34,10 @@ Environment variables:
   turns and message translation. The orchestrator falls back to `DEEPSEEK_MODEL`
   when it is absent. If the provider explicitly rejects a configured lightweight
   model as invalid, the gateway retries that turn once with the primary model.
+- `GROQ_API_KEY`: server-only key for short mobile voice transcription. The API forwards
+  a bounded audio request without persisting the audio file.
+- `GROQ_TRANSCRIPTION_MODEL`: optional Groq transcription model, default
+  `whisper-large-v3-turbo`.
 - `PROACTIVE_SCHEDULER_ENABLED`: set to `false` to disable background character
   initiation; enabled by default.
 - `PROACTIVE_SCHEDULER_INTERVAL_MS`: scheduler scan interval, default `30000`.
@@ -148,11 +152,11 @@ is classified as a source-term reference rather than drift. Chat output still us
 dialogue-only contract: stage directions, facial-expression narration, inner thoughts,
 and roleplay markup are not shown to the user.
 
-Voice dictation is implemented in the frontend as an input modality. The browser MVP
-uses Web Speech recognition and session-scoped audio capture, then stores transcript
-metadata in `messages.content_json.voice` through the normal chat request. Raw audio is
-not uploaded; see the repository-level voice architecture document for the future
-realtime adapter boundary.
+Voice dictation records a short mobile audio file only after the user accepts its
+disclosure, forwards it through a dedicated bounded transcription endpoint, and deletes
+the local temporary file afterward. Chatterra does not persist raw audio. The editable
+transcript metadata is stored in `messages.content_json.voice` through the normal chat
+request; see the repository-level voice architecture document for the adapter boundary.
 
 Quoted replies use the same chat endpoint. Clients send a source message ID and visible
 segment index when available; the server verifies ownership and conversation membership,

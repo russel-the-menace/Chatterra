@@ -28,6 +28,12 @@ import { createInferenceTrace } from './inference-logger'
 import { processDueProactiveActions } from './proactive-service'
 import { isExpoPushToken } from './push-notifications'
 import { translateToEnglish, TranslationServiceError } from './translation-service'
+import {
+  GroqTranscriptionError,
+  isSupportedTranscriptionAudioType,
+  MAX_TRANSCRIPTION_AUDIO_BYTES,
+  transcribeWithGroq,
+} from './groq-transcription'
 import { parseCustomCharacterDocument } from './custom-character'
 import {
   clearChatHistory,
@@ -70,6 +76,9 @@ dotenv.config()
 const app = express()
 const REJECTED_OUTPUT_LOG_LIMIT = 4000
 const SYNC_PROTOCOL_VERSION = 1
+const TRANSCRIPTION_RATE_LIMIT_WINDOW_MS = 60_000
+const TRANSCRIPTION_RATE_LIMIT_MAX_REQUESTS = 6
+const transcriptionRequests = new Map<string, number[]>()
 app.use(cors())
 app.use(express.json({ limit: '2mb' }))
 app.use('/media/voice', express.static(voiceMediaDirectory, {
@@ -81,6 +90,17 @@ const asyncRoute = (
   handler: (req: Request, res: Response, next: NextFunction) => Promise<any>
 ) => (req: Request, res: Response, next: NextFunction) => {
   Promise.resolve(handler(req, res, next)).catch(next)
+}
+
+const canTranscribe = (key: string) => {
+  const now = Date.now()
+  const activeRequests = (transcriptionRequests.get(key) || []).filter(
+    startedAt => now - startedAt < TRANSCRIPTION_RATE_LIMIT_WINDOW_MS
+  )
+  if (activeRequests.length >= TRANSCRIPTION_RATE_LIMIT_MAX_REQUESTS) return false
+  activeRequests.push(now)
+  transcriptionRequests.set(key, activeRequests)
+  return true
 }
 
 const voiceMetadataFromPayload = (payload: any): VoiceTranscriptMetadata | undefined => {
@@ -313,6 +333,40 @@ app.post('/api/translations', asyncRoute(async (req, res) => {
     }
   })
 }))
+
+app.post(
+  '/api/voice/transcriptions',
+  express.raw({
+    type: request => isSupportedTranscriptionAudioType(request.headers['content-type']),
+    limit: MAX_TRANSCRIPTION_AUDIO_BYTES,
+  }),
+  asyncRoute(async (req, res) => {
+    const userId = typeof req.headers['x-chatterra-user-id'] === 'string'
+      ? req.headers['x-chatterra-user-id'].trim()
+      : ''
+    const mimeType = req.headers['content-type'] || ''
+    if (!userId) return res.status(400).json({ error: 'user ID is required' })
+    if (!isSupportedTranscriptionAudioType(mimeType)) {
+      return res.status(415).json({ error: 'unsupported audio format' })
+    }
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+      return res.status(400).json({ error: 'audio is required' })
+    }
+    const rateLimitKey = `${req.ip}:${userId}`
+    if (!canTranscribe(rateLimitKey)) {
+      return res.status(429).json({ error: 'voice transcription rate limit reached; try again shortly' })
+    }
+
+    const transcription = await transcribeWithGroq({ audio: req.body, mimeType })
+    return res.status(201).json({
+      transcription: {
+        text: transcription.text,
+        provider: transcription.provider,
+        model: transcription.model,
+      },
+    })
+  })
+)
 
 app.post('/api/messages/:id/translations', asyncRoute(async (req, res) => {
   const userId = typeof req.body?.userId === 'string' ? req.body.userId.trim() : ''
@@ -930,7 +984,13 @@ app.use((error: any, _req: Request, res: Response, _next: NextFunction) => {
   ) {
     return res.status(400).json({ error: 'request body contains invalid JSON' })
   }
+  if (error?.type === 'entity.too.large' || Number(error?.status) === 413) {
+    return res.status(413).json({ error: 'request body is too large' })
+  }
   if (error instanceof TranslationServiceError) {
+    return res.status(error.statusCode).json({ error: error.message, ...persistenceDetails })
+  }
+  if (error instanceof GroqTranscriptionError) {
     return res.status(error.statusCode).json({ error: error.message, ...persistenceDetails })
   }
   if (error?.code === '23505') {

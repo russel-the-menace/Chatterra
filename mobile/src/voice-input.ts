@@ -1,18 +1,21 @@
+import { File } from 'expo-file-system'
 import {
-  ExpoSpeechRecognitionModule,
-  useSpeechRecognitionEvent,
-  type ExpoSpeechRecognitionErrorEvent,
-  type ExpoSpeechRecognitionResultEvent,
-} from 'expo-speech-recognition'
+  RecordingPresets,
+  requestRecordingPermissionsAsync,
+  setAudioModeAsync,
+  useAudioRecorder,
+} from 'expo-audio'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Platform } from 'react-native'
 
+import { api, ApiError } from './api'
 import { DetectedLanguage, VoiceTranscriptMetadata } from './types'
+import { requestGroqTranscriptionConsent } from './voice-transcription-consent'
 
 export type VoiceInputStatus = 'idle' | 'recording' | 'processing' | 'error'
 
 type VoiceInputOptions = {
-  language?: string
+  userId?: string
   onTranscriptChange?: (text: string, metadata: VoiceTranscriptMetadata) => void
 }
 
@@ -21,6 +24,7 @@ type VoiceSnapshot = {
   error?: string
 }
 
+const MAX_RECORDING_DURATION_MS = 30_000
 const initialSnapshot: VoiceSnapshot = { status: 'idle' }
 
 const combineDraft = (prefix: string, spoken: string) => {
@@ -54,92 +58,26 @@ const detectTranscriptLanguage = (text: string): DetectedLanguage => {
   return 'Unknown'
 }
 
-const recognitionLanguageHint = (preferredLanguage?: string) => {
-  const preferred = (preferredLanguage || '').toLowerCase()
-  if (/cantonese|粤语|粵語|廣東話|广东话/u.test(preferred)) return 'zh-HK'
-  if (/mandarin|普通话|普通話|国语|國語/u.test(preferred)) return 'zh-CN'
-  if (/japanese|日本語|日语|日語/u.test(preferred)) return 'ja-JP'
-  if (/korean|한국|韩语|韓語/u.test(preferred)) return 'ko-KR'
-  if (/arabic|阿拉伯/u.test(preferred)) return 'ar-SA'
-  if (/russian|俄语|俄語/u.test(preferred)) return 'ru-RU'
-  if (/spanish|español|espanol|西班牙语|西班牙語/u.test(preferred)) return 'es-AR'
-  if (/english|英语|英語/u.test(preferred)) return 'en-US'
-
-  const locale = typeof Intl === 'undefined'
-    ? 'en-US'
-    : Intl.DateTimeFormat().resolvedOptions().locale || 'en-US'
-  if (/^zh/i.test(locale)) return locale.includes('-') ? locale : 'zh-CN'
-  if (/^ja/i.test(locale)) return locale.includes('-') ? locale : 'ja-JP'
-  if (/^ko/i.test(locale)) return locale.includes('-') ? locale : 'ko-KR'
-  if (/^ar/i.test(locale)) return locale.includes('-') ? locale : 'ar-SA'
-  if (/^ru/i.test(locale)) return locale.includes('-') ? locale : 'ru-RU'
-  return locale
+const recordingMimeType = () => {
+  if (Platform.OS === 'web') return 'audio/webm'
+  if (Platform.OS === 'android') return 'audio/3gpp'
+  return 'audio/mp4'
 }
 
-const recognitionLanguageCandidates = (preferredLanguage?: string) => {
-  const primary = recognitionLanguageHint(preferredLanguage)
-  if (primary === 'es-AR') return ['es-AR', 'es-ES', 'es-MX', 'es-US']
-  return [primary]
+const voiceErrorMessage = (error: unknown) => {
+  if (error instanceof ApiError) return error.message
+  return error instanceof Error ? error.message : 'Voice input could not be completed.'
 }
 
-const supportedRecognitionLanguage = async (preferredLanguage?: string) => {
-  const candidates = recognitionLanguageCandidates(preferredLanguage)
-  try {
-    const supported = await ExpoSpeechRecognitionModule.getSupportedLocales({})
-    const supportedByNormalizedLocale = new Map(
-      supported.locales.map(locale => [locale.toLowerCase(), locale])
-    )
-    const exact = candidates.find(locale => supportedByNormalizedLocale.has(locale.toLowerCase()))
-    if (exact) return supportedByNormalizedLocale.get(exact.toLowerCase()) || exact
-
-    const language = candidates[0]?.split('-')[0]?.toLowerCase()
-    const regionalFallback = supported.locales.find(locale => (
-      locale.toLowerCase().startsWith(`${language}-`)
-    ))
-    if (regionalFallback) return regionalFallback
-  } catch {
-    // The platform may not expose its supported locale list. Let the native service
-    // handle the requested locale in that case.
-  }
-  return candidates[0] || 'en-US'
-}
-
-const supportsContinuousRecognition = () => {
-  if (Platform.OS !== 'ios') return false
-  const version = Number.parseFloat(String(Platform.Version))
-  return Number.isFinite(version) && version >= 17
-}
-
-const voiceErrorMessage = (event: ExpoSpeechRecognitionErrorEvent) => {
-  switch (event.error) {
-    case 'not-allowed':
-      return 'Microphone or speech recognition permission was denied.'
-    case 'audio-capture':
-      return 'No working microphone is available.'
-    case 'network':
-    case 'service-not-allowed':
-      return 'Speech recognition is unavailable right now.'
-    case 'language-not-supported':
-      return 'Speech recognition is unavailable for this language.'
-    case 'no-speech':
-    case 'speech-timeout':
-      return 'No speech was detected.'
-    case 'interrupted':
-      return 'Speech recognition was interrupted.'
-    default:
-      return event.message || 'Voice input stopped unexpectedly.'
-  }
-}
-
-export const useVoiceInput = ({ language, onTranscriptChange }: VoiceInputOptions = {}) => {
+export const useVoiceInput = ({ userId, onTranscriptChange }: VoiceInputOptions = {}) => {
   const [snapshot, setSnapshot] = useState<VoiceSnapshot>(initialSnapshot)
+  const recorder = useAudioRecorder(RecordingPresets.LOW_QUALITY)
   const mountedRef = useRef(true)
   const statusRef = useRef<VoiceInputStatus>('idle')
   const sessionRef = useRef(0)
-  const abortingRef = useRef(false)
   const prefixRef = useRef('')
-  const spokenRef = useRef('')
   const onTranscriptChangeRef = useRef(onTranscriptChange)
+  const recordingTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   useEffect(() => {
     onTranscriptChangeRef.current = onTranscriptChange
@@ -150,105 +88,113 @@ export const useVoiceInput = ({ language, onTranscriptChange }: VoiceInputOption
     if (mountedRef.current) setSnapshot(next)
   }, [])
 
-  const emitTranscript = useCallback((result: ExpoSpeechRecognitionResultEvent['results'][number]) => {
-    const spoken = result.transcript.trim()
-    if (!spoken) return
-    spokenRef.current = spoken
-    const text = combineDraft(prefixRef.current, spoken)
-    const metadata: VoiceTranscriptMetadata = {
-      originalText: spoken,
-      detectedLanguage: detectTranscriptLanguage(spoken || text),
-      confidence: result.confidence > 0 ? Number(result.confidence.toFixed(3)) : undefined,
-      audioAvailable: false,
-    }
-    onTranscriptChangeRef.current?.(text, metadata)
+  const clearRecordingTimer = useCallback(() => {
+    if (!recordingTimerRef.current) return
+    clearTimeout(recordingTimerRef.current)
+    recordingTimerRef.current = undefined
   }, [])
 
-  const handleResult = useCallback((event: ExpoSpeechRecognitionResultEvent) => {
-    const result = event.results[0]
-    if (result) emitTranscript(result)
-  }, [emitTranscript])
+  const resetAudioMode = useCallback(() => {
+    void setAudioModeAsync({ allowsRecording: false }).catch(() => undefined)
+  }, [])
 
-  useSpeechRecognitionEvent('result', handleResult)
-  useSpeechRecognitionEvent('start', () => {
-    updateSnapshot({ status: 'recording' })
-  })
-  useSpeechRecognitionEvent('end', () => {
-    if (abortingRef.current || statusRef.current === 'error') return
-    updateSnapshot({ status: 'idle' })
-  })
-  useSpeechRecognitionEvent('nomatch', () => {
-    if (spokenRef.current || abortingRef.current) return
-    updateSnapshot({ status: 'error', error: 'No speech was detected.' })
-  })
-  useSpeechRecognitionEvent('error', event => {
-    if (event.error === 'aborted' && abortingRef.current) return
-    updateSnapshot({ status: 'error', error: voiceErrorMessage(event) })
-  })
+  const finishRecording = useCallback(async (session: number) => {
+    if (session !== sessionRef.current || statusRef.current !== 'recording') return
+    clearRecordingTimer()
+    updateSnapshot({ status: 'processing' })
+    let recording: File | undefined
+    try {
+      await recorder.stop()
+      if (session !== sessionRef.current || !mountedRef.current) return
+      if (!recorder.uri) throw new Error('The recording could not be read.')
+
+      recording = new File(recorder.uri)
+      const transcription = await api.transcribeVoice({
+        userId: userId || '',
+        audio: recording,
+        mimeType: recordingMimeType(),
+      })
+      if (session !== sessionRef.current || !mountedRef.current) return
+      const spoken = transcription.text.trim()
+      if (!spoken) throw new Error('No speech was detected.')
+      onTranscriptChangeRef.current?.(combineDraft(prefixRef.current, spoken), {
+        originalText: spoken,
+        detectedLanguage: detectTranscriptLanguage(spoken),
+        audioAvailable: false,
+      })
+      updateSnapshot(initialSnapshot)
+    } catch (error) {
+      if (session === sessionRef.current && mountedRef.current) {
+        updateSnapshot({ status: 'error', error: voiceErrorMessage(error) })
+      }
+    } finally {
+      try {
+        recording?.delete()
+      } catch {
+        // The recorder cache may already have been removed by the operating system.
+      }
+      resetAudioMode()
+    }
+  }, [clearRecordingTimer, recorder, resetAudioMode, updateSnapshot, userId])
 
   const start = useCallback(async (initialText = '') => {
     if (statusRef.current === 'recording' || statusRef.current === 'processing') return
+    if (!userId) {
+      updateSnapshot({ status: 'error', error: 'Voice input needs an active user session.' })
+      return
+    }
 
     const session = sessionRef.current + 1
     sessionRef.current = session
-    abortingRef.current = false
     prefixRef.current = initialText.trim()
-    spokenRef.current = ''
     updateSnapshot({ status: 'processing' })
 
-    try {
-      if (!ExpoSpeechRecognitionModule.isRecognitionAvailable()) {
-        updateSnapshot({ status: 'error', error: 'Speech recognition is unavailable on this device.' })
-        return
-      }
-      const permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync()
-      if (sessionRef.current !== session || !mountedRef.current) return
-      if (!permission.granted) {
-        updateSnapshot({ status: 'error', error: 'Microphone or speech recognition permission was denied.' })
-        return
-      }
-      const recognitionLanguage = await supportedRecognitionLanguage(language)
-      if (sessionRef.current !== session || !mountedRef.current) return
-      ExpoSpeechRecognitionModule.start({
-        lang: recognitionLanguage,
-        interimResults: true,
-        // iOS 16 has the same Speech APIs, but its long-running recognition sessions
-        // are less reliable. Keep it to one short utterance there.
-        continuous: supportsContinuousRecognition(),
-        maxAlternatives: 1,
-        addsPunctuation: true,
-        iosTaskHint: 'dictation',
-        iosCategory: Platform.OS === 'ios'
-          ? { category: 'record', categoryOptions: [], mode: 'measurement' }
-          : undefined,
-      })
-    } catch {
-      updateSnapshot({ status: 'error', error: 'Voice input could not be started.' })
+    const hasConsent = await requestGroqTranscriptionConsent()
+    if (session !== sessionRef.current || !mountedRef.current) return
+    if (!hasConsent) {
+      updateSnapshot(initialSnapshot)
+      return
     }
-  }, [language, updateSnapshot])
+
+    try {
+      const permission = await requestRecordingPermissionsAsync()
+      if (session !== sessionRef.current || !mountedRef.current) return
+      if (!permission.granted) {
+        updateSnapshot({ status: 'error', error: 'Microphone permission was denied.' })
+        return
+      }
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true })
+      await recorder.prepareToRecordAsync()
+      if (session !== sessionRef.current || !mountedRef.current) return
+      recorder.record()
+      recordingTimerRef.current = setTimeout(
+        () => void finishRecording(session),
+        MAX_RECORDING_DURATION_MS
+      )
+      updateSnapshot({ status: 'recording' })
+    } catch (error) {
+      if (session === sessionRef.current && mountedRef.current) {
+        updateSnapshot({ status: 'error', error: voiceErrorMessage(error) })
+      }
+      resetAudioMode()
+    }
+  }, [finishRecording, recorder, resetAudioMode, updateSnapshot, userId])
 
   const stop = useCallback(() => {
     if (statusRef.current !== 'recording') return
-    updateSnapshot({ status: 'processing' })
-    try {
-      ExpoSpeechRecognitionModule.stop()
-    } catch {
-      updateSnapshot({ status: 'error', error: 'Voice input could not be stopped.' })
-    }
-  }, [updateSnapshot])
+    void finishRecording(sessionRef.current)
+  }, [finishRecording])
 
   const reset = useCallback(() => {
     sessionRef.current += 1
-    abortingRef.current = true
-    try {
-      ExpoSpeechRecognitionModule.abort()
-    } catch {
-      // The native recognition session may already be closed.
+    clearRecordingTimer()
+    if (statusRef.current === 'recording') {
+      void recorder.stop().catch(() => undefined)
     }
     prefixRef.current = ''
-    spokenRef.current = ''
     updateSnapshot(initialSnapshot)
-  }, [updateSnapshot])
+    resetAudioMode()
+  }, [clearRecordingTimer, recorder, resetAudioMode, updateSnapshot])
 
   const toggle = useCallback((initialText = '') => {
     if (statusRef.current === 'recording') {
@@ -263,14 +209,13 @@ export const useVoiceInput = ({ language, onTranscriptChange }: VoiceInputOption
     return () => {
       mountedRef.current = false
       sessionRef.current += 1
-      abortingRef.current = true
-      try {
-        ExpoSpeechRecognitionModule.abort()
-      } catch {
-        // The native recognition session may already be closed.
+      clearRecordingTimer()
+      if (statusRef.current === 'recording') {
+        void recorder.stop().catch(() => undefined)
       }
+      resetAudioMode()
     }
-  }, [])
+  }, [clearRecordingTimer, recorder, resetAudioMode])
 
   return {
     ...snapshot,

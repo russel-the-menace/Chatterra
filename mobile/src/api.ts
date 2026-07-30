@@ -176,6 +176,20 @@ export const api = {
     return result.translation
   },
 
+  async transcribeVoice(input: { userId: string; audio: Blob; mimeType: string }) {
+    const result = await request<{
+      transcription: { text: string; provider: 'groq'; model: string }
+    }>('/api/voice/transcriptions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': input.mimeType,
+        'X-Chatterra-User-Id': input.userId,
+      },
+      body: input.audio,
+    }, 60_000)
+    return result.transcription
+  },
+
   async getCharacterState(userId: string, characterId: string) {
     const result = await request<{ state: PublicCharacterState }>(
       `/api/characters/${encodeURIComponent(characterId)}/state?userId=${encodeURIComponent(userId)}`
