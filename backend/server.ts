@@ -488,6 +488,15 @@ app.post(
             mimeType,
             prompt: transcriptionContext?.prompt,
           })
+          const transcribedMessage = await updateUserVoiceMessageTranscript(
+            message.id,
+            transcription.text
+          )
+          if (!transcribedMessage) throw new Error('voice message not found')
+          console.info('Voice message transcript persisted for reply', {
+            messageId: message.id,
+            transcriptLength: transcription.text.length,
+          })
           const response = await fetch(`http://127.0.0.1:${process.env.PORT || 3000}/api/chat`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -496,7 +505,8 @@ app.post(
               conversationId: conversation.id,
               message: transcription.text,
               userId,
-              voiceMessageId: message.id,
+              voiceMessageId: transcribedMessage.id,
+              voiceMessageReply: true,
             }),
             signal: AbortSignal.timeout(90_000),
           })
@@ -840,6 +850,7 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
   const voiceMessageId = typeof req.body?.voiceMessageId === 'string'
     ? req.body.voiceMessageId.trim()
     : ''
+  const voiceMessageReply = req.body?.voiceMessageReply === true
   if (
     clientMessageId
     && !/^[A-Za-z0-9][A-Za-z0-9._:-]{7,199}$/.test(clientMessageId)
@@ -851,6 +862,9 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
   }
   if (voiceMessageId && clientMessageId && voiceMessageId !== clientMessageId) {
     return res.status(400).json({ error: 'voiceMessageId must match clientMessageId' })
+  }
+  if (voiceMessageReply && !voiceMessageId) {
+    return res.status(400).json({ error: 'voiceMessageReply requires voiceMessageId' })
   }
   const voiceMetadata = voiceMetadataFromPayload(req.body?.voice)
   let quoteInput: MessageQuoteInput | undefined
@@ -886,7 +900,7 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
   )) {
     return res.status(404).json({ error: 'voice message not found' })
   }
-  if (existingVoiceMessage?.content.trim()) {
+  if (existingVoiceMessage?.content.trim() && !voiceMessageReply) {
     return res.json({
       reply: null,
       userMessageId: existingVoiceMessage.id,
