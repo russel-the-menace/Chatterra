@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 760" role="img" aria-labelledby="title description">
+  <title id="title">Chatterra character architecture</title>
+  <desc id="description">A character document becomes a versioned template. Private character state and relevant context feed the inference orchestrator, which creates durable, segmented conversation output.</desc>
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#0f172a" flood-opacity="0.12"/>
+    </filter>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M1 1 L11 6 L1 11 Z" fill="#8090a8"/>
+    </marker>
+    <style>
+      .title { font: 700 26px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; fill: #152238; }
+      .label { font: 700 18px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; fill: #152238; }
+      .body { font: 15px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; fill: #65738a; }
+      .line { stroke: #8090a8; stroke-width: 2.5; fill: none; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect width="1000" height="760" rx="26" fill="#f7f9fc"/>
+  <text x="52" y="64" class="title">A character is a document, then a life in context</text>
+
+  <g filter="url(#shadow)">
+    <rect x="52" y="116" width="260" height="164" rx="16" fill="#ffffff"/>
+    <rect x="52" y="116" width="10" height="164" rx="5" fill="#34c759"/>
+    <text x="84" y="157" class="label">Character document</text>
+    <text x="84" y="190" class="body">Full prompt and boundaries</text>
+    <text x="84" y="214" class="body">Voice, language, background</text>
+    <text x="84" y="238" class="body">Front matter for runtime policy</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="382" y="116" width="236" height="164" rx="16" fill="#ffffff"/>
+    <rect x="382" y="116" width="10" height="164" rx="5" fill="#5f7ee7"/>
+    <text x="414" y="157" class="label">Versioned template</text>
+    <text x="414" y="190" class="body">Stable identity to evolve</text>
+    <text x="414" y="214" class="body">without rewriting history</text>
+    <text x="414" y="238" class="body">Source-managed or user-authored</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="688" y="116" width="260" height="164" rx="16" fill="#ffffff"/>
+    <rect x="688" y="116" width="10" height="164" rx="5" fill="#ff9f43"/>
+    <text x="720" y="157" class="label">Private character instance</text>
+    <text x="720" y="190" class="body">One user / one worldline</text>
+    <text x="720" y="214" class="body">Mood, relationship, next action</text>
+    <text x="720" y="238" class="body">Facts and causal event history</text>
+  </g>
+
+  <path d="M312 198 H365" class="line"/>
+  <path d="M618 198 H671" class="line"/>
+
+  <g filter="url(#shadow)">
+    <rect x="111" y="392" width="300" height="180" rx="16" fill="#ffffff"/>
+    <rect x="111" y="392" width="10" height="180" rx="5" fill="#8f61d9"/>
+    <text x="143" y="434" class="label">Context composer</text>
+    <text x="143" y="468" class="body">Recent conversation and summary</text>
+    <text x="143" y="492" class="body">Relevant memories and local time</text>
+    <text x="143" y="516" class="body">Character policy for this moment</text>
+    <text x="143" y="540" class="body">No raw prompt dump</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="589" y="392" width="300" height="180" rx="16" fill="#ffffff"/>
+    <rect x="589" y="392" width="10" height="180" rx="5" fill="#34c759"/>
+    <text x="621" y="434" class="label">Inference orchestrator</text>
+    <text x="621" y="468" class="body">Reply, correction, or initiative</text>
+    <text x="621" y="492" class="body">Safety and delivery policy</text>
+    <text x="621" y="516" class="body">Validate bubble boundaries</text>
+    <text x="621" y="540" class="body">Persist before presenting</text>
+  </g>
+
+  <path d="M500 280 V350 H261 V375" class="line"/>
+  <path d="M818 280 V350 H739 V375" class="line"/>
+  <path d="M411 482 H572" class="line"/>
+
+  <g filter="url(#shadow)">
+    <rect x="210" y="635" width="580" height="82" rx="16" fill="#152238"/>
+    <circle cx="291" cy="678" r="13" fill="#34c759"/>
+    <text x="324" y="674" style="font: 700 17px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; fill: #ffffff;">Durable conversation output</text>
+    <text x="324" y="695" style="font: 14px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; fill: #c9d4e5;">Messages, delivery segments, voice metadata,</text>
+    <text x="324" y="713" style="font: 14px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; fill: #c9d4e5;">and contact previews</text>
+  </g>
+  <path d="M739 572 V627" class="line"/>
+  <path d="M261 572 V627 H739" stroke="#8090a8" stroke-width="2.5" fill="none"/>
+</svg>
