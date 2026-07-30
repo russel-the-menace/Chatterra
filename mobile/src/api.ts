@@ -166,6 +166,13 @@ export const api = {
     )
   },
 
+  async updateUserProfile(userId: string, input: { displayName: string; avatar?: string }) {
+    return request<{ userName?: string; userAvatar?: string }>(
+      `/api/users/${encodeURIComponent(userId)}/profile`,
+      { method: 'PUT', body: JSON.stringify(input) }
+    )
+  },
+
   async listConversations(userId: string) {
     const result = await request<{ conversations: Conversation[] }>(
       `/api/conversations?userId=${encodeURIComponent(userId)}`

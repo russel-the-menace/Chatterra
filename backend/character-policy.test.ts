@@ -17,10 +17,10 @@ const arjun: Character = {
   updatedAt: '2026-07-24T00:00:00.000Z'
 }
 
-const minjun: Character = {
+const minji: Character = {
   ...arjun,
   id: 'seed-minjun-friend',
-  name: '민준',
+  name: '민지',
   role: 'Korean international student friend and first-year mathematics major',
   company: 'Beijing Normal University',
   scenario: 'Campus friendship at Beijing Normal University.',
@@ -31,7 +31,7 @@ const minjun: Character = {
 }
 
 const ren: Character = {
-  ...minjun,
+  ...minji,
   id: 'seed-ren-friend',
   name: '蓮',
   role: 'Japanese international student friend and third-year mathematics major',
@@ -41,8 +41,8 @@ const ren: Character = {
 const teacher: Character = {
   ...arjun,
   id: 'teacher',
-  name: 'English Teacher',
-  role: 'English Teacher',
+  name: 'Emma Carter',
+  role: 'English teacher',
   scenario: 'English practice for developers'
 }
 
@@ -58,9 +58,9 @@ const sofia: Character = {
 assert.equal(resolveCharacterMode(arjun), 'companion')
 assert.equal(timeZoneForCharacter(arjun), 'Asia/Kolkata')
 assert.equal(deriveProactivePolicy(arjun).enabled, false)
-assert.equal(resolveCharacterMode(minjun), 'companion')
+assert.equal(resolveCharacterMode(minji), 'companion')
 assert.equal(resolveCharacterMode(ren), 'companion')
-assert.equal(timeZoneForCharacter(minjun), 'Asia/Shanghai')
+assert.equal(timeZoneForCharacter(minji), 'Asia/Shanghai')
 assert.equal(timeZoneForCharacter(ren), 'Asia/Shanghai')
 assert.equal(resolveCharacterMode(teacher), 'practice')
 assert.equal(resolveCharacterMode(sofia), 'practice')

@@ -68,6 +68,7 @@ import {
   setCharacterPinned,
   setUserAvatar,
   setUserMemoryConsent,
+  updateUserProfile,
   listRecentMessages,
   upsertExpoPushDevice,
   updateAssistantMessageVoice,
@@ -161,7 +162,7 @@ const getStarterMessage = (character?: Character) => {
     return "Let us get straight to it. Which DJI model are you offering, what lawful route gets the complete units into India, and what is your landed unit price at the proposed volume? I will not accept 'we handle customs' as an answer."
   }
   if (character?.id === 'seed-minjun-friend') {
-    return '안녕, 민준이야. 오늘 수업 어땠어? 난 선형대수 과제에 아직도 붙잡혀 있어.'
+    return '안녕, 민지야. 오늘 수업 어땠어? 난 선형대수 과제에 아직도 붙잡혀 있어.'
   }
   if (character?.id === 'seed-ren-friend') {
     return 'やあ、蓮だよ。今日の授業どうだった？こっちは解析の課題にずっと捕まってた。'
@@ -174,7 +175,7 @@ const getStarterMessage = (character?: Character) => {
   }
   if (character?.id === 'c2') {
     if (languagePolicy.code === 'english') {
-      return 'Hi. I will help you practice English and point out useful mistakes when it helps, while keeping the conversation natural. Tell me about your current project.'
+      return "Hi, I'm Emma. I will help you practice English and point out useful mistakes when it helps, while keeping the conversation natural. Tell me about your current project."
     }
   }
 
@@ -229,6 +230,18 @@ app.put('/api/users/:id/avatar', asyncRoute(async (req, res) => {
   if (!avatar) return res.status(400).json({ error: 'avatar is required' })
   const userAvatar = await setUserAvatar(req.params.id, avatar)
   return res.json({ userAvatar })
+}))
+
+app.put('/api/users/:id/profile', asyncRoute(async (req, res) => {
+  const displayName = typeof req.body?.displayName === 'string'
+    ? req.body.displayName.trim().slice(0, 120)
+    : ''
+  const avatar = typeof req.body?.avatar === 'string'
+    ? req.body.avatar.trim().slice(0, 1_500_000)
+    : undefined
+  if (!displayName) return res.status(400).json({ error: 'displayName is required' })
+  const profile = await updateUserProfile(req.params.id, { displayName, avatar })
+  return res.json(profile)
 }))
 
 app.get('/api/users/:id/contact-preferences', asyncRoute(async (req, res) => {

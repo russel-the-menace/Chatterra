@@ -838,6 +838,7 @@ const assembleSystemPrompt = ({
     personaPrompt(character),
     mayaTextingInstruction(character),
     `Language enforcement: ${responseLanguage.instruction}`,
+    'User identity: when learningContext.userName is present, it is the user\'s saved name and may be used naturally. Do not invent a name when it is absent.',
     `Format enforcement: ${DIALOGUE_ONLY_INSTRUCTION}`,
     '',
     'Structured context packet:',

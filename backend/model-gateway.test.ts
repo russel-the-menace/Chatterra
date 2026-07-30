@@ -26,7 +26,7 @@ const plan = {
 
 const character = {
   id: 'c2',
-  name: 'English Teacher',
+  name: 'Emma Carter',
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z'
 } as Character

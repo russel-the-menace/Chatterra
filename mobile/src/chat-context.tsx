@@ -43,6 +43,7 @@ type ChatContextValue = {
   apiBaseUrl: string
   ready: boolean
   userId: string | null
+  userName?: string
   userAvatar?: string
   characters: Character[]
   connectionError: string | null
@@ -70,6 +71,7 @@ type ChatContextValue = {
   saveCharacter: (character: Character | Omit<Character, 'id'>) => Promise<Character>
   saveBuiltInCharacterAvatar: (characterId: string, avatar: string) => Promise<Character>
   saveUserAvatar: (avatar: string) => Promise<void>
+  saveUserProfile: (input: { displayName: string; avatar?: string }) => Promise<void>
   markCharacterRead: (characterId: string) => void
   setActiveCharacter: (characterId: string | null) => void
   setCharacterPinned: (characterId: string, pinned: boolean) => Promise<void>
@@ -131,6 +133,7 @@ const persistentConversationEntry = (entry: ConversationCacheEntry): Conversatio
 export function ChatProvider({ children }: PropsWithChildren) {
   const [ready, setReady] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
+  const [userName, setUserName] = useState<string | undefined>()
   const [userAvatar, setUserAvatar] = useState<string | undefined>()
   const [characters, setCharacters] = useState<Character[]>([])
   const [connectionError, setConnectionError] = useState<string | null>(null)
@@ -257,6 +260,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     try {
       const snapshot = await api.getSyncSnapshot(userId)
       setCharacters(snapshot.characters)
+      setUserName(snapshot.userName)
       setUserAvatar(snapshot.userAvatar)
       setPinnedCharacterIds(new Set(snapshot.pinnedCharacterIds))
       setPinnedCharacterOrder(snapshot.pinnedCharacterIds)
@@ -484,6 +488,13 @@ export function ChatProvider({ children }: PropsWithChildren) {
     setUserAvatar(result.userAvatar || avatar)
   }, [userId])
 
+  const saveUserProfile = useCallback(async (input: { displayName: string; avatar?: string }) => {
+    if (!userId) throw new Error('User is not ready.')
+    const result = await api.updateUserProfile(userId, input)
+    setUserName(result.userName || input.displayName)
+    if (result.userAvatar || input.avatar) setUserAvatar(result.userAvatar || input.avatar)
+  }, [userId])
+
   const markCharacterRead = useCallback((characterId: string) => {
     setUnreadCharacterIds(current => {
       if (!current.has(characterId)) return current
@@ -659,6 +670,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     apiBaseUrl: API_BASE_URL,
     ready,
     userId,
+    userName,
     userAvatar,
     characters,
     connectionError,
@@ -678,6 +690,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     saveCharacter,
     saveBuiltInCharacterAvatar,
     saveUserAvatar,
+    saveUserProfile,
     markCharacterRead,
     setActiveCharacter,
     setCharacterPinned,
@@ -712,6 +725,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     saveCharacter,
     saveBuiltInCharacterAvatar,
     saveUserAvatar,
+    saveUserProfile,
     setActiveCharacter,
     setCharacterPinned,
     markConversationActive,
@@ -720,6 +734,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     setDraft,
     setQuoteDraft,
     unreadCharacterIds,
+    userName,
     userAvatar,
     userId,
   ])

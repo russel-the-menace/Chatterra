@@ -3,7 +3,6 @@ import { router } from 'expo-router'
 import { useMemo, useState } from 'react'
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Modal,
   Pressable,
@@ -16,7 +15,6 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 
 import { Avatar } from '@/components/avatar'
-import { pickSquareAvatar } from '@/src/avatar-upload'
 import { useChat } from '@/src/chat-context'
 import { layout, palette } from '@/src/theme'
 import { Character } from '@/src/types'
@@ -65,19 +63,16 @@ export default function ContactsScreen() {
   const {
     apiBaseUrl,
     ready,
-    userAvatar,
     characters,
     connectionError,
     pinnedCharacterIds,
     pinnedCharacterOrder,
     lastMessageAtByCharacter,
     refreshCharacters,
-    saveUserAvatar,
   } = useChat()
   const [search, setSearch] = useState('')
   const [refreshing, setRefreshing] = useState(false)
   const [settingsVisible, setSettingsVisible] = useState(false)
-  const [savingUserAvatar, setSavingUserAvatar] = useState(false)
 
   const visibleCharacters = useMemo(() => {
     const query = search.trim().toLocaleLowerCase()
@@ -121,21 +116,9 @@ export default function ContactsScreen() {
     router.push({ pathname: '/character/[characterId]', params: { characterId: 'new' } })
   }
 
-  const chooseUserAvatar = async () => {
-    try {
-      setSavingUserAvatar(true)
-      const avatar = await pickSquareAvatar()
-      if (!avatar) return
-      await saveUserAvatar(avatar)
-      setSettingsVisible(false)
-    } catch (avatarError) {
-      Alert.alert(
-        'Avatar unavailable',
-        avatarError instanceof Error ? avatarError.message : 'Could not save the selected photo.'
-      )
-    } finally {
-      setSavingUserAvatar(false)
-    }
+  const openProfileEditor = () => {
+    setSettingsVisible(false)
+    router.push('/profile')
   }
 
   return (
@@ -245,25 +228,20 @@ export default function ContactsScreen() {
               <View style={styles.settingsRowIcon}>
                 <Ionicons name="person-add-outline" size={21} color={palette.text} />
               </View>
-              <Text style={styles.settingsRowLabel}>Add character</Text>
+              <Text style={styles.settingsRowLabel}>add character</Text>
               <Ionicons name="chevron-forward" size={19} color={palette.textMuted} />
             </Pressable>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Edit your avatar"
-              disabled={savingUserAvatar}
-              onPress={() => void chooseUserAvatar()}
-              style={({ pressed }) => [
-                styles.settingsRow,
-                savingUserAvatar && styles.settingsRowDisabled,
-                pressed && !savingUserAvatar && styles.settingsRowPressed,
-              ]}
+              accessibilityLabel="Edit profile"
+              onPress={openProfileEditor}
+              style={({ pressed }) => [styles.settingsRow, pressed && styles.settingsRowPressed]}
             >
-              <Avatar avatar={userAvatar} name="Me" size={36} muted />
-              <Text style={styles.settingsRowLabel}>Edit your avatar</Text>
-              {savingUserAvatar
-                ? <ActivityIndicator size="small" color={palette.accent} />
-                : <Ionicons name="camera-outline" size={21} color={palette.textMuted} />}
+              <View style={styles.settingsRowIcon}>
+                <Ionicons name="person-circle-outline" size={22} color={palette.text} />
+              </View>
+              <Text style={styles.settingsRowLabel}>edit profile</Text>
+              <Ionicons name="chevron-forward" size={19} color={palette.textMuted} />
             </Pressable>
           </SafeAreaView>
         </View>
@@ -356,9 +334,6 @@ const styles = StyleSheet.create({
   },
   settingsRowPressed: {
     backgroundColor: palette.surfaceMuted,
-  },
-  settingsRowDisabled: {
-    opacity: 0.56,
   },
   settingsRowIcon: {
     width: 36,

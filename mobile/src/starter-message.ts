@@ -17,7 +17,7 @@ export const starterMessageForCharacter = (character: Character) => {
     return "Let us get straight to it. Which DJI model are you offering, what lawful route gets the complete units into India, and what is your landed unit price at the proposed volume? I will not accept 'we handle customs' as an answer."
   }
   if (character.id === 'seed-minjun-friend') {
-    return '안녕, 민준이야. 오늘 수업 어땠어? 난 선형대수 과제에 아직도 붙잡혀 있어.'
+    return '안녕, 민지야. 오늘 수업 어땠어? 난 선형대수 과제에 아직도 붙잡혀 있어.'
   }
   if (character.id === 'seed-ren-friend') {
     return 'やあ、蓮だよ。今日の授業どうだった？こっちは解析の課題にずっと捕まってた。'
@@ -29,7 +29,7 @@ export const starterMessageForCharacter = (character: Character) => {
     return "Hi, I'm Sofía. We can start from zero and work toward B2, one small step at a time. First Spanish word: hola means hello. Want to try writing hola?"
   }
   if (character.id === 'c2' && code === 'english') {
-    return 'Hi. I will help you practice English and point out useful mistakes when it helps, while keeping the conversation natural. Tell me about your current project.'
+    return "Hi, I'm Emma. I will help you practice English and point out useful mistakes when it helps, while keeping the conversation natural. Tell me about your current project."
   }
 
   switch (code) {

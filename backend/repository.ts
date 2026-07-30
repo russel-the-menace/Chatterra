@@ -215,6 +215,37 @@ export const setUserAvatar = async (userId: string, avatar: string) => {
   })
 }
 
+export const updateUserProfile = async (
+  userId: string,
+  input: { displayName: string; avatar?: string }
+) => {
+  return withTransaction(async client => {
+    await ensureUser(client, userId)
+    const result = await client.query(
+      `UPDATE users SET
+         display_name = $2,
+         preferences = CASE
+           WHEN $3::text IS NULL THEN preferences
+           ELSE jsonb_set(
+             COALESCE(preferences, '{}'::jsonb),
+             '{avatar}',
+             to_jsonb($3::text),
+             TRUE
+           )
+         END,
+         updated_at = NOW()
+       WHERE id = $1
+       RETURNING display_name, preferences`,
+      [userId, input.displayName, input.avatar || null]
+    )
+    const row = result.rows[0] || {}
+    return {
+      userName: typeof row.display_name === 'string' ? row.display_name : undefined,
+      userAvatar: typeof row.preferences?.avatar === 'string' ? row.preferences.avatar : undefined,
+    }
+  })
+}
+
 export const listPinnedCharacterIds = async (userId: string): Promise<string[]> => {
   return withTransaction(async client => {
     await ensureUser(client, userId)
@@ -456,7 +487,7 @@ export const getSyncSnapshot = async (userId: string): Promise<SyncSnapshot> => 
       [userId]
     )
     const userResult = await client.query(
-      'SELECT preferences FROM users WHERE id = $1',
+      'SELECT display_name, preferences FROM users WHERE id = $1',
       [userId]
     )
     const conversationResult = await client.query(
@@ -504,6 +535,10 @@ export const getSyncSnapshot = async (userId: string): Promise<SyncSnapshot> => 
 
     return {
       serverTime: new Date().toISOString(),
+      userName: typeof userResult.rows[0]?.display_name === 'string'
+        && userResult.rows[0].display_name !== 'Local User'
+        ? userResult.rows[0].display_name
+        : undefined,
       userAvatar: typeof userResult.rows[0]?.preferences?.avatar === 'string'
         ? userResult.rows[0].preferences.avatar
         : undefined,
@@ -811,7 +846,8 @@ export const getLatestConversationSummary = async (
 export const getUserLearningContext = async (userId: string) => {
   const result = await query(
     `SELECT
-       u.learning_goals,
+      u.learning_goals,
+       u.display_name,
        lp.target_language,
        lp.proficiency,
        lp.correction_mode,
@@ -823,6 +859,9 @@ export const getUserLearningContext = async (userId: string) => {
   )
   const row = result.rows[0]
   return {
+    userName: row?.display_name && row.display_name !== 'Local User'
+      ? row.display_name
+      : undefined,
     userGoals: row?.learning_goals || {},
     targetLanguage: row?.target_language || undefined,
     proficiency: row?.proficiency || {},

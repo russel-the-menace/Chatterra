@@ -26,6 +26,10 @@ export default function RootLayout() {
         <Stack.Screen name="index" />
         <Stack.Screen name="chat/[characterId]" />
         <Stack.Screen
+          name="profile"
+          options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+        />
+        <Stack.Screen
           name="character/[characterId]"
           options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
         />
