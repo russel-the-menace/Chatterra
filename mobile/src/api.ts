@@ -91,30 +91,67 @@ export const setApiAccessToken = (nextAccessToken?: string) => {
   accessToken = nextAccessToken?.trim() || undefined
 }
 
+const clientRequestId = () => (
+  `mobile-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+)
+
 const request = async <T>(path: string, init?: RequestInit, timeoutMs = 20_000): Promise<T> => {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  const method = (init?.method || 'GET').toUpperCase()
+  const canRetryUnreadableResponse = method === 'GET'
+  const requestId = clientRequestId()
 
   try {
-    const response = await fetch(`${API_BASE_URL}${path}`, {
-      ...init,
-      headers: {
-        Accept: 'application/json',
-        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-        ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
-        ...init?.headers,
-      },
-      signal: controller.signal,
-    })
-    const payload = await response.json().catch(() => ({}))
-    if (!response.ok) {
-      throw new ApiError(
-        payload.error || `Request failed (${response.status})`,
-        response.status,
-        payload
-      )
+    for (let attempt = 0; attempt <= Number(canRetryUnreadableResponse); attempt += 1) {
+      const separator = path.includes('?') ? '&' : '?'
+      const requestPath = canRetryUnreadableResponse
+        ? `${path}${separator}_chatterra_request=${encodeURIComponent(`${requestId}-${attempt}`)}`
+        : path
+      const response = await fetch(`${API_BASE_URL}${requestPath}`, {
+        ...init,
+        cache: 'no-store',
+        headers: {
+          Accept: 'application/json',
+          'Cache-Control': 'no-store',
+          Pragma: 'no-cache',
+          'X-Chatterra-Request-Id': requestId,
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+          ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+          ...init?.headers,
+        },
+        signal: controller.signal,
+      })
+      let payload: unknown
+      try {
+        payload = await response.json()
+      } catch {
+        console.warn('[api] unreadable_json_response', {
+          attempt,
+          contentType: response.headers.get('content-type') || undefined,
+          endpoint: path.split('?')[0],
+          requestId,
+          serverRevision: response.headers.get('x-chatterra-api-revision') || undefined,
+          status: response.status,
+        })
+        if (canRetryUnreadableResponse && attempt === 0) continue
+        throw new ApiError('The server sent an unreadable response. Please retry.', response.status)
+      }
+      if (!response.ok) {
+        const error = payload && typeof payload === 'object' && !Array.isArray(payload)
+          ? (payload as Record<string, unknown>).error
+          : undefined
+        throw new ApiError(
+          typeof error === 'string' ? error : `Request failed (${response.status})`,
+          response.status,
+          payload && typeof payload === 'object' && !Array.isArray(payload)
+            ? payload as Record<string, unknown>
+            : undefined
+        )
+      }
+      return payload as T
     }
-    return payload as T
+    throw new ApiError('The server did not return a response.')
   } catch (error) {
     if (error instanceof ApiError) throw error
     if (error instanceof Error && error.name === 'AbortError') {

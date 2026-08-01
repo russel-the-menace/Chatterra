@@ -99,6 +99,7 @@ const REJECTED_OUTPUT_LOG_LIMIT = 4000
 const SYNC_PROTOCOL_VERSION = 1
 const TRANSCRIPTION_RATE_LIMIT_WINDOW_MS = 60_000
 const TRANSCRIPTION_RATE_LIMIT_MAX_REQUESTS = 6
+const API_REVISION = (process.env.SOURCE_COMMIT || 'development').slice(0, 12)
 const transcriptionRequests = new Map<string, number[]>()
 const voiceMessageTranscriptionInFlight = new Map<string, Promise<Message>>()
 app.use(cors())
@@ -107,6 +108,14 @@ app.use('/media/voice', express.static(voiceMediaDirectory, {
   immutable: true,
   maxAge: '30d',
 }))
+app.use('/api', (req, res, next) => {
+  // Conversation data is user-specific. Never let an intermediary reuse it.
+  res.setHeader('Cache-Control', 'private, no-store, max-age=0, must-revalidate')
+  res.setHeader('Pragma', 'no-cache')
+  res.append('Vary', 'Authorization')
+  res.setHeader('X-Chatterra-API-Revision', API_REVISION)
+  next()
+})
 
 type AuthenticatedRequest = Request & {
   authenticatedUser?: {
@@ -148,6 +157,13 @@ const canTranscribe = (key: string) => {
 const voiceRequestId = (req: Request) => {
   const value = typeof req.headers['x-chatterra-voice-request-id'] === 'string'
     ? req.headers['x-chatterra-voice-request-id'].trim()
+    : ''
+  return value.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 96) || 'untracked'
+}
+
+const apiRequestId = (req: Request) => {
+  const value = typeof req.headers['x-chatterra-request-id'] === 'string'
+    ? req.headers['x-chatterra-request-id'].trim()
     : ''
   return value.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 96) || 'untracked'
 }
@@ -231,7 +247,8 @@ app.get('/api/health', asyncRoute(async (_req, res) => {
     synchronization: {
       protocolVersion: SYNC_PROTOCOL_VERSION,
       transport: 'snapshot-polling'
-    }
+    },
+    revision: API_REVISION,
   })
 }))
 
@@ -257,7 +274,15 @@ app.post('/api/auth/logout', asyncRoute(async (req, res) => {
 }))
 
 app.get('/api/characters', asyncRoute(async (req, res) => {
+  const startedAt = Date.now()
   const characters = await listCharacters(authenticatedUserId(req))
+  console.info('Character list served', {
+    characterCount: characters.length,
+    durationMs: Date.now() - startedAt,
+    requestId: apiRequestId(req),
+    responseBytes: Buffer.byteLength(JSON.stringify({ characters })),
+    revision: API_REVISION,
+  })
   return res.json({ characters })
 }))
 
