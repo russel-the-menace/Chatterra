@@ -164,11 +164,15 @@ export default function ContactsScreen() {
         ) : connectionError && characters.length === 0 ? (
           <View style={styles.centerState}>
             <Ionicons name="cloud-offline-outline" size={30} color={palette.textMuted} />
-            <Text style={styles.stateTitle}>Server unavailable</Text>
+            <Text style={styles.stateTitle}>Could not load conversations</Text>
             <Text style={styles.stateText}>{connectionError}</Text>
             <Text style={styles.endpointText}>{apiBaseUrl}</Text>
-            <Pressable onPress={() => void refresh()} style={styles.retryButton}>
-              <Text style={styles.retryButtonText}>Retry</Text>
+            <Pressable
+              disabled={refreshing}
+              onPress={() => void refresh()}
+              style={({ pressed }) => [styles.retryButton, (pressed || refreshing) && styles.retryButtonPressed]}
+            >
+              <Text style={styles.retryButtonText}>{refreshing ? 'Retrying...' : 'Retry'}</Text>
             </Pressable>
           </View>
         ) : (
@@ -452,6 +456,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: palette.accent,
+  },
+  retryButtonPressed: {
+    opacity: 0.68,
   },
   retryButtonText: {
     color: '#FFFFFF',

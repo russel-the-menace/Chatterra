@@ -12,6 +12,7 @@ import {
   PublicCharacterState,
   MessageTranslationResponse,
   ServerMessage,
+  SyncConversation,
   SyncSnapshot,
   VoiceTranscriptMetadata,
 } from './types'
@@ -44,6 +45,24 @@ export class ApiError extends Error {
     super(message)
     this.name = 'ApiError'
   }
+}
+
+const requiredArray = <T>(value: unknown, endpoint: string, field: string): T[] => {
+  if (Array.isArray(value)) return value as T[]
+
+  const responseKeys = value && typeof value === 'object' && !Array.isArray(value)
+    ? Object.keys(value as Record<string, unknown>).slice(0, 12)
+    : []
+  console.warn('[api] invalid_response_shape', {
+    endpoint,
+    field,
+    receivedType: value === null ? 'null' : typeof value,
+    responseKeys,
+  })
+  throw new ApiError(`The server returned an invalid ${field} list. Please retry.`, undefined, {
+    endpoint,
+    field,
+  })
 }
 
 export type VoiceCapability = {
@@ -154,14 +173,20 @@ export const api = {
   },
 
   async listCharacters(userId: string) {
-    const result = await request<{ characters: Character[] }>(
+    const result = await request<{ characters?: unknown }>(
       `/api/characters?userId=${encodeURIComponent(userId)}`
     )
-    return result.characters
+    return requiredArray<Character>(result.characters, '/api/characters', 'characters')
   },
 
   async getSyncSnapshot(userId: string) {
-    return request<SyncSnapshot>(`/api/sync?userId=${encodeURIComponent(userId)}`)
+    const snapshot = await request<SyncSnapshot>(`/api/sync?userId=${encodeURIComponent(userId)}`)
+    return {
+      ...snapshot,
+      characters: requiredArray<Character>(snapshot.characters, '/api/sync', 'characters'),
+      conversations: requiredArray<SyncConversation>(snapshot.conversations, '/api/sync', 'conversations'),
+      pinnedCharacterIds: requiredArray<string>(snapshot.pinnedCharacterIds, '/api/sync', 'pinnedCharacterIds'),
+    }
   },
 
   async createCharacter(userId: string, character: Omit<Character, 'id'>) {
@@ -236,10 +261,14 @@ export const api = {
   },
 
   async listPinnedCharacterIds(userId: string) {
-    const result = await request<{ pinnedCharacterIds: string[] }>(
+    const result = await request<{ pinnedCharacterIds?: unknown }>(
       `/api/users/${encodeURIComponent(userId)}/contact-preferences`
     )
-    return result.pinnedCharacterIds
+    return requiredArray<string>(
+      result.pinnedCharacterIds,
+      '/api/users/:id/contact-preferences',
+      'pinnedCharacterIds'
+    )
   },
 
   async setCharacterPinned(userId: string, characterId: string, pinned: boolean) {

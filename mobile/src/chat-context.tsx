@@ -220,6 +220,12 @@ export function ChatProvider({ children }: PropsWithChildren) {
     accountId: string,
     currentCharacters: Character[]
   ) => {
+    if (!Array.isArray(currentCharacters)) {
+      console.warn('[workspace] invalid_character_list_for_cache_prewarm', {
+        receivedType: currentCharacters === null ? 'null' : typeof currentCharacters,
+      })
+      throw new Error('The app received an invalid character list. Please retry.')
+    }
     const cachedEntries = await Promise.all(currentCharacters.map(async character => {
       try {
         const cache = await getStoredConversationCache(API_BASE_URL, accountId, character.id)
@@ -323,10 +329,12 @@ export function ChatProvider({ children }: PropsWithChildren) {
     if (!id) throw new Error('User is not ready.')
     try {
       const nextCharacters = await api.listCharacters(id)
+      console.info('[workspace] character_list_refreshed', { count: nextCharacters.length })
       setCharacters(nextCharacters)
       setConnectionError(null)
     } catch (error) {
       const message = messageForError(error)
+      console.warn('[workspace] character_refresh_failed', { message })
       setConnectionError(message)
       throw error
     }
@@ -353,6 +361,9 @@ export function ChatProvider({ children }: PropsWithChildren) {
           storedSession.user.id,
           nextCharacters
         )
+        console.info('[workspace] bootstrap_character_list_received', {
+          count: nextCharacters.length,
+        })
         if (cancelled) return
         const contactPreviewState = buildContactPreviewState(
           nextCharacters,
@@ -381,7 +392,9 @@ export function ChatProvider({ children }: PropsWithChildren) {
           setUsername(undefined)
           setUserName(undefined)
         } else {
-          setConnectionError(messageForError(error))
+          const message = messageForError(error)
+          console.warn('[workspace] bootstrap_failed', { message })
+          setConnectionError(message)
         }
       } finally {
         if (!cancelled && storedSession && !sessionInvalid) {
@@ -423,6 +436,9 @@ export function ChatProvider({ children }: PropsWithChildren) {
         storedSession.user.id,
         nextCharacters
       )
+      console.info('[workspace] login_character_list_received', {
+        count: nextCharacters.length,
+      })
       const contactPreviewState = buildContactPreviewState(
         nextCharacters,
         storedContactPreviews,
@@ -441,7 +457,9 @@ export function ChatProvider({ children }: PropsWithChildren) {
         cachedAt: Date.now(),
       })
     } catch (error) {
-      setConnectionError(messageForError(error))
+      const message = messageForError(error)
+      console.warn('[workspace] login_workspace_load_failed', { message })
+      setConnectionError(message)
     } finally {
       setUserId(storedSession.user.id)
       setUsername(storedSession.user.username)
