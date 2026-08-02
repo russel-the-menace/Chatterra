@@ -1,11 +1,18 @@
 import React, {useState, useEffect, useMemo, useRef} from 'react'
 import ChatWindow from '../components/ChatWindow'
-import InputBox from '../components/InputBox'
-import { AssistantVoiceMessage, ChatMessage } from '../components/MessageBubble'
+import InputBox, { RecordedVoiceMessage } from '../components/InputBox'
+import { AssistantVoiceMessage, ChatMessage, UserVoiceMessage } from '../components/MessageBubble'
 import seedCharacter, {characters as seedCharacters, Character} from '../data/character'
 import { VoiceTranscriptMetadata } from '../voice/types'
 import { starterMessageForCharacter } from '../languagePolicy'
-import { apiFetch, apiUrl, getStoredSession, getSyncSnapshot } from '../api'
+import {
+  apiFetch,
+  apiUrl,
+  getStoredSession,
+  getSyncSnapshot,
+  transcribeVoiceRecording,
+  uploadVoiceMessage,
+} from '../api'
 
 type CharacterTextKey = 'name' | 'role' | 'company' | 'scenario' | 'goal' | 'language' | 'personality' | 'background' | 'systemPromptTemplate'
 type Point = { x: number; y: number }
@@ -51,6 +58,24 @@ const parseAssistantVoiceMessage = (value: unknown): AssistantVoiceMessage | und
     generatedAt: typeof voice.generatedAt === 'string' ? voice.generatedAt : undefined,
   }
 }
+const parseUserVoiceMessage = (value: unknown): UserVoiceMessage | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const voice = value as Record<string, unknown>
+  const mimeType = typeof voice.mimeType === 'string' ? voice.mimeType : ''
+  if (voice.provider !== 'user-recording' || voice.status !== 'ready') return undefined
+  if (typeof voice.audioUrl !== 'string' || !voice.audioUrl) return undefined
+  if (typeof voice.durationSeconds !== 'number' || !Number.isFinite(voice.durationSeconds)) return undefined
+  if (!['audio/mp4', 'audio/m4a', 'audio/x-m4a', 'audio/3gpp', 'audio/webm'].includes(mimeType)) return undefined
+  if (voice.transcriptStatus !== 'none' && voice.transcriptStatus !== 'ready') return undefined
+  return {
+    provider: 'user-recording',
+    status: 'ready',
+    audioUrl: mediaUrl(voice.audioUrl),
+    durationSeconds: voice.durationSeconds,
+    mimeType: mimeType as UserVoiceMessage['mimeType'],
+    transcriptStatus: voice.transcriptStatus,
+  }
+}
 const deliverySegments = (message: any): string[] => {
   const stored = message?.contentJson?.deliverySegments
   if (message?.senderRole === 'assistant' && Array.isArray(stored)) {
@@ -64,7 +89,8 @@ const deliverySegments = (message: any): string[] => {
 const mapServerMessages = (items: any[]): ChatMessage[] => items.flatMap((message: any) => {
   const segments = deliverySegments(message)
   const englishTranslations = message?.contentJson?.translations?.en
-  const voice = parseAssistantVoiceMessage(message?.contentJson?.voice)
+  const assistantVoice = parseAssistantVoiceMessage(message?.contentJson?.voice)
+  const userVoice = parseUserVoiceMessage(message?.contentJson?.voice)
   return segments.map((text, index) => ({
     id: segments.length === 1 ? String(message.id) : `${String(message.id)}:segment:${index}`,
     sender: message.senderRole === 'user' ? 'user' as const : 'ai' as const,
@@ -74,8 +100,11 @@ const mapServerMessages = (items: any[]): ChatMessage[] => items.flatMap((messag
     translation: typeof englishTranslations?.[String(index)] === 'string'
       ? englishTranslations[String(index)]
       : undefined,
-    translationVisible: typeof englishTranslations?.[String(index)] === 'string',
-    voice: voice?.segmentIndex === index ? voice : undefined
+    translationVisible: false,
+    voice: message.senderRole === 'user'
+      ? userVoice
+      : assistantVoice?.segmentIndex === index ? assistantVoice : undefined,
+    voiceTranscriptVisible: false,
   }))
 })
 
@@ -85,7 +114,7 @@ const responseMessages = (data: any): ChatMessage[] => {
         typeof segment === 'string' && Boolean(segment.trim())
       ))
     : []
-  const usable = segments.length > 0 && typeof data.reply === 'string'
+  const usable: string[] = segments.length > 0 && typeof data.reply === 'string'
     ? segments
     : typeof data.reply === 'string' ? [data.reply] : []
   const baseId = typeof data.messageId === 'string' ? data.messageId : makeMessageId()
@@ -98,6 +127,14 @@ const responseMessages = (data: any): ChatMessage[] => {
     segmentIndex: index,
     voice: voice?.segmentIndex === index ? voice : undefined
   }))
+}
+
+const contactPreviewForMessage = (message: any): string | undefined => {
+  const voice = parseUserVoiceMessage(message?.contentJson?.voice)
+  if (voice) return `[Audio] ${Math.max(1, Math.round(voice.durationSeconds))}\"`
+  return typeof message?.content === 'string' && message.content.trim()
+    ? message.content.trim()
+    : undefined
 }
 
 const mergeMessageUiState = (current: ChatMessage[], incoming: ChatMessage[]) => {
@@ -174,6 +211,8 @@ const createCharacterDraft = (): Character => ({
 export default function ChatPage(): JSX.Element{
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [userId, setUserIdentifier] = useState<string | null>(null)
+  const [userName, setUserName] = useState<string | undefined>(() => getStoredSession()?.user.displayName)
+  const [userAvatar, setUserAvatar] = useState<string | undefined>()
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [characters, setCharacters] = useState<Character[]>(seedCharacters)
   const [selectedCharacter, setSelectedCharacter] = useState<Character>(seedCharacter)
@@ -450,6 +489,7 @@ export default function ChatPage(): JSX.Element{
   useEffect(() => {
     const uid = getStoredSession()?.user.id
     if (!uid) return
+    setUserName(getStoredSession()?.user.displayName)
     setUserIdentifier(uid)
     const loadContactPreferences = async () => {
       try {
@@ -508,6 +548,9 @@ export default function ChatPage(): JSX.Element{
         const snapshot = await getSyncSnapshot(userId)
         if (stopped) return
 
+        setUserName(snapshot.userName || getStoredSession()?.user.displayName)
+        setUserAvatar(snapshot.userAvatar)
+
         setCharacters(current => {
           const unchanged = current.length === snapshot.characters.length
             && current.every((character, index) => (
@@ -559,9 +602,8 @@ export default function ChatPage(): JSX.Element{
             conversation.latestMessage?.id || ''
           ].join(':')
           nextMetadata[characterId] = version
-          if (conversation.latestMessage?.content) {
-            nextPreviews[characterId] = conversation.latestMessage.content
-          }
+          const preview = contactPreviewForMessage(conversation.latestMessage)
+          if (preview) nextPreviews[characterId] = preview
           const lastMessageAt = conversation.lastMessageAt || conversation.latestMessage?.createdAt
           if (lastMessageAt) nextLastMessageAtByCharacter[characterId] = lastMessageAt
           if (conversationMetadataRef.current[characterId] !== version) {
@@ -950,13 +992,47 @@ export default function ChatPage(): JSX.Element{
     })()
   }
 
-  const toggleVoiceTranscript = (message: ChatMessage) => {
+  const toggleVoiceTranscript = async (message: ChatMessage) => {
     if (message.voice?.status !== 'ready') return
-    updateMessagesForCharacter(selectedCharacter.id, current => current.map(item => (
-      item.id === message.id
-        ? { ...item, voiceTranscriptVisible: !item.voiceTranscriptVisible }
-        : item
+    const characterId = selectedCharacter.id
+    if (message.voiceTranscriptVisible) {
+      updateMessagesForCharacter(characterId, current => current.map(item => (
+        item.id === message.id ? { ...item, voiceTranscriptVisible: false } : item
+      )))
+      return
+    }
+
+    if (message.voice.provider !== 'user-recording' || message.text.trim()) {
+      updateMessagesForCharacter(characterId, current => current.map(item => (
+        item.id === message.id ? { ...item, voiceTranscriptVisible: true } : item
+      )))
+      return
+    }
+    if (!message.sourceMessageId || message.voiceTranscriptionLoading) return
+
+    updateMessagesForCharacter(characterId, current => current.map(item => (
+      item.id === message.id ? { ...item, voiceTranscriptionLoading: true } : item
     )))
+    try {
+      const response = await apiFetch(
+        apiUrl(`/api/voice/messages/${encodeURIComponent(message.sourceMessageId)}/transcription`),
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId }) }
+      )
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok || !data.message) throw new Error(data.error || 'Could not convert this voice message to text.')
+      const converted = mapServerMessages([data.message])[0]
+      if (!converted) throw new Error('The converted voice message could not be displayed.')
+      updateMessagesForCharacter(characterId, current => current.map(item => (
+        item.id === message.id
+          ? { ...item, ...converted, voiceTranscriptVisible: true, voiceTranscriptionLoading: false }
+          : item
+      )))
+    } catch (conversionError) {
+      console.warn('Voice message transcription failed', conversionError)
+      updateMessagesForCharacter(characterId, current => current.map(item => (
+        item.id === message.id ? { ...item, voiceTranscriptionLoading: false } : item
+      )))
+    }
   }
 
   const handleDraftChange = (draft: string) => {
@@ -1070,6 +1146,92 @@ export default function ChatPage(): JSX.Element{
     }
 
     window.alert('Start Group Chat is not implemented yet.')
+  }
+
+  const transcribeVoice = async (recording: RecordedVoiceMessage) => {
+    if (!userId) throw new Error('User is not ready.')
+    const result = await transcribeVoiceRecording({
+      userId,
+      characterId: selectedCharacter.id,
+      audio: recording.audio,
+      durationMilliseconds: recording.durationMilliseconds,
+    })
+    return result.text
+  }
+
+  const sendVoiceMessage = async (recording: RecordedVoiceMessage) => {
+    if (!userId) throw new Error('User is not ready.')
+    const targetCharacter = selectedCharacter
+    const targetCharacterId = targetCharacter.id
+    const targetConversationId = conversationId
+    const durationSeconds = Math.max(1, recording.durationMilliseconds / 1000)
+    const localUrl = URL.createObjectURL(recording.audio)
+    const localMessageId = makeMessageId()
+    const loadingId = makeMessageId()
+    const localMessage: ChatMessage = {
+      id: localMessageId,
+      sender: 'user',
+      text: '',
+      segmentIndex: 0,
+      voice: {
+        provider: 'user-recording',
+        status: 'ready',
+        audioUrl: localUrl,
+        durationSeconds,
+        mimeType: (recording.audio.type.split(';')[0] || 'audio/webm') as UserVoiceMessage['mimeType'],
+        transcriptStatus: 'none',
+      },
+    }
+    const loadingMessage: ChatMessage = { id: loadingId, sender: 'ai', text: '', loading: true }
+
+    markCharacterActive(targetCharacterId)
+    setScrollToEndRequest(current => current + 1)
+    setMessages(current => [...current, localMessage, loadingMessage])
+    try {
+      const data = await uploadVoiceMessage({
+        userId,
+        characterId: targetCharacterId,
+        conversationId: targetConversationId || undefined,
+        audio: recording.audio,
+        durationMilliseconds: recording.durationMilliseconds,
+      }) as any
+      if (typeof data.conversation?.id === 'string') {
+        updateConversationForCharacter(targetCharacterId, data.conversation.id)
+      }
+      if (data.behavior) {
+        const activity = String(data.behavior.activity || 'Online')
+          .replace(/_/g, ' ')
+          .replace(/^./, value => value.toUpperCase())
+        updateBehaviorForCharacter(targetCharacterId, activity)
+      }
+
+      const serverMessage = data.message ? mapServerMessages([data.message])[0] : undefined
+      if (!serverMessage) throw new Error('The server did not save this voice message.')
+      updateMessagesForCharacter(targetCharacterId, current => current.map(message => (
+        message.id === localMessageId
+          ? { ...serverMessage, voiceTranscriptVisible: false }
+          : message
+      )))
+      URL.revokeObjectURL(localUrl)
+
+      if (data.reply === null || data.behavior?.decision === 'no_reply') {
+        updateMessagesForCharacter(targetCharacterId, current => current.filter(message => message.id !== loadingId))
+        return
+      }
+      if (typeof data.reply !== 'string') {
+        updateMessagesForCharacter(targetCharacterId, current => current.filter(message => message.id !== loadingId))
+        return
+      }
+      const replies = responseMessages(data)
+      updateMessagesForCharacter(targetCharacterId, current => current.flatMap(message => (
+        message.id === loadingId ? replies : [message]
+      )))
+    } catch (uploadError) {
+      console.error('Voice message upload failed', uploadError)
+      URL.revokeObjectURL(localUrl)
+      updateMessagesForCharacter(targetCharacterId, current => current.filter(message => message.id !== loadingId))
+      throw uploadError
+    }
   }
 
   const sendMessage = (text: string, voice?: VoiceTranscriptMetadata) => {
@@ -1277,6 +1439,8 @@ export default function ChatPage(): JSX.Element{
         <ChatWindow
           messages={messages}
           character={selectedCharacter}
+          userAvatar={userAvatar}
+          userName={userName}
           onEditCharacter={() => openCharacterEditor(selectedCharacter)}
           scrollToEndRequest={scrollToEndRequest}
           onToggleTranslation={toggleMessageTranslation}
@@ -1285,9 +1449,10 @@ export default function ChatPage(): JSX.Element{
         <InputBox
           key={selectedCharacter.id}
           onSend={sendMessage}
+          onSendVoice={sendVoiceMessage}
+          onTranscribeVoice={transcribeVoice}
           draft={messageDrafts[selectedCharacter.id] || ''}
           onDraftChange={handleDraftChange}
-          language={selectedCharacter.language}
         />
       </main>
 

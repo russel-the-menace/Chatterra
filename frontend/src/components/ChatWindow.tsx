@@ -11,6 +11,8 @@ const bottomThreshold = 4
 export default function ChatWindow({
   messages,
   character,
+  userAvatar,
+  userName,
   onEditCharacter,
   scrollToEndRequest,
   onToggleTranslation,
@@ -18,6 +20,8 @@ export default function ChatWindow({
 }:{
   messages: ChatMessage[]
   character: Character
+  userAvatar?: string
+  userName?: string
   onEditCharacter: () => void
   scrollToEndRequest: number
   onToggleTranslation: (message: ChatMessage) => void
@@ -108,7 +112,7 @@ export default function ChatWindow({
   const openMessageMenu = (event: React.MouseEvent<HTMLDivElement>, message: ChatMessage) => {
     if (message.loading) return
     event.preventDefault()
-    const menuWidth = message.voice?.status === 'ready' ? 282 : 190
+    const menuWidth = message.voice?.status === 'ready' ? 154 : 190
     const menuHeight = 48
     setMessageMenu({
       message,
@@ -154,6 +158,8 @@ export default function ChatWindow({
           key={m.id}
           msg={m}
           character={character}
+          userAvatar={userAvatar}
+          userName={userName}
           onEditCharacter={onEditCharacter}
           onMessageContextMenu={openMessageMenu}
         />
@@ -167,32 +173,38 @@ export default function ChatWindow({
             style={{ left: messageMenu.x, top: messageMenu.y }}
             onMouseDown={event => event.stopPropagation()}
           >
-            <button type="button" role="menuitem" onClick={() => void copyMessage(messageMenu.message)}>
-              Copy
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                const message = messageMenu.message
-                setMessageMenu(null)
-                onToggleTranslation(message)
-              }}
-            >
-              {messageMenu.message.translationVisible ? 'Stop Translate' : 'Translate'}
-            </button>
-            {messageMenu.message.voice?.status === 'ready' && (
+            {messageMenu.message.voice?.status === 'ready' ? (
               <button
                 type="button"
                 role="menuitem"
+                disabled={messageMenu.message.voiceTranscriptionLoading}
                 onClick={() => {
                   const message = messageMenu.message
                   setMessageMenu(null)
-                  onToggleVoiceTranscript(message)
+                  void onToggleVoiceTranscript(message)
                 }}
               >
-                {messageMenu.message.voiceTranscriptVisible ? 'Hide text' : 'Show text'}
+                {messageMenu.message.voiceTranscriptionLoading
+                  ? 'Converting...'
+                  : messageMenu.message.voiceTranscriptVisible ? 'Hide text' : 'Convert to Text'}
               </button>
+            ) : (
+              <>
+                <button type="button" role="menuitem" onClick={() => void copyMessage(messageMenu.message)}>
+                  Copy
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    const message = messageMenu.message
+                    setMessageMenu(null)
+                    onToggleTranslation(message)
+                  }}
+                >
+                  {messageMenu.message.translationVisible ? 'Hide translation' : 'Translate'}
+                </button>
+              </>
             )}
           </div>
         </div>,

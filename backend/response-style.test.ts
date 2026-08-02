@@ -206,11 +206,11 @@ assert.deepEqual(secondLongSentenceDelivery.deliverySegments, [
   'The third sentence is separate too.'
 ])
 
-const mayaEmojiFallback = diagnoseInferenceOutput(
+const mayaPlainTextDelivery = diagnoseInferenceOutput(
   plan,
   'i am barely surviving bio rn'
 )
-assert.match(mayaEmojiFallback.deliverySegments[0], /\p{Extended_Pictographic}/u)
+assert.deepEqual(mayaPlainTextDelivery.deliverySegments, ['i am barely surviving bio rn'])
 
 const twoBubblePlan = {
   ...plan,

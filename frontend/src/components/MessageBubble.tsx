@@ -1,5 +1,6 @@
 import React, {useEffect, useRef, useState} from 'react'
 import { Character } from '../data/character'
+import { WeChatVoiceWave } from './wechat-voice-wave'
 
 export type AssistantVoiceMessage = {
   provider: 'qwen3-tts'
@@ -13,6 +14,17 @@ export type AssistantVoiceMessage = {
   generatedAt?: string
 }
 
+export type UserVoiceMessage = {
+  provider: 'user-recording'
+  status: 'ready'
+  audioUrl: string
+  durationSeconds: number
+  mimeType: 'audio/mp4' | 'audio/m4a' | 'audio/x-m4a' | 'audio/3gpp' | 'audio/webm'
+  transcriptStatus: 'none' | 'ready'
+}
+
+export type MessageVoice = AssistantVoiceMessage | UserVoiceMessage
+
 export type ChatMessage = {
   id: string
   sender: 'ai' | 'user'
@@ -24,8 +36,9 @@ export type ChatMessage = {
   translationVisible?: boolean
   translationLoading?: boolean
   translationError?: string
-  voice?: AssistantVoiceMessage
+  voice?: MessageVoice
   voiceTranscriptVisible?: boolean
+  voiceTranscriptionLoading?: boolean
 }
 
 const isImageAvatar = (avatar?: string) => Boolean(avatar && /^(data:image\/|blob:|https?:\/\/|\/)/.test(avatar))
@@ -33,11 +46,15 @@ const isImageAvatar = (avatar?: string) => Boolean(avatar && /^(data:image\/|blo
 export default function MessageBubble({
   msg,
   character,
+  userAvatar,
+  userName,
   onEditCharacter,
   onMessageContextMenu
 }:{
   msg: ChatMessage
   character: Character
+  userAvatar?: string
+  userName?: string
   onEditCharacter: () => void
   onMessageContextMenu: (event: React.MouseEvent<HTMLDivElement>, message: ChatMessage) => void
 }): JSX.Element{
@@ -45,15 +62,34 @@ export default function MessageBubble({
   const bubbleClass = "bubble "+(isUser? 'user':'ai')
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [playing, setPlaying] = useState(false)
+  const [waveLevel, setWaveLevel] = useState(3)
   const readyVoice = msg.voice?.status === 'ready' && Boolean(msg.voice.audioUrl)
   const duration = Math.max(1, Math.round(msg.voice?.durationSeconds || 1))
+  const isUserVoice = msg.voice?.provider === 'user-recording'
   const characterAvatar = isImageAvatar(character.avatar)
     ? <img src={character.avatar} alt="" />
     : <span>{character.avatar || character.name.slice(0, 1)}</span>
+  const userAvatarContent = isImageAvatar(userAvatar)
+    ? <img src={userAvatar} alt="" />
+    : <span>{(userName || 'Me').trim().slice(0, 1).toUpperCase() || 'M'}</span>
 
   useEffect(() => () => {
     audioRef.current?.pause()
   }, [])
+
+  useEffect(() => {
+    if (!playing) {
+      setWaveLevel(3)
+      return
+    }
+    let level = 1
+    setWaveLevel(level)
+    const timer = window.setInterval(() => {
+      level = level === 3 ? 1 : level + 1
+      setWaveLevel(level)
+    }, 220)
+    return () => window.clearInterval(timer)
+  }, [playing])
 
   const toggleVoice = async () => {
     const audio = audioRef.current
@@ -101,12 +137,15 @@ export default function MessageBubble({
             <>
               <button
                 type="button"
-                className={`voice-note${playing ? ' playing' : ''}`}
+                className={`voice-note${isUserVoice ? ' user-voice-note' : ''}${playing ? ' playing' : ''}`}
                 onClick={() => void toggleVoice()}
-                aria-label={`${playing ? 'Pause' : 'Play'} Maya voice message`}
+                aria-label={`${playing ? 'Pause' : 'Play'} voice message`}
               >
-                <span className="voice-note-icon" aria-hidden="true">))</span>
-                <span className="voice-note-wave" aria-hidden="true"><i/><i/><i/><i/></span>
+                <WeChatVoiceWave
+                  color={isUser ? '#FFFFFF' : '#171b22'}
+                  level={waveLevel}
+                  mirrored={isUser}
+                />
                 <span className="voice-note-duration">{duration}\"</span>
               </button>
               <audio
@@ -123,9 +162,8 @@ export default function MessageBubble({
           )}
         </div>
         {readyVoice && msg.voiceTranscriptVisible && (
-          <div className="voice-transcript" role="status">
-            <span>Voice message</span>
-            {msg.text}
+          <div className={`voice-transcript${isUser ? ' user-voice-transcript' : ''}`} role="status">
+            {msg.voiceTranscriptionLoading ? 'Converting to text...' : msg.text}
           </div>
         )}
         {msg.translationVisible && !msg.loading && (
@@ -146,7 +184,7 @@ export default function MessageBubble({
           </div>
         )}
       </div>
-      {isUser && <div className="avatar user">Me</div>}
+      {isUser && <div className="avatar user">{userAvatarContent}</div>}
     </div>
   )
 }

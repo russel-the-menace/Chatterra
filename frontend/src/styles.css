@@ -253,6 +253,7 @@ body.modal-open{overflow:hidden}
 .contact-avatar img,
 .top-bar-avatar img,
 .avatar.assistant img,
+.avatar.user img,
 .character-avatar-picker img{
   width:100%;
   height:100%;
@@ -744,6 +745,139 @@ body.modal-open{overflow:hidden}
 }
 .input-box .send:disabled{cursor:not-allowed;opacity:0.55;box-shadow:none}
 
+/* Web and mobile use the same neutral avatar framing and WeChat-style voice mark. */
+.contact-avatar,
+.top-bar-avatar,
+.avatar.assistant,
+.avatar.user{
+  border:0;
+  box-shadow:none;
+}
+.top-bar-avatar,
+.avatar.assistant{background:#e3e8ef;color:#172033}
+.top-bar-avatar:has(img),
+.avatar.assistant:has(img),
+.avatar.user:has(img),
+.contact-avatar:has(img){background:transparent}
+
+.voice-note{
+  min-width:92px;
+  min-height:40px;
+  padding:0;
+  display:flex;
+  align-items:center;
+  justify-content:flex-start;
+  gap:5px;
+  border:0;
+  background:transparent;
+  color:#171b22;
+  cursor:pointer;
+}
+.voice-note.user-voice{flex-direction:row-reverse;color:#fff}
+.voice-note .wechat-voice-wave{display:block;flex:0 0 auto}
+.voice-note-duration{font-variant-numeric:tabular-nums;font-size:16px;line-height:1}
+.voice-note.playing .wechat-voice-wave{filter:drop-shadow(0 0 1px currentColor)}
+.voice-transcript{
+  width:fit-content;
+  max-width:min(72ch,100%);
+  min-height:42px;
+  margin-top:5px;
+  padding:11px 14px;
+  border:0;
+  border-radius:14px;
+  background:#fff;
+  color:#111827;
+  font-size:14px;
+  line-height:1.45;
+  white-space:pre-wrap;
+  word-break:break-word;
+  box-shadow:0 8px 18px rgba(15,23,42,0.08);
+}
+.user-voice-transcript{align-self:flex-end;border-bottom-right-radius:4px}
+.message-context-menu button:only-child{width:100%}
+
+.composer-mode-button,
+.dictation-command{
+  width:48px;
+  height:48px;
+  flex:0 0 auto;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border:1px solid rgba(15,23,42,0.14);
+  border-radius:14px;
+  background:#fff;
+  color:#172033;
+  cursor:pointer;
+}
+.composer-mode-button:hover:not(:disabled),
+.dictation-command:hover:not(:disabled){background:#f3f7f4;color:var(--accent-pressed);border-color:rgba(var(--accent-rgb),0.4)}
+.composer-mode-button:disabled,.dictation-command:disabled{cursor:wait;opacity:.55}
+.composer-icon{width:22px;height:22px;display:block}
+.voice-message-compose-row{align-items:center}
+.hold-to-talk{
+  flex:1;
+  min-width:0;
+  height:48px;
+  padding:0 16px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border:1px solid rgba(15,23,42,0.14);
+  border-radius:14px;
+  background:#fff;
+  color:#172033;
+  font-weight:700;
+  cursor:pointer;
+  user-select:none;
+  touch-action:none;
+}
+.hold-to-talk:hover:not(:disabled){background:#f3f7f4;border-color:rgba(var(--accent-rgb),0.4)}
+.hold-to-talk.recording{background:#f2fbf4;border-color:var(--accent);color:var(--accent-pressed)}
+.hold-to-talk:disabled{cursor:wait;opacity:.65}
+.dictation-compose-row{align-items:center}
+.cloud-dictation-bar{
+  height:48px;
+  flex:1;
+  min-width:0;
+  display:flex;
+  align-items:center;
+  overflow:hidden;
+  border:1px solid rgba(15,23,42,0.14);
+  border-radius:14px;
+  background:#fff;
+}
+.dictation-command{color:#667085}
+.dictation-confirm{border:0;background:var(--accent);color:#fff}
+.dictation-confirm:hover:not(:disabled){background:var(--accent-pressed);color:#fff;border-color:transparent}
+.composer-command-glyph{font-size:30px;font-weight:400;line-height:1}
+.dictation-confirm .composer-command-glyph{font-size:27px;font-weight:700}
+.recording-waveform{
+  width:100%;
+  height:30px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:4px;
+  overflow:hidden;
+  padding:0 12px;
+}
+.recording-waveform i{
+  width:3px;
+  min-height:4px;
+  flex:0 0 auto;
+  border-radius:99px;
+  background:#9ca6b6;
+  opacity:calc(.38 + var(--voice-level) * .62);
+  transform:scaleY(calc(.26 + var(--voice-level) * .74));
+  transform-origin:center;
+}
+.recording-waveform.active i{animation:recording-wave 780ms ease-in-out infinite alternate}
+.recording-waveform.active i:nth-child(3n){animation-delay:120ms}
+.recording-waveform.active i:nth-child(4n){animation-delay:240ms}
+.recording-waveform.active i:nth-child(5n){animation-delay:360ms}
+@keyframes recording-wave{from{transform:scaleY(calc(.22 + var(--voice-level) * .58))}to{transform:scaleY(calc(.52 + var(--voice-level) * .9))}}
+
 .typing{ display:inline-flex; align-items:center; gap:6px }
 .typing .dot{ width:8px; height:8px; background:currentColor; border-radius:50%; display:inline-block; opacity:0.9 }
 .typing .dot:nth-child(1){ animation: blink 1s infinite 0s }
@@ -1025,6 +1159,8 @@ body.modal-open{overflow:hidden}
   .input-box textarea{height:44px;min-height:44px;padding:9px 12px;border-radius:13px}
   .input-actions{gap:6px;height:44px}
   .voice-button{width:44px;height:44px;border-radius:13px}
+  .composer-mode-button,.dictation-command{width:44px;height:44px;border-radius:13px}
+  .hold-to-talk,.cloud-dictation-bar{height:44px;border-radius:13px}
   .input-box .send{height:44px;min-width:68px;padding:0 11px;border-radius:13px}
   .character-modal-backdrop{align-items:flex-end;padding:0}
   .character-modal{width:100%;max-height:94vh;border-radius:8px 8px 0 0}

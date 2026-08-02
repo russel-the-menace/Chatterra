@@ -28,6 +28,8 @@ export type SyncConversation = {
 
 export type SyncSnapshot = {
   serverTime: string
+  userName?: string
+  userAvatar?: string
   characters: Character[]
   conversations: SyncConversation[]
   pinnedCharacterIds: string[]
@@ -107,4 +109,63 @@ export const getSyncSnapshot = async (_userId?: string): Promise<SyncSnapshot> =
   const data = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(data.error || 'Could not synchronize Chatterra.')
   return data as SyncSnapshot
+}
+
+type VoiceUploadInput = {
+  userId: string
+  characterId?: string
+  conversationId?: string
+  audio: Blob
+  durationMilliseconds: number
+}
+
+const voiceRequestId = () => `web-voice-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+
+const responsePayload = async (response: Response) => {
+  const payload = await response.json().catch(() => ({})) as Record<string, unknown>
+  if (!response.ok) {
+    throw new Error(typeof payload.error === 'string' ? payload.error : `Voice request failed (${response.status})`)
+  }
+  return payload
+}
+
+export const transcribeVoiceRecording = async (input: VoiceUploadInput) => {
+  const requestId = voiceRequestId()
+  const response = await apiFetch(apiUrl('/api/voice/transcriptions'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': input.audio.type || 'audio/webm',
+      'X-Chatterra-User-Id': input.userId,
+      ...(input.characterId ? { 'X-Chatterra-Character-Id': input.characterId } : {}),
+      'X-Chatterra-Voice-Request-Id': requestId,
+    },
+    body: input.audio,
+  })
+  const payload = await responsePayload(response)
+  const transcription = payload.transcription as Record<string, unknown> | undefined
+  if (typeof transcription?.text !== 'string' || !transcription.text.trim()) {
+    throw new Error('The transcription service returned no text.')
+  }
+  return {
+    text: transcription.text.trim(),
+    provider: typeof transcription.provider === 'string' ? transcription.provider : undefined,
+    model: typeof transcription.model === 'string' ? transcription.model : undefined,
+  }
+}
+
+export const uploadVoiceMessage = async (input: Required<Pick<VoiceUploadInput, 'userId' | 'characterId' | 'audio' | 'durationMilliseconds'>> & Pick<VoiceUploadInput, 'conversationId'>) => {
+  const requestId = voiceRequestId()
+  const response = await apiFetch(apiUrl('/api/voice/messages'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': input.audio.type || 'audio/webm',
+      'X-Chatterra-User-Id': input.userId,
+      'X-Chatterra-Character-Id': input.characterId,
+      ...(input.conversationId ? { 'X-Chatterra-Conversation-Id': input.conversationId } : {}),
+      'X-Chatterra-Voice-Duration-Ms': String(Math.round(input.durationMilliseconds)),
+      'X-Chatterra-Voice-Request-Id': requestId,
+    },
+    body: input.audio,
+  })
+  return responsePayload(response)
 }

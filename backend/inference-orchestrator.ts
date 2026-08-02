@@ -148,7 +148,6 @@ const MESSAGE_CANDIDATE_LIMIT = 120
 const MEMORY_CANDIDATE_LIMIT = 100
 export const MESSAGE_BREAK_TOKEN = '<<<MESSAGE_BREAK>>>'
 const MAYA_ONE_LINE_SENTENCE_CHARACTERS = 36
-const MAYA_TEXTING_EMOJI = /\p{Extended_Pictographic}/u
 const LANGUAGE_FEEDBACK_FRIEND_IDS = new Set([
   'seed-minjun-friend',
   'seed-ren-friend'
@@ -735,10 +734,9 @@ const mayaTextingInstruction = (character: Character) => {
   if (character.id !== 'c3') return ''
   return [
     'Maya texting priority: for ordinary social turns, write like an actual 18-year-old New Yorker sending iMessages to her boyfriend, not polished dialogue or an assistant summary.',
-    'For every ordinary social turn, include at least one current U.S. texting marker that genuinely fits: rn, idk, tbh, ngl, lmao, lowkey, kinda, wanna, asap, toxic, or a similarly natural contemporary phrase. In affectionate, amused, awkward, or overwhelmed turns, use both a texting marker and one emoji by default. Vary them; never explain them or turn every line into a meme.',
-    'Most ordinary replies should have exactly one emoji as a tone marker. It belongs in the words she would actually type, not as generic decoration. Keep serious medical, grief, conflict, or vulnerable conversations direct and sincere without forced slang or emoji.',
+    'Casual shorthand, lowercase, fragments, and slang are ingredients, not a checklist. Use them only when they earn their place, and use plain language freely. Keep the repertoire broad rather than cycling rn, tbh, and ngl: depending on the thought, natural options can include idk, ikr, fr, imo, btw, lmao, lol, pls, bc, kinda, lowkey, highkey, wanna, gonna, gotta, nah, nope, or no abbreviation at all. Do not force one into every reply, and avoid reusing a recent shorthand when another natural phrasing or plain English is better.',
+    'Emoji are occasional emotional punctuation, not Maya\'s signature. In ordinary chat, a loose rhythm of about one emoji across two to four messages is natural; two nearby bubbles may both have one when the same emotional beat calls for it, and many messages should have none. Never append an emoji just to satisfy a rule. Keep serious medical, grief, conflict, or vulnerable conversations direct and sincere without forced slang or emoji.',
     `When an ordinary reply uses multiple sentences, keep a sentence that would fill a bubble by itself in its own bubble. Put ${MESSAGE_BREAK_TOKEN} on its own line before the next sentence. Use no more than three bubbles, and never put a second sentence after a long first sentence in the same bubble.`,
-    'For example, an ordinary answer to "what r u doing rn" could be as short as "trying to survive bio rn 😭" or "why are you asking 👀", depending on her situation. Never reuse these examples mechanically.',
     'Avoid stiff updates such as "I am sitting here trying to..." or a formal conclusion followed by a question. Send the thought she would actually type.'
   ].join(' ')
 }
@@ -1270,29 +1268,6 @@ const boundedDeliverySegments = (segments: string[], maxCount: number) => {
   ]
 }
 
-const mayaFallbackEmoji = (text: string) => {
-  const normalized = text.toLowerCase()
-  if (/(?:miss|love|cute|kiss|baby|date)/u.test(normalized)) return String.fromCodePoint(0x1FAF6)
-  if (/(?:study|studying|class|lab|exam|tired|surviv)/u.test(normalized)) return String.fromCodePoint(0x1F62D)
-  if (/(?:lol|lmao|funny|wild|crazy)/u.test(normalized)) return String.fromCodePoint(0x1F480)
-  return String.fromCodePoint(0x1F970)
-}
-
-const addMayaEmojiFallback = (plan: InferencePlan, segments: string[]) => {
-  if (
-    plan.characterId !== 'c3'
-    || plan.responseStyle.turnPriority !== 'conversation'
-    || segments.length === 0
-    || segments.some(segment => MAYA_TEXTING_EMOJI.test(segment))
-  ) {
-    return segments
-  }
-  const lastIndex = segments.length - 1
-  return segments.map((segment, index) => (
-    index === lastIndex ? `${segment} ${mayaFallbackEmoji(segment)}` : segment
-  ))
-}
-
 const parseDeliverySegments = (plan: InferencePlan, output: string) => {
   const maxCount = plan.responseStyle.messageCadence?.maxCount || 1
   const separator = /\s*<{3}\s*MESSAGE_BREAK\s*>{3}\s*/giu
@@ -1304,10 +1279,7 @@ const parseDeliverySegments = (plan: InferencePlan, output: string) => {
   const sentenceAware = plan.characterId === 'c3'
     ? cleaned.flatMap(splitMayaSentenceBubbles)
     : cleaned
-  return addMayaEmojiFallback(
-    plan,
-    boundedDeliverySegments(sentenceAware, maxCount)
-  )
+  return boundedDeliverySegments(sentenceAware, maxCount)
 }
 
 export const diagnoseInferenceOutput = (
