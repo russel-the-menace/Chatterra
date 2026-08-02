@@ -3760,6 +3760,8 @@ const styles = StyleSheet.create({
   },
   assistantBubble: {
     backgroundColor: palette.assistantBubble,
+    // The hairline border reduces the visible white fill slightly; compensate against the 40px avatar.
+    minHeight: 41,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: '#E3E8EF',
     paddingVertical: 9 - StyleSheet.hairlineWidth,

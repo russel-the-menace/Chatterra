@@ -146,7 +146,7 @@ export default function MessageBubble({
                   level={waveLevel}
                   mirrored={isUser}
                 />
-                <span className="voice-note-duration">{duration}\"</span>
+                <span className="voice-note-duration">{`${duration}"`}</span>
               </button>
               <audio
                 ref={audioRef}
