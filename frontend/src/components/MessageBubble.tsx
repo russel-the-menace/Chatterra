@@ -137,7 +137,7 @@ export default function MessageBubble({
             <>
               <button
                 type="button"
-                className={`voice-note${isUserVoice ? ' user-voice-note' : ''}${playing ? ' playing' : ''}`}
+                className={`voice-note${isUserVoice ? ' user-voice' : ''}${playing ? ' playing' : ''}`}
                 onClick={() => void toggleVoice()}
                 aria-label={`${playing ? 'Pause' : 'Play'} voice message`}
               >

@@ -240,7 +240,6 @@ body.modal-open{overflow:hidden}
 .contact-item.pinned.active{
   background:#ebeef0;
   color:#111827;
-  box-shadow:inset 3px 0 0 var(--accent);
 }
 .contact-avatar{
   width:44px;height:44px;border-radius:14px;
@@ -412,6 +411,7 @@ body.modal-open{overflow:hidden}
 .top-bar-avatar{
   width:42px;
   height:42px;
+  padding:0;
   flex:0 0 auto;
   border:0;
   border-radius:10px;
@@ -422,6 +422,10 @@ body.modal-open{overflow:hidden}
   align-items:center;
   justify-content:center;
   overflow:hidden;
+}
+.top-bar-avatar img{
+  aspect-ratio:1 / 1;
+  object-fit:cover;
 }
 .title{min-width:0}
 .title .name{
@@ -466,10 +470,15 @@ body.modal-open{overflow:hidden}
 .message-row.right .message-content{align-items:flex-end}
 .avatar{
   width:34px;height:34px;border-radius:10px;
+  padding:0;
   border:0;
   display:flex;align-items:center;justify-content:center;
   font-size:12px;font-weight:700;flex:0 0 auto;
   overflow:hidden;
+}
+.avatar img{
+  aspect-ratio:1 / 1;
+  object-fit:cover;
 }
 .avatar.assistant{background:var(--accent);color:#fff}
 .avatar.user{background:#dbe4ef;color:#0f172a}
@@ -762,8 +771,10 @@ body.modal-open{overflow:hidden}
 
 .voice-note{
   min-width:92px;
-  min-height:40px;
-  padding:0;
+  width:100%;
+  height:46px;
+  min-height:46px;
+  padding:0 14px;
   display:flex;
   align-items:center;
   justify-content:flex-start;
@@ -774,6 +785,12 @@ body.modal-open{overflow:hidden}
   cursor:pointer;
 }
 .voice-note.user-voice{flex-direction:row-reverse;color:#fff}
+.bubble:has(.voice-note){
+  min-height:46px;
+  padding:0;
+  display:flex;
+  align-items:center;
+}
 .voice-note .wechat-voice-wave{display:block;flex:0 0 auto}
 .voice-note-duration{font-variant-numeric:tabular-nums;font-size:16px;line-height:1}
 .voice-note.playing .wechat-voice-wave{filter:drop-shadow(0 0 1px currentColor)}
