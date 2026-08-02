@@ -44,6 +44,7 @@ import {
   readUserVoiceMessage,
   removeUserVoiceMessage,
   saveUserVoiceMessage,
+  userVoiceMessageDirectory,
   userVoiceMessageMetadata,
 } from './user-voice-message'
 import { parseCustomCharacterDocument } from './custom-character'
@@ -104,6 +105,12 @@ const transcriptionRequests = new Map<string, number[]>()
 const voiceMessageTranscriptionInFlight = new Map<string, Promise<Message>>()
 app.use(cors())
 app.use(express.json({ limit: '2mb' }))
+// User recordings and generated assistant speech use separate persistent directories.
+// Keep one public media route so existing message metadata remains playable.
+app.use('/media/voice', express.static(userVoiceMessageDirectory, {
+  immutable: true,
+  maxAge: '30d',
+}))
 app.use('/media/voice', express.static(voiceMediaDirectory, {
   immutable: true,
   maxAge: '30d',
