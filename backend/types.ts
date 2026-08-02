@@ -154,7 +154,14 @@ export interface ConversationSummary {
   conversationId: UUID
   summaryText: string
   lastGeneratedAt: string
-  coverage?: { start?: string; end?: string; topics?: string[] }
+  coverage?: {
+    start?: string
+    end?: string
+    startMessageId?: UUID
+    endMessageId?: UUID
+    messageCount?: number
+    topics?: string[]
+  }
 }
 
 export type InteractionMode = 'companion' | 'practice'

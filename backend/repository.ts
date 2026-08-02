@@ -917,6 +917,56 @@ export const getLatestConversationSummary = async (
   }
 }
 
+export const listMessagesAfterSummaryCoverage = async (
+  conversationId: string,
+  coverage?: ConversationSummary['coverage'],
+  limit = 64
+): Promise<Message[]> => {
+  const end = coverage?.end
+  const endMessageId = coverage?.endMessageId
+  const result = await query(
+    `SELECT * FROM messages
+     WHERE conversation_id = $1
+       AND (
+         $2::timestamptz IS NULL
+         OR created_at > $2::timestamptz
+         OR (created_at = $2::timestamptz AND ($3::text IS NULL OR id > $3::text))
+       )
+     ORDER BY created_at, id
+     LIMIT $4`,
+    [conversationId, end || null, endMessageId || null, Math.max(1, Math.min(128, Math.floor(limit)))]
+  )
+  return result.rows.map(mapMessage)
+}
+
+export const replaceConversationSummary = async (input: {
+  conversationId: string
+  summaryText: string
+  coverage: NonNullable<ConversationSummary['coverage']>
+}): Promise<ConversationSummary> => {
+  return withTransaction(async client => {
+    await client.query(
+      'DELETE FROM conversation_summaries WHERE conversation_id = $1',
+      [input.conversationId]
+    )
+    const result = await client.query(
+      `INSERT INTO conversation_summaries (
+         id, conversation_id, summary_text, last_generated_at, coverage
+       ) VALUES ($1, $2, $3, NOW(), $4::jsonb)
+       RETURNING *`,
+      [newId(), input.conversationId, input.summaryText, JSON.stringify(input.coverage)]
+    )
+    const row = result.rows[0]
+    return {
+      id: row.id,
+      conversationId: row.conversation_id,
+      summaryText: row.summary_text,
+      lastGeneratedAt: iso(row.last_generated_at)!,
+      coverage: row.coverage || undefined
+    }
+  })
+}
+
 export const getUserLearningContext = async (userId: string) => {
   const result = await query(
     `SELECT

@@ -48,8 +48,8 @@ class ModelProviderResponseError extends ModelGatewayError {
   }
 }
 
-const EMPTY_TRUNCATION_RETRY_MIN_TOKENS = 1024
-const EMPTY_TRUNCATION_RETRY_MAX_TOKENS = 2048
+const TRUNCATION_RETRY_MIN_TOKENS = 1024
+const TRUNCATION_RETRY_MAX_TOKENS = 2048
 
 const contentText = (value: any): string => {
   if (typeof value === 'string') return value
@@ -93,17 +93,16 @@ const latestUserMessage = (plan: InferencePlan) => {
   return [...plan.messages].reverse().find(message => message.role === 'user')?.content || ''
 }
 
-export const shouldRetryEmptyTruncatedResponse = (result: ModelGatewayResult) => {
+export const isTruncatedResponse = (result: ModelGatewayResult) => {
   const finishReason = String(result.diagnostics.finishReason || '').toLowerCase()
   return result.diagnostics.transport === 'http'
-    && !result.content.trim()
     && (finishReason === 'length' || finishReason === 'max_tokens')
 }
 
-export const getEmptyTruncationRetryTokens = (initialTokens: number) => {
+export const getTruncationRetryTokens = (initialTokens: number) => {
   return Math.min(
-    EMPTY_TRUNCATION_RETRY_MAX_TOKENS,
-    Math.max(EMPTY_TRUNCATION_RETRY_MIN_TOKENS, Math.ceil(initialTokens * 2))
+    TRUNCATION_RETRY_MAX_TOKENS,
+    Math.max(TRUNCATION_RETRY_MIN_TOKENS, Math.ceil(initialTokens * 2))
   )
 }
 
@@ -303,20 +302,21 @@ export const generateModelResponse = async (
       extractedTextLength: initialResult.diagnostics.extractedTextLength
     })
   }
-  if (!shouldRetryEmptyTruncatedResponse(initialResult)) {
+  if (!isTruncatedResponse(initialResult)) {
     return { ...initialResult, latencyMs: Date.now() - startedAt }
   }
 
-  const retryMaxResponseTokens = getEmptyTruncationRetryTokens(plan.parameters.maxResponseTokens)
+  const retryMaxResponseTokens = getTruncationRetryTokens(plan.parameters.maxResponseTokens)
   if (retryMaxResponseTokens <= plan.parameters.maxResponseTokens) {
-    return { ...initialResult, latencyMs: Date.now() - startedAt }
+    throw new ModelGatewayError('AI response was truncated before completion. Please retry.')
   }
 
   trace?.mark('provider_retry_scheduled', 'started', {
-    reason: 'empty_content_after_length',
+    reason: 'truncated_response',
     attempt: attempt + 1,
     previousMaxResponseTokens: plan.parameters.maxResponseTokens,
     retryMaxResponseTokens,
+    previousExtractedTextLength: initialResult.diagnostics.extractedTextLength,
     previousCompletionTokens: initialResult.diagnostics.completionTokens,
     previousReasoningContentLength: initialResult.diagnostics.reasoningContentLength
   })
@@ -326,13 +326,17 @@ export const generateModelResponse = async (
     maxResponseTokens: retryMaxResponseTokens,
     model
   })
-  trace?.mark('provider_retry_completed', retryResult.content.trim() ? 'completed' : 'failed', {
+  const retryWasTruncated = isTruncatedResponse(retryResult)
+  trace?.mark('provider_retry_completed', !retryWasTruncated && retryResult.content.trim() ? 'completed' : 'failed', {
     attempt,
     maxResponseTokens: retryMaxResponseTokens,
     finishReason: retryResult.diagnostics.finishReason,
     extractedTextLength: retryResult.diagnostics.extractedTextLength,
     reasoningContentLength: retryResult.diagnostics.reasoningContentLength
   })
+  if (retryWasTruncated || !retryResult.content.trim()) {
+    throw new ModelGatewayError('AI response was truncated before completion. Please retry.')
+  }
 
   return {
     ...retryResult,

@@ -3,8 +3,9 @@ import { createInferenceTrace } from './inference-logger'
 import { InferencePlan } from './inference-orchestrator'
 import {
   generateModelResponse,
-  getEmptyTruncationRetryTokens,
-  shouldRetryEmptyTruncatedResponse
+  getTruncationRetryTokens,
+  isTruncatedResponse,
+  ModelGatewayError
 } from './model-gateway'
 import { Character } from './types'
 
@@ -43,7 +44,7 @@ let providerResponses: Array<{ status?: number; body: any }> = [
       finish_reason: 'length',
       message: {
         role: 'assistant',
-        content: '',
+        content: 'Small corrections: it is spelled "weird," and say "I feel weird about" instead of',
         reasoning_content: 'hidden reasoning that consumed the first output budget'
       }
     }],
@@ -81,7 +82,7 @@ const run = async () => {
     const events = trace.snapshot().events
     const parsedResponses = events.filter(event => event.stage === 'provider_response_parsed')
 
-    assert.equal(getEmptyTruncationRetryTokens(340), 1024)
+    assert.equal(getTruncationRetryTokens(340), 1024)
     assert.equal(requestBodies.length, 2)
     assert.equal(requestBodies[0].max_tokens, 340)
     assert.equal(requestBodies[1].max_tokens, 1024)
@@ -94,7 +95,32 @@ const run = async () => {
     assert.equal(result.diagnostics.attempt, 2)
     assert.equal(result.diagnostics.maxResponseTokens, 1024)
     assert.equal(result.content, "I'm sorry you're having a rough time. You don't need to apologize.")
-    assert.equal(shouldRetryEmptyTruncatedResponse(result), false)
+    assert.equal(isTruncatedResponse(result), false)
+
+    requestBodies.length = 0
+    providerResponses = [
+      {
+        body: {
+          choices: [{
+            finish_reason: 'length',
+            message: { content: 'This reply stops in the middle of a' }
+          }]
+        }
+      },
+      {
+        body: {
+          choices: [{
+            finish_reason: 'length',
+            message: { content: 'This second reply also stops in the middle of a' }
+          }]
+        }
+      }
+    ]
+    await assert.rejects(
+      () => generateModelResponse(plan, character, createInferenceTrace('model-gateway-double-truncation-test')),
+      (error: unknown) => error instanceof ModelGatewayError && /truncated before completion/i.test(error.message)
+    )
+    assert.equal(requestBodies.length, 2)
 
     requestBodies.length = 0
     process.env.DEEPSEEK_MODEL = 'supported-primary-model'

@@ -893,12 +893,26 @@ const manifestBase = (
   }
 })
 
+const isCoveredByConversationSummary = (message: Message, summary?: ConversationSummary) => {
+  const end = summary?.coverage?.end
+  if (!end) return false
+  const messageTime = new Date(message.createdAt).getTime()
+  const endTime = new Date(end).getTime()
+  if (!Number.isFinite(messageTime) || !Number.isFinite(endTime)) return false
+  if (messageTime < endTime) return true
+  if (messageTime > endTime) return false
+  const endMessageId = summary?.coverage?.endMessageId
+  return !endMessageId || message.id <= endMessageId
+}
+
 export const buildInferencePlan = async (input: OrchestrationInput): Promise<InferencePlan> => {
   const responseLanguage = resolveResponseLanguagePolicy(input.character.language)
   const modelRoutingText = messageAndQuoteForRouting(input.message, input.quote)
   const styleRoutingText = messageAndQuoteForResponseStyle(input.message, input.quote)
   let style = inferResponseStyle(input.character, input.snapshot, styleRoutingText, input.mode)
-  const maxResponseTokens = Math.round(clamp(style.targetWords * 2 + 128, 256, 800))
+  // Reasoning-capable providers spend this allowance on both hidden reasoning and visible text.
+  // Reserve enough for a complete short reply before selecting historical context.
+  const maxResponseTokens = Math.round(clamp(style.targetWords * 2 + 384, 512, 1024))
   const tokenBudget = MODEL_CONTEXT_LIMIT - CONTEXT_SAFETY_MARGIN - maxResponseTokens
   const parameters = {
     temperature: FIXED_TEMPERATURE,
@@ -951,7 +965,7 @@ export const buildInferencePlan = async (input: OrchestrationInput): Promise<Inf
     }
   }
 
-  const [messageCandidates, memoryCandidates, summary, learningContext] = await Promise.all([
+  const [rawMessageCandidates, memoryCandidates, summary, learningContext] = await Promise.all([
     listRecentMessages(input.conversationId, MESSAGE_CANDIDATE_LIMIT),
     input.memoryEnabled
       ? listMemoryCandidates(input.userId, input.character.id, MEMORY_CANDIDATE_LIMIT)
@@ -959,6 +973,10 @@ export const buildInferencePlan = async (input: OrchestrationInput): Promise<Inf
     getLatestConversationSummary(input.conversationId),
     getUserLearningContext(input.userId)
   ])
+  // Once older turns are compacted, retain the summary plus only the uncovered raw turns.
+  const messageCandidates = rawMessageCandidates.filter(message => (
+    !isCoveredByConversationSummary(message, summary)
+  ))
   style = refineMessageCadenceFromHistory(style, messageCandidates)
   const topicTerms = lexicalTerms([
     input.message,

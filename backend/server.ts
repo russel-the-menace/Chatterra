@@ -25,6 +25,7 @@ import {
 } from './message-quote'
 import { resolveResponseLanguagePolicy, starterMessageForPolicy } from './language-policy'
 import { createInferenceTrace } from './inference-logger'
+import { compactConversationIfNeeded } from './conversation-compaction'
 import { processDueProactiveActions } from './proactive-service'
 import { isExpoPushToken } from './push-notifications'
 import { translateToEnglish, TranslationServiceError } from './translation-service'
@@ -1422,6 +1423,16 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
       now: new Date(assistantMessage.createdAt)
     })
     trace.mark('request_completed', 'completed', { messageId: assistantMessage.id })
+    void compactConversationIfNeeded(conversation.id)
+      .then(compacted => {
+        if (compacted) console.info('Conversation context compacted', { conversationId: conversation.id })
+      })
+      .catch(compactionError => {
+        console.warn('Conversation context compaction failed', {
+          conversationId: conversation.id,
+          error: compactionError instanceof Error ? compactionError.message : 'unknown_error'
+        })
+      })
   } catch (error) {
     trace.mark('request_failed', 'failed', {
       stage: 'response_persistence',
