@@ -17,7 +17,7 @@ expensive and creates meaningless state churn.
 
 The recommended design has five foundations:
 
-1. A versioned character template defines stable identity, personality, values,
+1. A current character template defines stable identity, personality, values,
    boundaries, background, habits, and default routines.
 2. Each user receives a private character instance with its own worldline,
    relationship, memories, schedule, and state. A shared template must not imply a
@@ -1022,7 +1022,7 @@ Identity and consent:
 Character definition:
 
 - Character templates.
-- Character template versions.
+- Current character-template version registry.
 - Character instances.
 - Persona traits, boundaries, routine templates, and authored goals.
 - World entities and character social links.
@@ -1318,8 +1318,8 @@ hybrid boundary is deliberate.
 ## 23. Final Recommended Architecture
 
 1. Keep PostgreSQL as the application source of truth.
-2. Split character templates, immutable template versions, and per-user character
-   instances.
+2. Split current character templates, their lightweight version registry, and
+   per-user character instances.
 3. Add an immutable domain-event ledger and transactional outbox for meaningful state
    changes.
 4. Store rebuildable, versioned projections for relationship, affect, current activity,

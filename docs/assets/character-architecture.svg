@@ -35,9 +35,9 @@
   <g filter="url(#shadow)">
     <rect x="60" y="575" width="880" height="235" rx="20" fill="#ffffff"/>
     <rect x="60" y="575" width="14" height="235" rx="7" fill="#5f7ee7"/>
-    <text x="112" y="650" class="label">2. Versioned template</text>
+    <text x="112" y="650" class="label">2. Current template</text>
     <text x="112" y="707" class="body">A stable identity.</text>
-    <text x="112" y="747" class="body">It can evolve safely.</text>
+    <text x="112" y="747" class="body">Current version registry.</text>
   </g>
 
   <path d="M500 830 V880" class="line"/>

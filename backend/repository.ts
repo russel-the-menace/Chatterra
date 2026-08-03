@@ -199,34 +199,19 @@ export const deleteAuthenticatedSession = async (accessToken: string) => {
   await query('DELETE FROM auth_sessions WHERE token_hash = $1', [hashAccessToken(accessToken)])
 }
 
-const characterDefinition = (character: Character) => JSON.stringify({
-  name: character.name,
-  avatar: character.avatar || '',
-  role: character.role || '',
-  company: character.company || '',
-  personality: character.personality || '',
-  scenario: character.scenario || '',
-  goal: character.goal || '',
-  language: character.language || '',
-  background: character.background || '',
-  systemPromptTemplate: character.systemPromptTemplate || '',
-  runtimeConfig: character.runtimeConfig || {}
-})
-
 const insertCharacterVersion = async (
   client: PoolClient,
   character: Character,
   version: number
 ) => {
   await client.query(
-    `INSERT INTO character_versions (id, character_id, version, definition, created_at)
-     VALUES ($1, $2, $3, $4::jsonb, $5)
+    `INSERT INTO character_versions (id, character_id, version, created_at)
+     VALUES ($1, $2, $3, $4)
      ON CONFLICT (character_id, version) DO NOTHING`,
     [
       `${character.id}:v${version}`,
       character.id,
       version,
-      characterDefinition(character),
       character.updatedAt || new Date().toISOString()
     ]
   )
@@ -519,6 +504,11 @@ export const updateCharacter = async (userId: string, character: Character): Pro
          SET template_version = $2, updated_at = $3
          WHERE character_id = $1`,
         [updated.id, nextVersion, updated.updatedAt]
+      )
+      await client.query(
+        `DELETE FROM character_versions
+         WHERE character_id = $1 AND version <> $2`,
+        [updated.id, nextVersion]
       )
       if (updated.runtimeConfig?.timezone) {
         await client.query(

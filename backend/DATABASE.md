@@ -49,7 +49,9 @@ erDiagram
   character is pinned.
 - `memories`: extracted facts scoped to a user and optionally a character/message.
 - `conversation_summaries`: generated summaries and flexible coverage metadata.
-- `character_versions`: immutable snapshots of editable character templates.
+- `character_versions`: the current template-version registry referenced by each
+  character instance. Superseded versions are pruned; the live character definition
+  remains in `characters`.
 - `character_instances`: one private user/character worldline and event sequence.
 - `relationship_states`: rebuildable, slowly changing relationship projection.
 - `affect_states`: compact, timestamped affect projection with passive decay.

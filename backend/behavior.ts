@@ -217,30 +217,16 @@ const decay = (value: number, baseline: number, elapsedHours: number, halfLifeHo
   return baseline + (value - baseline) * factor
 }
 
-const characterize = (character: Character) => JSON.stringify({
-  name: character.name,
-  avatar: character.avatar || '',
-  role: character.role || '',
-  company: character.company || '',
-  personality: character.personality || '',
-  scenario: character.scenario || '',
-  goal: character.goal || '',
-  language: character.language || '',
-  background: character.background || '',
-  systemPromptTemplate: character.systemPromptTemplate || ''
-})
-
 const ensureCharacterVersion = async (client: PoolClient, character: Character) => {
   const version = character.currentVersion || 1
   await client.query(
-    `INSERT INTO character_versions (id, character_id, version, definition, created_at)
-     VALUES ($1, $2, $3, $4::jsonb, $5)
+    `INSERT INTO character_versions (id, character_id, version, created_at)
+     VALUES ($1, $2, $3, $4)
      ON CONFLICT (character_id, version) DO NOTHING`,
     [
       `${character.id}:v${version}`,
       character.id,
       version,
-      characterize(character),
       character.updatedAt || new Date().toISOString()
     ]
   )
