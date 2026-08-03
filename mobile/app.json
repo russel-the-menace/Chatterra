@@ -11,6 +11,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.chatterra.mobile",
+      "appleTeamId": "2W9694YH5J",
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Allow Chatterra to use the microphone for voice messages.",
         "NSSpeechRecognitionUsageDescription": "Allow Chatterra to transcribe your speech.",
