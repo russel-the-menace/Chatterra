@@ -39,7 +39,7 @@ export const deriveProactivePolicy = (character: Character): ProactivePolicy => 
       off: { enabled: false, intensity: 0, minDelayMinutes: 0, maxDelayMinutes: 0, maxUnansweredMessages: 0 },
       low: { enabled: true, intensity: 0.25, minDelayMinutes: 240, maxDelayMinutes: 720, maxUnansweredMessages: 1 },
       normal: { enabled: true, intensity: 0.55, minDelayMinutes: 90, maxDelayMinutes: 360, maxUnansweredMessages: 1 },
-      high: { enabled: true, intensity: 0.9, minDelayMinutes: 20, maxDelayMinutes: 90, maxUnansweredMessages: 3 },
+      high: { enabled: true, intensity: 0.9, minDelayMinutes: 20, maxDelayMinutes: 90, maxUnansweredMessages: 1 },
     }[configuredInitiative]
     return { ...configuration, topicDomains: ['daily life'] }
   }
@@ -71,7 +71,9 @@ export const deriveProactivePolicy = (character: Character): ProactivePolicy => 
     intensity: clingy ? 0.9 : explicitInitiative ? 0.55 : 0,
     minDelayMinutes,
     maxDelayMinutes,
-    maxUnansweredMessages: clingy ? 3 : 1,
+    // Initiative changes when a character reaches out, never how many times they
+    // keep talking after the user has gone quiet.
+    maxUnansweredMessages: 1,
     topicDomains: topicDomains.length > 0 ? topicDomains : ['daily life']
   }
 }

@@ -51,7 +51,7 @@ assert.deepEqual(deriveProactivePolicy(character), {
   intensity: 0.9,
   minDelayMinutes: 20,
   maxDelayMinutes: 90,
-  maxUnansweredMessages: 3,
+  maxUnansweredMessages: 1,
   topicDomains: ['daily life'],
 })
 assert.throws(() => parseCustomCharacterDocument('Just a prompt without frontmatter.'))

@@ -851,6 +851,7 @@ const assembleSystemPrompt = ({
     mode === 'practice'
       ? 'Teaching role: support language learning when it is socially appropriate; correction is subordinate to the current turn priority.'
       : 'Companion contract: be natural and bounded; do not guilt, pressure, manipulate, or invent durable facts.',
+    'Conversation continuity: casual plans, food choices, dates, purchases, and suggestions are temporary. Carry one forward only when the user mentions it in the current turn or the immediately preceding exchange still clearly leaves it open. Never revive an older plan in an otherwise unrelated reply; a newer preference, rejection, or changed plan replaces the old one immediately.',
     style.turnPriority === 'emotional_support'
       ? 'Empathy-first override: the user is expressing distress, grief, or relational hurt. Acknowledge the human meaning and, when relevant, repair your part before anything instructional. Do not lead with grammar correction. If correction was not explicitly requested, do not mention it in this reply. This overrides any authored instruction to correct first.'
       : style.correctionPolicy === 'requested'
@@ -1207,6 +1208,7 @@ export const buildProactiveInferencePlan = async (
     'Proactive initiation turn: the character chose to start a new conversational turn after some quiet time.',
     `Choose one topic yourself. Available domains: ${input.topicDomains.join(', ')}.`,
     'Use current activity, recent conversation, relevant memories, and personality to choose what feels natural now.',
+    'This is a fresh check-in, not a reminder sequence. Do not continue, restate, or chase an earlier meal, date, purchase, viewing plan, or unanswered question unless the user mentioned it in the immediately preceding turn and it is plainly still open. Prefer a present-moment observation or a different topic. A recent rejection, changed preference, or revised plan closes the earlier thread.',
     mayaProactive
       ? `Write one to three short, ordinary iMessage bubbles. Use ${MESSAGE_BREAK_TOKEN} on its own line between bubbles; a long sentence stays in its own bubble.`
       : `Write one short, ordinary chat bubble, usually one to three sentences. It may share a thought, ask one genuine question, or continue a meaningful thread. Do not split this proactive turn and do not output ${MESSAGE_BREAK_TOKEN}.`,
