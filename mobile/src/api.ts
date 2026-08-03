@@ -442,6 +442,22 @@ export const api = {
     )
   },
 
+  async forwardMessage(input: {
+    targetCharacterId: string
+    message: string
+    note?: string
+  }) {
+    return request<{
+      conversationId: string
+      characterId: string
+      starterMessage?: ServerMessage
+      messages: ServerMessage[]
+    }>('/api/messages/forward', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+  },
+
   async getCharacterState(userId: string, characterId: string) {
     const result = await request<{ state: PublicCharacterState }>(
       `/api/characters/${encodeURIComponent(characterId)}/state?userId=${encodeURIComponent(userId)}`

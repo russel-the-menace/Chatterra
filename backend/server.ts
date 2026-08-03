@@ -50,6 +50,7 @@ import {
 } from './user-voice-message'
 import { parseCustomCharacterDocument } from './custom-character'
 import {
+  appendMessages,
   appendMessage,
   authenticateUser,
   clearUserVoiceMessageTranscript,
@@ -937,6 +938,76 @@ app.delete('/api/chat-history', asyncRoute(async (req, res) => {
   const result = await clearChatHistory(String(userId), String(characterId))
   await resetBehaviorState(String(userId), String(characterId))
   return res.json({ ok: true, characterId, ...result })
+}))
+
+app.post('/api/messages/forward', asyncRoute(async (req, res) => {
+  const userId = authenticatedUserId(req)
+  const targetCharacterId = typeof req.body?.targetCharacterId === 'string'
+    ? req.body.targetCharacterId.trim()
+    : ''
+  const forwardedText = typeof req.body?.message === 'string'
+    ? req.body.message.trim().slice(0, 20_000)
+    : ''
+  const note = typeof req.body?.note === 'string'
+    ? req.body.note.trim().slice(0, 20_000)
+    : ''
+
+  if (!targetCharacterId) return res.status(400).json({ error: 'targetCharacterId is required' })
+  if (!forwardedText) return res.status(400).json({ error: 'message is required' })
+
+  const character = await getCharacterForUser(userId, targetCharacterId)
+  if (!character) return res.status(404).json({ error: 'character not found' })
+
+  const now = new Date()
+  const nextConversationId = newId()
+  const created = await getOrCreateConversationWithStarter(
+    {
+      id: nextConversationId,
+      userId,
+      characterId: character.id,
+      title: `${character.name} chat`,
+      status: 'active',
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    },
+    {
+      id: newId(),
+      conversationId: nextConversationId,
+      senderRole: 'assistant',
+      senderId: character.id,
+      content: getStarterMessage(character),
+      createdAt: now.toISOString(),
+    }
+  )
+
+  const conversation = created.conversation
+  const forwardedAt = new Date(now.getTime() + 1).toISOString()
+  const messages: Message[] = [{
+    id: newId(),
+    conversationId: conversation.id,
+    senderRole: 'user',
+    senderId: userId,
+    content: forwardedText,
+    createdAt: forwardedAt,
+  }]
+  if (note) {
+    messages.push({
+      id: newId(),
+      conversationId: conversation.id,
+      senderRole: 'user',
+      senderId: userId,
+      content: note,
+      createdAt: new Date(now.getTime() + 2).toISOString(),
+    })
+  }
+
+  const persistedMessages = await appendMessages(messages)
+  return res.status(201).json({
+    conversationId: conversation.id,
+    characterId: character.id,
+    starterMessage: created.starterMessage,
+    messages: persistedMessages,
+  })
 }))
 
 app.post('/api/chat', asyncRoute(async (req, res) => {

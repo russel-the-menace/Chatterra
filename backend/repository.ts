@@ -1160,6 +1160,51 @@ export const appendMessage = async (message: Message): Promise<Message> => {
   })
 }
 
+export const appendMessages = async (messages: Message[]): Promise<Message[]> => {
+  if (messages.length === 0) return []
+  const conversationId = messages[0].conversationId
+  if (!messages.every(message => message.conversationId === conversationId)) {
+    throw new Error('all messages must belong to the same conversation')
+  }
+
+  return withTransaction(async client => {
+    // A forwarded bundle must remain consecutive even when another device sends at once.
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [conversationId])
+    const stored: Message[] = []
+
+    for (const message of messages) {
+      const result = await client.query(
+        `INSERT INTO messages (
+           id, conversation_id, sender_role, sender_id, content, content_json, token_count, created_at
+         ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)
+         RETURNING *`,
+        [
+          message.id,
+          message.conversationId,
+          message.senderRole,
+          message.senderId ?? null,
+          message.content,
+          message.contentJson ? JSON.stringify(message.contentJson) : null,
+          message.tokenCount ?? null,
+          message.createdAt,
+        ]
+      )
+      stored.push(mapMessage(result.rows[0]))
+    }
+
+    const latest = stored.at(-1)
+    if (latest) {
+      await client.query(
+        `UPDATE conversations
+         SET last_message_at = $2, updated_at = $2
+         WHERE id = $1`,
+        [conversationId, latest.createdAt]
+      )
+    }
+    return stored
+  })
+}
+
 export const createMemory = async (memory: Memory): Promise<Memory> => {
   const result = await query(
     `INSERT INTO memories (

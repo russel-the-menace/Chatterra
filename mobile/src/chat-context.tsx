@@ -92,7 +92,12 @@ type ChatContextValue = {
   markCharacterRead: (characterId: string) => void
   setActiveCharacter: (characterId: string | null) => void
   setCharacterPinned: (characterId: string, pinned: boolean) => Promise<void>
-  markConversationActive: (characterId: string, timestamp?: string, preview?: string) => void
+  markConversationActive: (
+    characterId: string,
+    timestamp?: string,
+    preview?: string,
+    conversationId?: string
+  ) => void
   getConversationCache: (characterId: string) => ConversationCacheEntry | undefined
   hydrateConversationCache: (characterId: string) => Promise<ConversationCacheEntry | undefined>
   setConversationCache: (characterId: string, entry: ConversationCacheEntry) => void
@@ -763,12 +768,13 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const markConversationActive = useCallback((
     characterId: string,
     timestamp = new Date().toISOString(),
-    preview?: string
+    preview?: string,
+    conversationId?: string
   ) => {
     const cachedConversation = conversationCacheRef.current.get(characterId)
     updateContactPreviews([{
       characterId,
-      conversationId: cachedConversation?.conversationId || undefined,
+      conversationId: conversationId || cachedConversation?.conversationId || undefined,
       preview: preview || latestDisplayableMessage(cachedConversation)?.text,
       timestamp,
     }])

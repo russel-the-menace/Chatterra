@@ -77,13 +77,12 @@ const OUTGOING_DELIVERY_STATUS_POLL_INITIAL_DELAY_MS = 250
 const OUTGOING_DELIVERY_STATUS_POLL_INTERVAL_MS = 500
 const MESSAGE_ROW_GAP = 10
 const MESSAGE_LIST_EDGE_GAP = 8
-const MESSAGE_ACTION_MENU_MAX_WIDTH = 308
 const MESSAGE_ACTION_MENU_COMPACT_HEIGHT = 72
 const MESSAGE_ACTION_MENU_EXPANDED_HEIGHT = 86
 const MESSAGE_ACTION_ARROW_SIZE = 6.44
 const MESSAGE_ACTION_GAP = 4
 const MESSAGE_ACTION_EDGE_GAP = 8
-const MESSAGE_ACTION_ITEM_WIDTH = 80
+const MESSAGE_ACTION_ITEM_WIDTH = 72
 const MESSAGE_ACTION_MENU_HORIZONTAL_PADDING = 4
 const MESSAGE_SELECTION_HIT_PADDING = 28
 const MESSAGE_SELECTION_HANDLE_HIT_PADDING = 22
@@ -278,7 +277,7 @@ const getMessageActionLayout = ({
     + StyleSheet.hairlineWidth * Math.max(0, itemCount - 1)
     + MESSAGE_ACTION_MENU_HORIZONTAL_PADDING * 2
   )
-  const width = Math.min(MESSAGE_ACTION_MENU_MAX_WIDTH, availableWidth, contentWidth)
+  const width = Math.min(availableWidth, contentWidth)
   const anchorCenterX = anchor.x + anchor.width / 2
   const minimumLeft = safeLeft + MESSAGE_ACTION_EDGE_GAP
   const maximumLeft = viewportWidth - safeRight - width - MESSAGE_ACTION_EDGE_GAP
@@ -1194,6 +1193,12 @@ export default function ChatScreen() {
   const [messageActionMenuInteractive, setMessageActionMenuInteractive] = useState(true)
   const [avatarPreview, setAvatarPreview] = useState<AvatarPreview | null>(null)
   const [conversationActionsVisible, setConversationActionsVisible] = useState(false)
+  const [forwardingMessage, setForwardingMessage] = useState<ChatMessage | null>(null)
+  const [forwardPickerVisible, setForwardPickerVisible] = useState(false)
+  const [forwardTarget, setForwardTarget] = useState<Character | null>(null)
+  const [forwardSearch, setForwardSearch] = useState('')
+  const [forwardNote, setForwardNote] = useState('')
+  const [forwardSubmitting, setForwardSubmitting] = useState(false)
   const listRef = useRef<FlashListRef<ChatTimelineItem>>(null)
   const timelineItemHeightsRef = useRef(new Map<string, number>())
   const composerInputRef = useRef<TextInput>(null)
@@ -1208,6 +1213,8 @@ export default function ChatScreen() {
   const localDeliveryGenerationRef = useRef(0)
   const messageActionRequestRef = useRef(0)
   const messageActionMenuOpacity = useRef(new RNAnimated.Value(1)).current
+  const forwardPickerTranslateY = useRef(new RNAnimated.Value(window.height)).current
+  const forwardConfirmationTranslateY = useRef(new RNAnimated.Value(window.height)).current
   const messageActionReappearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const messageSelectionBlurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const messageActionPressRef = useRef(false)
@@ -2328,6 +2335,139 @@ export default function ChatScreen() {
     if (selectedText) await Clipboard.setStringAsync(selectedText)
   }
 
+  const dismissForwardPicker = () => {
+    if (forwardSubmitting) return
+    RNAnimated.parallel([
+      RNAnimated.timing(forwardPickerTranslateY, {
+        toValue: window.height,
+        duration: 230,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      RNAnimated.timing(forwardConfirmationTranslateY, {
+        toValue: window.height,
+        duration: 180,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start(({ finished }) => {
+      if (!finished) return
+      setForwardPickerVisible(false)
+      setForwardingMessage(null)
+      setForwardTarget(null)
+      setForwardSearch('')
+      setForwardNote('')
+    })
+  }
+
+  const dismissForwardConfirmation = () => {
+    if (forwardSubmitting) return
+    RNAnimated.timing(forwardConfirmationTranslateY, {
+      toValue: window.height,
+      duration: 210,
+      easing: Easing.in(Easing.cubic),
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (!finished) return
+      setForwardTarget(null)
+      setForwardNote('')
+    })
+  }
+
+  const openForwardPicker = (message: ChatMessage) => {
+    const text = message.text.trim()
+    closeMessageActionMenu()
+    if (!text) {
+      Alert.alert('Nothing to forward', 'Convert this voice message to text before forwarding it.')
+      return
+    }
+    // The long press preserves the composer. Only entering the full-screen
+    // forwarding flow should release its keyboard focus.
+    requestAnimationFrame(() => Keyboard.dismiss())
+    setForwardingMessage(message)
+    setForwardTarget(null)
+    setForwardSearch('')
+    setForwardNote('')
+    setForwardPickerVisible(true)
+    forwardPickerTranslateY.setValue(window.height)
+    forwardConfirmationTranslateY.setValue(window.height)
+    requestAnimationFrame(() => {
+      RNAnimated.timing(forwardPickerTranslateY, {
+        toValue: 0,
+        duration: 300,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start()
+    })
+  }
+
+  const selectForwardTarget = (target: Character) => {
+    if (target.id === characterId || forwardSubmitting) return
+    setForwardTarget(target)
+    setForwardNote('')
+    forwardConfirmationTranslateY.setValue(window.height)
+    requestAnimationFrame(() => {
+      RNAnimated.timing(forwardConfirmationTranslateY, {
+        toValue: 0,
+        duration: 260,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start()
+    })
+  }
+
+  const sendForwardMessage = async () => {
+    const text = forwardingMessage?.text.trim()
+    if (!userId || !forwardTarget || !text || forwardSubmitting) return
+    setForwardSubmitting(true)
+    try {
+      const result = await api.forwardMessage({
+        targetCharacterId: forwardTarget.id,
+        message: text,
+        note: forwardNote.trim() || undefined,
+      })
+      const latest = result.messages.at(-1)
+      markConversationActive(
+        forwardTarget.id,
+        latest?.createdAt || new Date().toISOString(),
+        latest?.content.trim() || text,
+        result.conversationId
+      )
+      setError(null)
+      RNAnimated.parallel([
+        RNAnimated.timing(forwardConfirmationTranslateY, {
+          toValue: window.height,
+          duration: 190,
+          easing: Easing.in(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        RNAnimated.timing(forwardPickerTranslateY, {
+          toValue: window.height,
+          duration: 260,
+          easing: Easing.in(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]).start(({ finished }) => {
+        if (!finished) {
+          setForwardSubmitting(false)
+          return
+        }
+        setForwardPickerVisible(false)
+        setForwardingMessage(null)
+        setForwardTarget(null)
+        setForwardSearch('')
+        setForwardNote('')
+        setForwardSubmitting(false)
+      })
+    } catch (forwardError) {
+      Alert.alert(
+        'Could not forward message',
+        forwardError instanceof Error ? forwardError.message : 'Please try again when connected.'
+      )
+      setForwardSubmitting(false)
+    }
+  }
+
   const openMessageActionMenu = (message: ChatMessage, anchor: MessageAnchor) => {
     const requestId = messageActionRequestRef.current + 1
     messageActionRequestRef.current = requestId
@@ -2811,7 +2951,9 @@ export default function ChatScreen() {
     && messageActionMessage.voiceTranscriptVisible
   )
   const messageActionItemCount = messageActionMessage
-    ? (isUserVoiceMessage(messageActionMessage) ? 2 : 3)
+    ? (messageActionIsVoice
+        ? (isUserVoiceMessage(messageActionMessage) ? 2 : 3)
+        : 4)
     : 0
   const messageActionMenuHeight = messageActionMessage && isUserVoiceMessage(messageActionMessage)
     ? MESSAGE_ACTION_MENU_EXPANDED_HEIGHT
@@ -2858,6 +3000,17 @@ export default function ChatScreen() {
         ),
       }
     : null
+  const forwardableCharacters = useMemo(() => {
+    const query = forwardSearch.trim().toLocaleLowerCase()
+    if (!query) return characters
+    return characters.filter(item => (
+      [item.name, item.role, item.company, item.personality]
+        .filter(Boolean)
+        .join(' ')
+        .toLocaleLowerCase()
+        .includes(query)
+    ))
+  }, [characters, forwardSearch])
 
   if (!ready) {
     return (
@@ -2983,11 +3136,6 @@ export default function ChatScreen() {
               onScrollEndDrag={() => {
                 manualScrollRef.current = false
                 followLatestRef.current = withinImmersiveRangeRef.current
-              }}
-              onTouchEnd={() => {
-                if (!messageActionSessionRef.current && composerFocusedRef.current) {
-                  Keyboard.dismiss()
-                }
               }}
               onMomentumScrollEnd={() => {
                 manualScrollRef.current = false
@@ -3356,6 +3504,24 @@ export default function ChatScreen() {
               </Pressable>
               <View style={styles.messageActionDivider} />
             </>}
+            {!messageActionIsVoice && <>
+            <Pressable
+              onPressIn={() => {
+                messageActionPressRef.current = true
+              }}
+              onPressOut={() => {
+                messageActionPressRef.current = false
+              }}
+              onPress={() => openForwardPicker(messageActionMessage)}
+              style={({ pressed }) => [styles.messageAction, pressed && styles.messageActionPressed]}
+            >
+              <View style={styles.messageActionIconSlot}>
+                <Ionicons name="arrow-redo-outline" size={19} color="#FFFFFF" />
+              </View>
+              <Text style={styles.messageActionLabel}>Forward</Text>
+            </Pressable>
+            <View style={styles.messageActionDivider} />
+            </>}
             <Pressable
               onPressIn={() => {
                 messageActionPressRef.current = true
@@ -3459,6 +3625,147 @@ export default function ChatScreen() {
           </RNAnimated.View>
         </View>
       )}
+      <Modal
+        transparent
+        animationType="none"
+        visible={forwardPickerVisible}
+        statusBarTranslucent
+        onRequestClose={() => {
+          if (forwardTarget) dismissForwardConfirmation()
+          else dismissForwardPicker()
+        }}
+      >
+        <RNAnimated.View
+          style={[
+            styles.forwardPickerScreen,
+            { transform: [{ translateY: forwardPickerTranslateY }] },
+          ]}
+        >
+          <SafeAreaView style={styles.forwardPickerSafeArea} edges={['top', 'bottom', 'left', 'right']}>
+            <View style={styles.forwardPickerHeader}>
+              <Pressable
+                onPress={dismissForwardPicker}
+                disabled={forwardSubmitting}
+                accessibilityRole="button"
+                accessibilityLabel="Close forwarding"
+                style={({ pressed }) => [styles.forwardPickerHeaderButton, pressed && styles.forwardPickerHeaderButtonPressed]}
+              >
+                <Text style={styles.forwardPickerHeaderCommand}>Close</Text>
+              </Pressable>
+              <Text style={styles.forwardPickerTitle}>Forward to</Text>
+              <View style={styles.forwardPickerHeaderButton} />
+            </View>
+            <View style={styles.forwardSearchBox}>
+              <Ionicons name="search" size={20} color="#98A2B3" />
+              <TextInput
+                value={forwardSearch}
+                onChangeText={setForwardSearch}
+                placeholder="Search"
+                placeholderTextColor="#98A2B3"
+                clearButtonMode="while-editing"
+                returnKeyType="search"
+                style={styles.forwardSearchInput}
+              />
+            </View>
+            <FlashList
+              data={forwardableCharacters}
+              keyExtractor={item => item.id}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={styles.forwardContactList}
+              ListHeaderComponent={<Text style={styles.forwardContactHeading}>Recent chats</Text>}
+              ListEmptyComponent={<Text style={styles.forwardEmptyText}>No matching conversations.</Text>}
+              renderItem={({ item }) => {
+                const isCurrentChat = item.id === characterId
+                return (
+                  <Pressable
+                    disabled={isCurrentChat || forwardSubmitting}
+                    onPress={() => selectForwardTarget(item)}
+                    accessibilityRole="button"
+                    accessibilityLabel={isCurrentChat ? `${item.name}, current chat` : `Forward to ${item.name}`}
+                    style={({ pressed }) => [
+                      styles.forwardContactRow,
+                      isCurrentChat && styles.forwardContactRowDisabled,
+                      pressed && !isCurrentChat && styles.forwardContactRowPressed,
+                    ]}
+                  >
+                    <Avatar avatar={item.avatar} name={item.name} size={46} />
+                    <Text style={[styles.forwardContactName, isCurrentChat && styles.forwardContactNameDisabled]} numberOfLines={1}>
+                      {item.name}
+                    </Text>
+                    {isCurrentChat && <Text style={styles.forwardCurrentChat}>Current chat</Text>}
+                    {!isCurrentChat && <Ionicons name="chevron-forward" size={20} color="#98A2B3" />}
+                  </Pressable>
+                )
+              }}
+            />
+          </SafeAreaView>
+
+          {forwardTarget && forwardingMessage && (
+            <View style={styles.forwardConfirmationOverlay}>
+              <Pressable
+                disabled={forwardSubmitting}
+                onPress={dismissForwardConfirmation}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel forwarding"
+                style={StyleSheet.absoluteFill}
+              />
+              <RNAnimated.View
+                style={[
+                  styles.forwardConfirmationSheet,
+                  {
+                    paddingBottom: Math.max(18, insets.bottom),
+                    transform: [{ translateY: forwardConfirmationTranslateY }],
+                  },
+                ]}
+              >
+                <Text style={styles.forwardConfirmationTitle}>Send to</Text>
+                <View style={styles.forwardRecipientRow}>
+                  <Avatar avatar={forwardTarget.avatar} name={forwardTarget.name} size={50} />
+                  <Text style={styles.forwardRecipientName} numberOfLines={1}>{forwardTarget.name}</Text>
+                </View>
+                <View style={styles.forwardMessagePreview}>
+                  <Text style={styles.forwardMessagePreviewText} numberOfLines={4}>{forwardingMessage.text}</Text>
+                </View>
+                <TextInput
+                  value={forwardNote}
+                  onChangeText={setForwardNote}
+                  placeholder="Add a message"
+                  placeholderTextColor="#98A2B3"
+                  multiline
+                  maxLength={20_000}
+                  style={styles.forwardNoteInput}
+                />
+                <View style={styles.forwardConfirmationActions}>
+                  <Pressable
+                    disabled={forwardSubmitting}
+                    onPress={dismissForwardConfirmation}
+                    accessibilityRole="button"
+                    accessibilityLabel="Cancel forwarding"
+                    style={({ pressed }) => [styles.forwardCancelButton, pressed && styles.forwardCancelButtonPressed]}
+                  >
+                    <Text style={styles.forwardCancelButtonText}>Cancel</Text>
+                  </Pressable>
+                  <Pressable
+                    disabled={forwardSubmitting}
+                    onPress={() => void sendForwardMessage()}
+                    accessibilityRole="button"
+                    accessibilityLabel="Send forwarded message"
+                    style={({ pressed }) => [
+                      styles.forwardSendButton,
+                      forwardSubmitting && styles.forwardSendButtonDisabled,
+                      pressed && !forwardSubmitting && styles.forwardSendButtonPressed,
+                    ]}
+                  >
+                    {forwardSubmitting
+                      ? <ActivityIndicator size="small" color="#FFFFFF" />
+                      : <Text style={styles.forwardSendButtonText}>Send</Text>}
+                  </Pressable>
+                </View>
+              </RNAnimated.View>
+            </View>
+          )}
+        </RNAnimated.View>
+      </Modal>
       <Modal
         transparent
         animationType="fade"
@@ -3700,6 +4007,213 @@ const styles = StyleSheet.create({
   },
   conversationActionDestructive: {
     color: palette.danger,
+  },
+  forwardPickerScreen: {
+    flex: 1,
+    backgroundColor: palette.surface,
+  },
+  forwardPickerSafeArea: {
+    flex: 1,
+    backgroundColor: palette.surface,
+  },
+  forwardPickerHeader: {
+    height: 54,
+    paddingHorizontal: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: palette.border,
+  },
+  forwardPickerHeaderButton: {
+    width: 72,
+    height: 40,
+    justifyContent: 'center',
+  },
+  forwardPickerHeaderButtonPressed: {
+    opacity: 0.55,
+  },
+  forwardPickerHeaderCommand: {
+    color: palette.text,
+    fontSize: 16,
+    lineHeight: 21,
+  },
+  forwardPickerTitle: {
+    color: palette.text,
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: '700',
+  },
+  forwardSearchBox: {
+    height: 48,
+    marginHorizontal: 16,
+    marginTop: 14,
+    marginBottom: 10,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    borderRadius: 8,
+    backgroundColor: palette.background,
+  },
+  forwardSearchInput: {
+    flex: 1,
+    minWidth: 0,
+    color: palette.text,
+    fontSize: 17,
+    lineHeight: 22,
+  },
+  forwardContactList: {
+    paddingBottom: 12,
+  },
+  forwardContactHeading: {
+    paddingHorizontal: 18,
+    paddingTop: 9,
+    paddingBottom: 7,
+    color: palette.text,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '700',
+  },
+  forwardContactRow: {
+    minHeight: 68,
+    paddingHorizontal: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: palette.border,
+  },
+  forwardContactRowPressed: {
+    backgroundColor: palette.background,
+  },
+  forwardContactRowDisabled: {
+    opacity: 0.5,
+  },
+  forwardContactName: {
+    flex: 1,
+    minWidth: 0,
+    color: palette.text,
+    fontSize: 17,
+    lineHeight: 22,
+  },
+  forwardContactNameDisabled: {
+    color: palette.textMuted,
+  },
+  forwardCurrentChat: {
+    color: palette.textMuted,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  forwardEmptyText: {
+    paddingTop: 30,
+    color: palette.textMuted,
+    fontSize: 15,
+    lineHeight: 21,
+    textAlign: 'center',
+  },
+  forwardConfirmationOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(17, 24, 39, 0.46)',
+  },
+  forwardConfirmationSheet: {
+    paddingTop: 20,
+    paddingHorizontal: 18,
+    borderTopLeftRadius: 8,
+    borderTopRightRadius: 8,
+    backgroundColor: palette.background,
+  },
+  forwardConfirmationTitle: {
+    color: palette.text,
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: '700',
+    marginBottom: 15,
+  },
+  forwardRecipientRow: {
+    minHeight: 58,
+    paddingBottom: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  forwardRecipientName: {
+    flex: 1,
+    minWidth: 0,
+    color: palette.text,
+    fontSize: 18,
+    lineHeight: 23,
+    fontWeight: '600',
+  },
+  forwardMessagePreview: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: palette.surface,
+  },
+  forwardMessagePreviewText: {
+    color: palette.text,
+    fontSize: 16,
+    lineHeight: 22,
+  },
+  forwardNoteInput: {
+    minHeight: 48,
+    maxHeight: 110,
+    marginTop: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    color: palette.text,
+    fontSize: 16,
+    lineHeight: 22,
+    borderWidth: 1,
+    borderColor: palette.border,
+    borderRadius: 8,
+    backgroundColor: palette.surface,
+    textAlignVertical: 'top',
+  },
+  forwardConfirmationActions: {
+    marginTop: 16,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 14,
+  },
+  forwardCancelButton: {
+    width: 128,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    backgroundColor: '#DDE2E8',
+  },
+  forwardCancelButtonPressed: {
+    opacity: 0.68,
+  },
+  forwardCancelButtonText: {
+    color: palette.text,
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: '600',
+  },
+  forwardSendButton: {
+    width: 128,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    backgroundColor: palette.accent,
+  },
+  forwardSendButtonDisabled: {
+    opacity: 0.62,
+  },
+  forwardSendButtonPressed: {
+    backgroundColor: palette.accentPressed,
+  },
+  forwardSendButtonText: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: '700',
   },
   messageContent: {
     maxWidth: '76%',
