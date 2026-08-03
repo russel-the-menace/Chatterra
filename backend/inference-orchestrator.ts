@@ -148,6 +148,7 @@ const MESSAGE_CANDIDATE_LIMIT = 120
 const MEMORY_CANDIDATE_LIMIT = 100
 export const MESSAGE_BREAK_TOKEN = '<<<MESSAGE_BREAK>>>'
 const MAYA_ONE_LINE_SENTENCE_CHARACTERS = 36
+const MAYA_EMOJI_CONTEXT_MESSAGE_LIMIT = 12
 const LANGUAGE_FEEDBACK_FRIEND_IDS = new Set([
   'seed-minjun-friend',
   'seed-ren-friend'
@@ -730,12 +731,40 @@ const messageDeliveryInstruction = (style: ResponseStyle) => {
   ].join(' ')
 }
 
-const mayaTextingInstruction = (character: Character) => {
+const emojiSequences = (text: string) => (
+  Array.from(text.matchAll(
+    /\p{Extended_Pictographic}(?:\uFE0F|\uFE0E|\p{Emoji_Modifier})*(?:\u200D\p{Extended_Pictographic}(?:\uFE0F|\uFE0E|\p{Emoji_Modifier})*)*/gu
+  ), match => match[0])
+)
+
+const mayaRecentEmojiContext = (messages: Message[]) => {
+  const counts = new Map<string, number>()
+  messages
+    .filter(message => message.senderRole === 'assistant')
+    .slice(-MAYA_EMOJI_CONTEXT_MESSAGE_LIMIT)
+    .forEach(message => {
+      emojiSequences(message.content).forEach(emoji => {
+        counts.set(emoji, (counts.get(emoji) || 0) + 1)
+      })
+    })
+
+  if (counts.size === 0) return 'No recent Maya emoji usage.'
+  return Array.from(counts.entries())
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .slice(0, 8)
+    .map(([emoji, count]) => `${emoji} x${count}`)
+    .join(', ')
+}
+
+const mayaTextingInstruction = (character: Character, recentMessages: Message[]) => {
   if (character.id !== 'c3') return ''
+  const recentEmojiContext = mayaRecentEmojiContext(recentMessages)
   return [
     'Maya texting priority: for ordinary social turns, write like an actual 18-year-old New Yorker sending iMessages to her boyfriend, not polished dialogue or an assistant summary.',
     'Casual shorthand, lowercase, fragments, and slang are ingredients, not a checklist. Use them only when they earn their place, and use plain language freely. Keep the repertoire broad rather than cycling rn, tbh, and ngl: depending on the thought, natural options can include idk, ikr, fr, imo, btw, lmao, lol, pls, bc, kinda, lowkey, highkey, wanna, gonna, gotta, nah, nope, or no abbreviation at all. Do not force one into every reply, and avoid reusing a recent shorthand when another natural phrasing or plain English is better.',
-    'Emoji are occasional emotional punctuation, not Maya\'s signature. In ordinary chat, a loose rhythm of about one emoji across two to four messages is natural; two nearby bubbles may both have one when the same emotional beat calls for it, and many messages should have none. Never append an emoji just to satisfy a rule. Keep serious medical, grief, conflict, or vulnerable conversations direct and sincere without forced slang or emoji.',
+    'Emoji are selected for the exact emotional beat of this message, never as Maya\'s default sentence ending. First decide whether an emoji adds meaning at all; neutral, practical, serious, or already-clear messages often need none. When one does add meaning, use the full everyday emoji vocabulary naturally: affection, playful disbelief, embarrassment, curiosity, relief, tiredness, excitement, teasing, and warmth do not all look alike. Repeating an emoji is completely fine when the same emotion genuinely recurs. Do not substitute a different emoji merely to rotate symbols, and do not append any emoji just to satisfy a frequency rule.',
+    `Recent Maya emoji context: ${recentEmojiContext}. This is context against mechanical imitation, not a ban list. If a recent emoji is exactly right for the present thought, reuse it; otherwise do not let it become a habitual default.`,
+    'Keep serious medical, grief, conflict, or vulnerable conversations direct and sincere without decorative slang or emoji.',
     `When an ordinary reply uses multiple sentences, keep a sentence that would fill a bubble by itself in its own bubble. Put ${MESSAGE_BREAK_TOKEN} on its own line before the next sentence. Use no more than three bubbles, and never put a second sentence after a long first sentence in the same bubble.`,
     'Avoid stiff updates such as "I am sitting here trying to..." or a formal conclusion followed by a question. Send the thought she would actually type.'
   ].join(' ')
@@ -751,7 +780,8 @@ const assembleSystemPrompt = ({
   summary,
   topicTerms,
   learningContext,
-  responseLanguage
+  responseLanguage,
+  recentMessages,
 }: {
   character: Character
   mode: InteractionMode
@@ -763,6 +793,7 @@ const assembleSystemPrompt = ({
   topicTerms: string[]
   learningContext: LearningContext
   responseLanguage: ResponseLanguagePolicy
+  recentMessages: Message[]
 }) => {
   const languageFeedbackFriend = LANGUAGE_FEEDBACK_FRIEND_IDS.has(character.id)
   const contextPacket = {
@@ -834,7 +865,7 @@ const assembleSystemPrompt = ({
     '',
     'Authored character identity:',
     personaPrompt(character),
-    mayaTextingInstruction(character),
+    mayaTextingInstruction(character, recentMessages),
     `Language enforcement: ${responseLanguage.instruction}`,
     'User identity: when learningContext.userName is present, it is the user\'s saved name and may be used naturally. Do not invent a name when it is absent.',
     `Format enforcement: ${DIALOGUE_ONLY_INSTRUCTION}`,
@@ -1015,7 +1046,8 @@ export const buildInferencePlan = async (input: OrchestrationInput): Promise<Inf
     summary: selectedSummary,
     topicTerms,
     learningContext,
-    responseLanguage
+    responseLanguage,
+    recentMessages: messageCandidates,
   })
   const totalTokens = () => estimateTokens(systemPrompt) + selectedMessages.reduce(
     (sum, item) => sum + item.estimatedTokens,
@@ -1083,7 +1115,8 @@ export const buildInferencePlan = async (input: OrchestrationInput): Promise<Inf
       summary: selectedSummary,
       topicTerms,
       learningContext,
-      responseLanguage
+      responseLanguage,
+      recentMessages: messageCandidates,
     })
   }
 
