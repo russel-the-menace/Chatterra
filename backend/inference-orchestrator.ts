@@ -30,6 +30,7 @@ import {
   messageContentForInference,
   storedMessageQuote
 } from './message-quote'
+import { activeConversationEpisode, CONVERSATION_TOPIC_GAP_MS } from './conversation-continuity'
 
 export type InferenceRoute = 'direct' | 'model' | 'none'
 export type ModelTier = 'lightweight' | 'primary'
@@ -139,7 +140,7 @@ export type ProactiveOrchestrationInput = {
 
 type LearningContext = Awaited<ReturnType<typeof getUserLearningContext>>
 
-const POLICY_VERSION = 'inference_policy_v2'
+const POLICY_VERSION = 'inference_policy_v3'
 const FIXED_TEMPERATURE = 0.7
 const FIXED_TOP_P = 0.95
 const MODEL_CONTEXT_LIMIT = 8192
@@ -937,6 +938,21 @@ const isCoveredByConversationSummary = (message: Message, summary?: Conversation
   return !endMessageId || message.id <= endMessageId
 }
 
+const summaryBelongsToActiveEpisode = (
+  summary: ConversationSummary | undefined,
+  activeMessages: Message[],
+  now: Date
+) => {
+  if (!summary) return false
+  const anchor = activeMessages[0]?.createdAt || now.toISOString()
+  const summaryEnd = summary.coverage?.end || summary.lastGeneratedAt
+  const anchorAt = new Date(anchor).getTime()
+  const summaryAt = new Date(summaryEnd).getTime()
+  return Number.isFinite(anchorAt)
+    && Number.isFinite(summaryAt)
+    && anchorAt - summaryAt <= CONVERSATION_TOPIC_GAP_MS
+}
+
 export const buildInferencePlan = async (input: OrchestrationInput): Promise<InferencePlan> => {
   const responseLanguage = resolveResponseLanguagePolicy(input.character.language)
   const modelRoutingText = messageAndQuoteForRouting(input.message, input.quote)
@@ -997,6 +1013,7 @@ export const buildInferencePlan = async (input: OrchestrationInput): Promise<Inf
     }
   }
 
+  const inferenceNow = new Date()
   const [rawMessageCandidates, memoryCandidates, summary, learningContext] = await Promise.all([
     listRecentMessages(input.conversationId, MESSAGE_CANDIDATE_LIMIT),
     input.memoryEnabled
@@ -1009,19 +1026,20 @@ export const buildInferencePlan = async (input: OrchestrationInput): Promise<Inf
   const messageCandidates = rawMessageCandidates.filter(message => (
     !isCoveredByConversationSummary(message, summary)
   ))
-  style = refineMessageCadenceFromHistory(style, messageCandidates)
+  const activeMessageCandidates = activeConversationEpisode(messageCandidates, inferenceNow)
+  style = refineMessageCadenceFromHistory(style, activeMessageCandidates)
   const topicTerms = lexicalTerms([
     input.message,
     input.quote?.text || '',
-    ...messageCandidates.slice(-6).map(message => message.content)
+    ...activeMessageCandidates.slice(-6).map(message => message.content)
   ].join(' ')).slice(0, 24)
-  let selectedMemories = selectUnderBudget(rankMemories(memoryCandidates, topicTerms, new Date()), Math.min(1300, tokenBudget * 0.22), 0.12)
+  let selectedMemories = selectUnderBudget(rankMemories(memoryCandidates, topicTerms, inferenceNow), Math.min(1300, tokenBudget * 0.22), 0.12)
   let selectedEvents = selectUnderBudget(
-    rankEvents(input.snapshot.recentEvents, topicTerms, new Date(), input.snapshot.simulation.localTimezone),
+    rankEvents(input.snapshot.recentEvents, topicTerms, inferenceNow, input.snapshot.simulation.localTimezone),
     Math.min(700, tokenBudget * 0.12),
     0.12
   )
-  const rankedMessages = rankMessages(messageCandidates, topicTerms)
+  const rankedMessages = rankMessages(activeMessageCandidates, topicTerms)
   const continuityMessages = rankedMessages.filter(item => item.continuity)
   const selectedMessageMap = new Map<string, SelectedMessage>()
   continuityMessages.forEach(item => selectedMessageMap.set(item.id, item))
@@ -1036,7 +1054,9 @@ export const buildInferencePlan = async (input: OrchestrationInput): Promise<Inf
   }
   let selectedMessages = Array.from(selectedMessageMap.values())
     .sort((left, right) => new Date(left.message.createdAt).getTime() - new Date(right.message.createdAt).getTime())
-  let selectedSummary = summary
+  let selectedSummary = summaryBelongsToActiveEpisode(summary, activeMessageCandidates, inferenceNow)
+    ? summary
+    : undefined
   let systemPrompt = assembleSystemPrompt({
     character: input.character,
     mode: input.mode,
@@ -1048,7 +1068,7 @@ export const buildInferencePlan = async (input: OrchestrationInput): Promise<Inf
     topicTerms,
     learningContext,
     responseLanguage,
-    recentMessages: messageCandidates,
+    recentMessages: activeMessageCandidates,
   })
   const totalTokens = () => estimateTokens(systemPrompt) + selectedMessages.reduce(
     (sum, item) => sum + item.estimatedTokens,
@@ -1117,7 +1137,7 @@ export const buildInferencePlan = async (input: OrchestrationInput): Promise<Inf
       topicTerms,
       learningContext,
       responseLanguage,
-      recentMessages: messageCandidates,
+      recentMessages: activeMessageCandidates,
     })
   }
 

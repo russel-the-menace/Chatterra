@@ -25,7 +25,7 @@ const ordinaryCharacter = {
 
 const policy = deriveProactivePolicy(maya)
 assert.equal(policy.enabled, true)
-assert.equal(policy.maxUnansweredMessages, 1)
+assert.equal(policy.maxUnansweredMessages, 3)
 assert.deepEqual(policy.topicDomains, [
   'school life',
   'medicine',
@@ -39,9 +39,11 @@ assert.equal(deriveProactivePolicy(ordinaryCharacter).enabled, false)
 const now = new Date('2026-07-23T12:00:00.000Z')
 const first = nextProactiveActionAt({ character: maya, now, seed: 'same-seed' })
 const repeated = nextProactiveActionAt({ character: maya, now, seed: 'same-seed' })
+const followUp = nextProactiveActionAt({ character: maya, now, seed: 'same-seed', unansweredCount: 1 })
 assert.equal(first?.toISOString(), repeated?.toISOString())
 assert.ok(first && first > now)
-assert.equal(nextProactiveActionAt({ character: maya, now, seed: 'same-seed', unansweredCount: 1 }), undefined)
+assert.ok(followUp && followUp > first!)
+assert.equal(nextProactiveActionAt({ character: maya, now, seed: 'same-seed', unansweredCount: 3 }), undefined)
 assert.equal(nextProactiveActionAt({ character: ordinaryCharacter, now, seed: 'same-seed' }), undefined)
 
 console.log('proactive policy checks passed')
