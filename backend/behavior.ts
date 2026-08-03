@@ -1073,13 +1073,16 @@ export const claimDueProactiveAction = async ({
         continue
       }
 
+      const unansweredScanLimit = policy.maxUnansweredMessages === null
+        ? 128
+        : policy.maxUnansweredMessages + 8
       const recentMessages = await client.query(
         `SELECT id, sender_role, content_json, created_at
          FROM messages
          WHERE conversation_id = $1
          ORDER BY created_at DESC, id DESC
          LIMIT $2`,
-        [row.conversation_id, policy.maxUnansweredMessages + 8]
+        [row.conversation_id, unansweredScanLimit]
       )
       const latestMessage = recentMessages.rows[0]
       if (!latestMessage || latestMessage.sender_role !== 'assistant') {
@@ -1094,7 +1097,10 @@ export const claimDueProactiveAction = async ({
           unansweredCount += 1
         }
       }
-      if (unansweredCount >= policy.maxUnansweredMessages) {
+      if (
+        policy.maxUnansweredMessages !== null
+        && unansweredCount >= policy.maxUnansweredMessages
+      ) {
         await client.query('UPDATE character_instances SET next_action_at = NULL WHERE id = $1', [row.id])
         continue
       }

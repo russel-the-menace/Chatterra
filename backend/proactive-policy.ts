@@ -5,7 +5,8 @@ export type ProactivePolicy = {
   intensity: number
   minDelayMinutes: number
   maxDelayMinutes: number
-  maxUnansweredMessages: number
+  // null means the character may keep reaching out after silence.
+  maxUnansweredMessages: number | null
   topicDomains: string[]
 }
 
@@ -41,7 +42,13 @@ export const deriveProactivePolicy = (character: Character): ProactivePolicy => 
       normal: { enabled: true, intensity: 0.55, minDelayMinutes: 90, maxDelayMinutes: 360, maxUnansweredMessages: 1 },
       high: { enabled: true, intensity: 0.9, minDelayMinutes: 20, maxDelayMinutes: 90, maxUnansweredMessages: 3 },
     }[configuredInitiative]
-    return { ...configuration, topicDomains: ['daily life'] }
+    return {
+      ...configuration,
+      maxUnansweredMessages: configuration.enabled && character.id === 'c3'
+        ? null
+        : configuration.maxUnansweredMessages,
+      topicDomains: ['daily life']
+    }
   }
   const text = authoredText(character)
   const explicitInitiative = /\b(?:proactiv(?:e|ely)|initiates? conversations?|starts? conversations?|messages? (?:the user|them) first|reach(?:es)? out)\b/i.test(text)
@@ -71,7 +78,7 @@ export const deriveProactivePolicy = (character: Character): ProactivePolicy => 
     intensity: clingy ? 0.9 : explicitInitiative ? 0.55 : 0,
     minDelayMinutes,
     maxDelayMinutes,
-    maxUnansweredMessages: clingy ? 3 : 1,
+    maxUnansweredMessages: character.id === 'c3' ? null : clingy ? 3 : 1,
     topicDomains: topicDomains.length > 0 ? topicDomains : ['daily life']
   }
 }
@@ -88,7 +95,10 @@ export const nextProactiveActionAt = ({
   unansweredCount?: number
 }): Date | undefined => {
   const policy = deriveProactivePolicy(character)
-  if (!policy.enabled || unansweredCount >= policy.maxUnansweredMessages) return undefined
+  if (!policy.enabled || (
+    policy.maxUnansweredMessages !== null
+    && unansweredCount >= policy.maxUnansweredMessages
+  )) return undefined
 
   const jitter = stableFraction(`${character.id}:${seed}:${unansweredCount}`)
   const baseDelay = policy.minDelayMinutes + jitter * (policy.maxDelayMinutes - policy.minDelayMinutes)
