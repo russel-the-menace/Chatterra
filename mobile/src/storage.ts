@@ -24,6 +24,7 @@ export type StoredAuthSession = {
     id: string
     username: string
     displayName: string
+    avatar?: string
   }
 }
 
@@ -46,6 +47,7 @@ const parseStoredAuthSession = (value: unknown): StoredAuthSession | undefined =
       id: user.id,
       username: user.username,
       displayName: user.displayName,
+      avatar: typeof user.avatar === 'string' && user.avatar ? user.avatar : undefined,
     }
   }
 }

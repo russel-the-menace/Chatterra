@@ -452,6 +452,9 @@ export const api = {
       characterId: string
       starterMessage?: ServerMessage
       messages: ServerMessage[]
+      assistantMessage?: ServerMessage
+      reply?: string | null
+      replySegments?: string[]
     }>('/api/messages/forward', {
       method: 'POST',
       body: JSON.stringify(input),

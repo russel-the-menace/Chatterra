@@ -31,10 +31,13 @@ import {
   View,
 } from 'react-native'
 import Reanimated, {
+  Easing as ReanimatedEasing,
+  runOnJS,
   useAnimatedKeyboard,
   useAnimatedStyle,
   useDerivedValue,
   useSharedValue,
+  withTiming,
 } from 'react-native-reanimated'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
@@ -166,7 +169,6 @@ type MessageActionSession = {
   generation: number
   messageKey: string
   openedAt: number
-  preserveComposerFocus: boolean
   selection: MessageSelectionRange
   selectionAdjusting: boolean
   selectionControlled: boolean
@@ -605,7 +607,6 @@ function MessageBubbleContent({
   selection,
   selectionAdjusting,
   selectionControlled,
-  preserveKeyboard,
   onSelectionBlur,
   onSelectionChange,
   onSelectionOutsideTap,
@@ -618,7 +619,6 @@ function MessageBubbleContent({
   selection?: MessageSelectionRange
   selectionAdjusting: boolean
   selectionControlled: boolean
-  preserveKeyboard: boolean
   onSelectionBlur: () => void
   onSelectionChange: (selection: MessageSelectionRange) => void
   onSelectionOutsideTap: () => void
@@ -774,12 +774,14 @@ function MessageBubbleContent({
       )}
       {selecting && !readyVoice && (
         <TextInput
-          autoFocus
+          // This temporary read-only input must never affect the composer or
+          // keyboard state that existed before the long press.
+          autoFocus={false}
           multiline
           // Read-only UITextView keeps UIKit in its text-selection interaction path.
           // The default `selectable` value remains true, so handles and the loupe still work.
           editable={Platform.OS !== 'ios'}
-          showSoftInputOnFocus={preserveKeyboard}
+          showSoftInputOnFocus={false}
           selectTextOnFocus
           scrollEnabled={false}
           contextMenuHidden={Platform.OS === 'ios'}
@@ -890,7 +892,6 @@ function MessageRow({
   selection,
   selectionAdjusting,
   selectionControlled,
-  preserveKeyboard,
   onSelectionBlur,
   onSelectionChange,
   onSelectionOutsideTap,
@@ -909,7 +910,6 @@ function MessageRow({
   selection?: MessageSelectionRange
   selectionAdjusting: boolean
   selectionControlled: boolean
-  preserveKeyboard: boolean
   onSelectionBlur: () => void
   onSelectionChange: (selection: MessageSelectionRange) => void
   onSelectionOutsideTap: () => void
@@ -999,7 +999,6 @@ function MessageRow({
                 selection={selection}
                 selectionAdjusting={selectionAdjusting}
                 selectionControlled={selectionControlled}
-                preserveKeyboard={preserveKeyboard}
                 onSelectionBlur={onSelectionBlur}
                 onSelectionChange={onSelectionChange}
                 onSelectionOutsideTap={onSelectionOutsideTap}
@@ -1030,7 +1029,6 @@ function MessageRow({
                 selection={selection}
                 selectionAdjusting={selectionAdjusting}
                 selectionControlled={selectionControlled}
-                preserveKeyboard={preserveKeyboard}
                 onSelectionBlur={onSelectionBlur}
                 onSelectionChange={onSelectionChange}
                 onSelectionOutsideTap={onSelectionOutsideTap}
@@ -1213,8 +1211,6 @@ export default function ChatScreen() {
   const localDeliveryGenerationRef = useRef(0)
   const messageActionRequestRef = useRef(0)
   const messageActionMenuOpacity = useRef(new RNAnimated.Value(1)).current
-  const forwardPickerTranslateY = useRef(new RNAnimated.Value(window.height)).current
-  const forwardConfirmationTranslateY = useRef(new RNAnimated.Value(window.height)).current
   const messageActionReappearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const messageSelectionBlurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const messageActionPressRef = useRef(false)
@@ -1223,7 +1219,6 @@ export default function ChatScreen() {
     messageKey: string
     selection: MessageSelectionRange
   } | null>(null)
-  const composerFocusedRef = useRef(false)
   const quoteDraftRevisionRef = useRef(0)
   const sendingRef = useRef(false)
   const withinImmersiveRangeRef = useRef(
@@ -1240,6 +1235,10 @@ export default function ChatScreen() {
     viewportHeight: 0,
   })
   const keyboard = useAnimatedKeyboard()
+  // Forwarding transitions run on the UI thread. Mounting a contact list can
+  // occupy JS briefly, but it must not make the sheet motion stutter.
+  const forwardPickerTranslateY = useSharedValue(window.height)
+  const forwardConfirmationTranslateY = useSharedValue(window.height)
   const scrollContentHeight = useSharedValue(0)
   const scrollViewportHeight = useSharedValue(0)
   const timelineIntrinsicHeight = useSharedValue(0)
@@ -1288,6 +1287,16 @@ export default function ChatScreen() {
       }],
     }
   })
+  const forwardPickerAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: forwardPickerTranslateY.value }],
+  }))
+  const forwardConfirmationAnimatedStyle = useAnimatedStyle(() => ({
+    // The sheet tracks the iOS keyboard on the UI thread, so its text field is
+    // always entirely above the keyboard instead of being covered by it.
+    transform: [{
+      translateY: forwardConfirmationTranslateY.value - Math.max(0, keyboard.height.value),
+    }],
+  }))
   const stagedDeliveryTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set())
   const deliveryStatusPollCancelsRef = useRef<Set<() => void>>(new Set())
   const voiceTranscriptionRequestsRef = useRef<Set<string>>(new Set())
@@ -1363,8 +1372,6 @@ export default function ChatScreen() {
   }, [voiceMessageRecorder.error])
 
   const closeMessageActionMenu = useCallback(() => {
-    const session = messageActionSessionRef.current
-    const restoreComposerFocus = Boolean(session?.preserveComposerFocus)
     messageActionRequestRef.current += 1
     if (messageActionReappearTimerRef.current) {
       clearTimeout(messageActionReappearTimerRef.current)
@@ -1374,7 +1381,6 @@ export default function ChatScreen() {
       clearTimeout(messageSelectionBlurTimerRef.current)
       messageSelectionBlurTimerRef.current = null
     }
-    if (restoreComposerFocus) composerInputRef.current?.focus()
     messageActionPressRef.current = false
     nativeSelectionGestureRef.current = null
     messageActionSessionRef.current = null
@@ -1382,9 +1388,6 @@ export default function ChatScreen() {
     setMessageActionMenuInteractive(true)
     messageActionMenuOpacity.stopAnimation()
     messageActionMenuOpacity.setValue(1)
-    if (restoreComposerFocus) {
-      requestAnimationFrame(() => composerInputRef.current?.focus())
-    }
   }, [messageActionMenuOpacity])
 
   const fadeOutMessageActionMenu = useCallback((generation: number) => {
@@ -1565,14 +1568,9 @@ export default function ChatScreen() {
   }, [closeMessageActionMenu, showLatestMessageButton, startLatestScroll])
 
   const handleComposerFocus = useCallback(() => {
-    composerFocusedRef.current = true
     initialScrollRef.current = false
     startLatestScroll(withinImmersiveRangeRef.current)
   }, [startLatestScroll])
-
-  const handleComposerBlur = useCallback(() => {
-    composerFocusedRef.current = false
-  }, [])
 
   const resetInitialScroll = useCallback(() => {
     initialScrollRef.current = true
@@ -2335,42 +2333,43 @@ export default function ChatScreen() {
     if (selectedText) await Clipboard.setStringAsync(selectedText)
   }
 
+  const resetForwardPicker = useCallback(() => {
+    setForwardPickerVisible(false)
+    setForwardingMessage(null)
+    setForwardTarget(null)
+    setForwardSearch('')
+    setForwardNote('')
+    setForwardSubmitting(false)
+  }, [])
+
+  const clearForwardTarget = useCallback(() => {
+    setForwardTarget(null)
+    setForwardNote('')
+  }, [])
+
   const dismissForwardPicker = () => {
     if (forwardSubmitting) return
-    RNAnimated.parallel([
-      RNAnimated.timing(forwardPickerTranslateY, {
-        toValue: window.height,
-        duration: 230,
-        easing: Easing.in(Easing.cubic),
-        useNativeDriver: true,
-      }),
-      RNAnimated.timing(forwardConfirmationTranslateY, {
-        toValue: window.height,
-        duration: 180,
-        easing: Easing.in(Easing.cubic),
-        useNativeDriver: true,
-      }),
-    ]).start(({ finished }) => {
-      if (!finished) return
-      setForwardPickerVisible(false)
-      setForwardingMessage(null)
-      setForwardTarget(null)
-      setForwardSearch('')
-      setForwardNote('')
+    Keyboard.dismiss()
+    forwardConfirmationTranslateY.value = withTiming(window.height, {
+      duration: 180,
+      easing: ReanimatedEasing.in(ReanimatedEasing.cubic),
+    })
+    forwardPickerTranslateY.value = withTiming(window.height, {
+      duration: 240,
+      easing: ReanimatedEasing.in(ReanimatedEasing.cubic),
+    }, finished => {
+      if (finished) runOnJS(resetForwardPicker)()
     })
   }
 
   const dismissForwardConfirmation = () => {
     if (forwardSubmitting) return
-    RNAnimated.timing(forwardConfirmationTranslateY, {
-      toValue: window.height,
-      duration: 210,
-      easing: Easing.in(Easing.cubic),
-      useNativeDriver: true,
-    }).start(({ finished }) => {
-      if (!finished) return
-      setForwardTarget(null)
-      setForwardNote('')
+    Keyboard.dismiss()
+    forwardConfirmationTranslateY.value = withTiming(window.height, {
+      duration: 220,
+      easing: ReanimatedEasing.in(ReanimatedEasing.cubic),
+    }, finished => {
+      if (finished) runOnJS(clearForwardTarget)()
     })
   }
 
@@ -2389,30 +2388,27 @@ export default function ChatScreen() {
     setForwardSearch('')
     setForwardNote('')
     setForwardPickerVisible(true)
-    forwardPickerTranslateY.setValue(window.height)
-    forwardConfirmationTranslateY.setValue(window.height)
+    forwardPickerTranslateY.value = window.height
+    forwardConfirmationTranslateY.value = window.height
     requestAnimationFrame(() => {
-      RNAnimated.timing(forwardPickerTranslateY, {
-        toValue: 0,
+      forwardPickerTranslateY.value = withTiming(0, {
         duration: 300,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }).start()
+        easing: ReanimatedEasing.out(ReanimatedEasing.cubic),
+      })
     })
   }
 
   const selectForwardTarget = (target: Character) => {
     if (target.id === characterId || forwardSubmitting) return
+    Keyboard.dismiss()
     setForwardTarget(target)
     setForwardNote('')
-    forwardConfirmationTranslateY.setValue(window.height)
+    forwardConfirmationTranslateY.value = window.height
     requestAnimationFrame(() => {
-      RNAnimated.timing(forwardConfirmationTranslateY, {
-        toValue: 0,
+      forwardConfirmationTranslateY.value = withTiming(0, {
         duration: 260,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }).start()
+        easing: ReanimatedEasing.out(ReanimatedEasing.cubic),
+      })
     })
   }
 
@@ -2426,7 +2422,7 @@ export default function ChatScreen() {
         message: text,
         note: forwardNote.trim() || undefined,
       })
-      const latest = result.messages.at(-1)
+      const latest = result.assistantMessage || result.messages.at(-1)
       markConversationActive(
         forwardTarget.id,
         latest?.createdAt || new Date().toISOString(),
@@ -2434,30 +2430,16 @@ export default function ChatScreen() {
         result.conversationId
       )
       setError(null)
-      RNAnimated.parallel([
-        RNAnimated.timing(forwardConfirmationTranslateY, {
-          toValue: window.height,
-          duration: 190,
-          easing: Easing.in(Easing.cubic),
-          useNativeDriver: true,
-        }),
-        RNAnimated.timing(forwardPickerTranslateY, {
-          toValue: window.height,
-          duration: 260,
-          easing: Easing.in(Easing.cubic),
-          useNativeDriver: true,
-        }),
-      ]).start(({ finished }) => {
-        if (!finished) {
-          setForwardSubmitting(false)
-          return
-        }
-        setForwardPickerVisible(false)
-        setForwardingMessage(null)
-        setForwardTarget(null)
-        setForwardSearch('')
-        setForwardNote('')
-        setForwardSubmitting(false)
+      Keyboard.dismiss()
+      forwardConfirmationTranslateY.value = withTiming(window.height, {
+        duration: 190,
+        easing: ReanimatedEasing.in(ReanimatedEasing.cubic),
+      })
+      forwardPickerTranslateY.value = withTiming(window.height, {
+        duration: 260,
+        easing: ReanimatedEasing.in(ReanimatedEasing.cubic),
+      }, finished => {
+        if (finished) runOnJS(resetForwardPicker)()
       })
     } catch (forwardError) {
       Alert.alert(
@@ -2472,7 +2454,6 @@ export default function ChatScreen() {
     const requestId = messageActionRequestRef.current + 1
     messageActionRequestRef.current = requestId
     const messageKey = message.renderKey || message.id
-    const preserveComposerFocus = composerFocusedRef.current
     const fallbackBottom = window.height - insets.bottom
     const open = (usableBottom: number) => {
       if (requestId !== messageActionRequestRef.current) return
@@ -2496,7 +2477,6 @@ export default function ChatScreen() {
         generation: requestId,
         messageKey,
         openedAt: Date.now(),
-        preserveComposerFocus,
         selection: { start: 0, end: message.text.length },
         selectionAdjusting: false,
         selectionControlled: true,
@@ -3087,7 +3067,6 @@ export default function ChatScreen() {
                     selection={selectionSession?.selection}
                     selectionAdjusting={Boolean(selectionSession?.selectionAdjusting)}
                     selectionControlled={Boolean(selectionSession?.selectionControlled)}
-                    preserveKeyboard={Boolean(selectionSession?.preserveComposerFocus)}
                     onSelectionBlur={() => {
                       if (selectionSession) {
                         handleMessageSelectionBlur(messageKey, selectionSession.generation)
@@ -3258,7 +3237,6 @@ export default function ChatScreen() {
                       style={styles.composerInput}
                       textAlignVertical="center"
                       onFocus={handleComposerFocus}
-                      onBlur={handleComposerBlur}
                     />
                     <Pressable
                       onPress={handleVoicePress}
@@ -3635,13 +3613,16 @@ export default function ChatScreen() {
           else dismissForwardPicker()
         }}
       >
-        <RNAnimated.View
-          style={[
-            styles.forwardPickerScreen,
-            { transform: [{ translateY: forwardPickerTranslateY }] },
-          ]}
-        >
-          <SafeAreaView style={styles.forwardPickerSafeArea} edges={['top', 'bottom', 'left', 'right']}>
+        <Reanimated.View style={[styles.forwardPickerScreen, forwardPickerAnimatedStyle]}>
+          <SafeAreaView
+            style={[
+              styles.forwardPickerSafeArea,
+              { paddingTop: insets.top, paddingBottom: insets.bottom },
+            ]}
+            // A native Modal owns a separate root view on iOS. Apply the
+            // parent inset explicitly instead of relying on modal context.
+            edges={['left', 'right']}
+          >
             <View style={styles.forwardPickerHeader}>
               <Pressable
                 onPress={dismissForwardPicker}
@@ -3709,13 +3690,13 @@ export default function ChatScreen() {
                 accessibilityLabel="Cancel forwarding"
                 style={StyleSheet.absoluteFill}
               />
-              <RNAnimated.View
+              <Reanimated.View
                 style={[
                   styles.forwardConfirmationSheet,
                   {
                     paddingBottom: Math.max(18, insets.bottom),
-                    transform: [{ translateY: forwardConfirmationTranslateY }],
                   },
+                  forwardConfirmationAnimatedStyle,
                 ]}
               >
                 <Text style={styles.forwardConfirmationTitle}>Send to</Text>
@@ -3761,10 +3742,10 @@ export default function ChatScreen() {
                       : <Text style={styles.forwardSendButtonText}>Send</Text>}
                   </Pressable>
                 </View>
-              </RNAnimated.View>
+              </Reanimated.View>
             </View>
           )}
-        </RNAnimated.View>
+        </Reanimated.View>
       </Modal>
       <Modal
         transparent

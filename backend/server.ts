@@ -234,6 +234,237 @@ const getStarterMessage = (character?: Character) => {
   return starterMessageForPolicy(character?.name || 'Interviewer', languagePolicy)
 }
 
+type ForwardReplyResult = {
+  assistantMessage?: Message
+  behavior: {
+    emotion: string
+    activity: string
+    decision: string
+    responseStatus?: 'inference_failed'
+  }
+  reply: string | null
+  replySegments?: string[]
+  voice?: ReturnType<typeof planMayaVoiceMessage>
+}
+
+// A forward is persisted as a consecutive user-message bundle first. The last
+// item then enters the same behavior and inference pipeline as a normal chat
+// turn, without inserting a duplicate user message.
+const generateForwardReply = async ({
+  userId,
+  character,
+  conversation,
+  triggerMessage,
+}: {
+  userId: string
+  character: Character
+  conversation: Conversation
+  triggerMessage: Message
+}): Promise<ForwardReplyResult> => {
+  const trace = createInferenceTrace(newId())
+  const mode = resolveCharacterMode(character)
+  const interactionNow = new Date(triggerMessage.createdAt)
+  const preparation = await prepareInteraction({
+    userId,
+    character,
+    conversationId: conversation.id,
+    messageId: triggerMessage.id,
+    message: triggerMessage.content,
+    contentJson: triggerMessage.contentJson,
+    messageAlreadyPersisted: true,
+    forceReply: true,
+    mode,
+    now: interactionNow,
+  })
+  const inference = await buildInferencePlan({
+    userId,
+    character,
+    conversationId: conversation.id,
+    currentMessageId: triggerMessage.id,
+    message: triggerMessage.content,
+    mode,
+    snapshot: preparation.snapshot,
+    memoryEnabled: preparation.memoryEnabled,
+    decision: preparation.decision,
+  })
+
+  const behavior = {
+    emotion: preparation.snapshot.emotionLabel,
+    activity: preparation.snapshot.simulation.currentActivity,
+    decision: preparation.decision.action,
+  }
+
+  if (inference.route === 'none') {
+    await recordSkippedInference({
+      userId,
+      character,
+      conversationId: conversation.id,
+      decisionId: preparation.decisionId,
+      triggerEventId: preparation.triggerEventId,
+      mode,
+      inference,
+      diagnostics: trace.snapshot(),
+      now: new Date(),
+    })
+    return { behavior, reply: null }
+  }
+
+  let rawReply = inference.directResponse || ''
+  let generation: {
+    provider?: string
+    model?: string
+    profile?: string
+    parameters?: Record<string, any>
+    contextManifest?: Record<string, any>
+    diagnostics?: Record<string, any>
+    latencyMs?: number
+  } | undefined
+  const inferenceStartedAt = Date.now()
+  try {
+    if (inference.route === 'model') {
+      const result = await generateModelResponse(inference, character, trace)
+      rawReply = result.content
+      generation = {
+        provider: result.provider,
+        model: result.model,
+        profile: inference.model?.profile,
+        parameters: {
+          ...inference.parameters,
+          maxResponseTokens: result.diagnostics.maxResponseTokens,
+        },
+        contextManifest: inference.contextManifest,
+        diagnostics: result.diagnostics,
+        latencyMs: result.latencyMs,
+      }
+    }
+  } catch (error) {
+    trace.mark('request_failed', 'failed', {
+      stage: 'forward_provider_request',
+      error: error instanceof ModelGatewayError
+        ? error.message
+        : error instanceof Error ? error.name : 'unknown_error',
+    })
+    await recordInferenceFailure({
+      userId,
+      character,
+      conversationId: conversation.id,
+      decisionId: preparation.decisionId,
+      triggerEventId: preparation.triggerEventId,
+      mode,
+      inference,
+      diagnostics: trace.snapshot(),
+      latencyMs: Date.now() - inferenceStartedAt,
+    }).catch(auditError => {
+      console.error('Could not record failed forward inference', auditError)
+    })
+    console.error('Could not generate a reply for a forwarded message', error)
+    return {
+      behavior: { ...behavior, responseStatus: 'inference_failed' },
+      reply: null,
+    }
+  }
+
+  const outputDiagnostics = diagnoseInferenceOutput(inference, rawReply)
+  const { reply, deliverySegments, ...traceOutputDiagnostics } = outputDiagnostics
+  trace.mark('output_processed', 'completed', traceOutputDiagnostics)
+  if (!outputDiagnostics.accepted || !reply) {
+    const failureReason = outputDiagnostics.rejectionReason || 'output_rejected'
+    await recordInferenceFailure({
+      userId,
+      character,
+      conversationId: conversation.id,
+      decisionId: preparation.decisionId,
+      triggerEventId: preparation.triggerEventId,
+      mode,
+      inference,
+      diagnostics: {
+        ...trace.snapshot(),
+        rejectedOutput: {
+          content: rawReply.slice(0, REJECTED_OUTPUT_LOG_LIMIT),
+          originalLength: rawReply.length,
+          truncated: rawReply.length > REJECTED_OUTPUT_LOG_LIMIT,
+          rejectionReason: failureReason,
+        },
+      },
+      latencyMs: generation?.latencyMs ?? Date.now() - inferenceStartedAt,
+      failureReason,
+    })
+    return {
+      behavior: { ...behavior, responseStatus: 'inference_failed' },
+      reply: null,
+    }
+  }
+
+  const replySegments = deliverySegments.length > 0 ? deliverySegments : [reply]
+  const assistantMessageId = newId()
+  const recentMessages = await listRecentMessages(conversation.id, 8)
+  const voice = planMayaVoiceMessage({
+    characterId: character.id,
+    messageId: assistantMessageId,
+    replySegments,
+    recentMessages,
+    userMessage: triggerMessage.content,
+  })
+  const assistantMessage: Message = {
+    id: assistantMessageId,
+    conversationId: conversation.id,
+    senderRole: 'assistant',
+    senderId: character.id,
+    content: reply,
+    contentJson: {
+      deliverySegments: replySegments,
+      ...(voice ? { voice } : {}),
+    },
+    createdAt: new Date().toISOString(),
+  }
+  await recordAssistantResponse({
+    userId,
+    character,
+    conversationId: conversation.id,
+    messageId: assistantMessage.id,
+    decisionId: preparation.decisionId,
+    triggerEventId: preparation.triggerEventId,
+    mode,
+    content: reply,
+    contentJson: assistantMessage.contentJson,
+    inference,
+    generation,
+    diagnostics: trace.snapshot(),
+    now: new Date(assistantMessage.createdAt),
+  })
+  void compactConversationIfNeeded(conversation.id).catch(compactionError => {
+    console.warn('Conversation context compaction failed after a forwarded message', {
+      conversationId: conversation.id,
+      error: compactionError instanceof Error ? compactionError.message : 'unknown_error',
+    })
+  })
+  if (voice) {
+    void synthesizeMayaVoiceMessage({
+      messageId: assistantMessage.id,
+      text: replySegments[voice.segmentIndex],
+      voice,
+    })
+      .then(readyVoice => updateAssistantMessageVoice(assistantMessage.id, readyVoice))
+      .catch(async error => {
+        console.error('Could not synthesize forwarded Maya voice message', error)
+        await updateAssistantMessageVoice(assistantMessage.id, {
+          ...voice,
+          status: 'failed',
+        }).catch(updateError => {
+          console.error('Could not mark forwarded Maya voice message as failed', updateError)
+        })
+      })
+  }
+
+  return {
+    assistantMessage,
+    behavior,
+    reply,
+    replySegments,
+    voice,
+  }
+}
+
 app.post('/api/auth/login', asyncRoute(async (req, res) => {
   const username = typeof req.body?.username === 'string'
     ? req.body.username.trim().slice(0, 64)
@@ -982,12 +1213,19 @@ app.post('/api/messages/forward', asyncRoute(async (req, res) => {
 
   const conversation = created.conversation
   const forwardedAt = new Date(now.getTime() + 1).toISOString()
+  const forwardBundleId = newId()
   const messages: Message[] = [{
     id: newId(),
     conversationId: conversation.id,
     senderRole: 'user',
     senderId: userId,
     content: forwardedText,
+    contentJson: {
+      forward: {
+        bundleId: forwardBundleId,
+        position: 'forwarded_message',
+      },
+    },
     createdAt: forwardedAt,
   }]
   if (note) {
@@ -997,16 +1235,36 @@ app.post('/api/messages/forward', asyncRoute(async (req, res) => {
       senderRole: 'user',
       senderId: userId,
       content: note,
+      contentJson: {
+        forward: {
+          bundleId: forwardBundleId,
+          position: 'forward_note',
+        },
+      },
       createdAt: new Date(now.getTime() + 2).toISOString(),
     })
   }
 
   const persistedMessages = await appendMessages(messages)
+  const triggerMessage = persistedMessages.at(-1)
+  const generated = triggerMessage
+    ? await generateForwardReply({
+        userId,
+        character,
+        conversation,
+        triggerMessage,
+      })
+    : undefined
   return res.status(201).json({
     conversationId: conversation.id,
     characterId: character.id,
     starterMessage: created.starterMessage,
     messages: persistedMessages,
+    assistantMessage: generated?.assistantMessage,
+    reply: generated?.reply || null,
+    replySegments: generated?.replySegments || [],
+    voice: generated?.voice,
+    behavior: generated?.behavior,
   })
 }))
 

@@ -825,6 +825,7 @@ export const prepareInteraction = async ({
   message,
   contentJson,
   messageAlreadyPersisted = false,
+  forceReply = false,
   mode = 'practice',
   now = new Date()
 }: {
@@ -835,6 +836,7 @@ export const prepareInteraction = async ({
   message: string
   contentJson?: Record<string, any>
   messageAlreadyPersisted?: boolean
+  forceReply?: boolean
   mode?: InteractionMode
   now?: Date
 }): Promise<InteractionPreparation> => {
@@ -943,7 +945,7 @@ export const prepareInteraction = async ({
       [instance.id]
     )
     const snapshot = await loadSnapshot(client, mapInstance(refreshedInstanceResult.rows[0]))
-    const decision = decideResponse({
+    let decision = decideResponse({
       message,
       mode,
       character,
@@ -957,6 +959,20 @@ export const prepareInteraction = async ({
       })),
       now
     })
+    if (forceReply) {
+      decision = {
+        ...decision,
+        action: 'reply_now',
+        reasonCodes: Array.from(new Set([
+          ...decision.reasonCodes,
+          'forwarded_message_requires_response',
+        ])),
+        scoreDetails: {
+          ...decision.scoreDetails,
+          forcedReply: true,
+        },
+      }
+    }
     const decisionId = uuidv4()
     await client.query(
       `INSERT INTO decision_records (

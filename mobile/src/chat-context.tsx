@@ -221,6 +221,31 @@ export function ChatProvider({ children }: PropsWithChildren) {
     setLastMessageAtByCharacter({})
   }, [])
 
+  const persistSessionProfile = useCallback(async (profile: {
+    displayName?: string
+    avatar?: string
+  }) => {
+    const current = sessionRef.current
+    if (!current) return
+    const displayName = profile.displayName || current.user.displayName
+    const avatar = profile.avatar || current.user.avatar
+    if (displayName === current.user.displayName && avatar === current.user.avatar) return
+    const next: StoredAuthSession = {
+      ...current,
+      user: {
+        ...current.user,
+        displayName,
+        avatar,
+      },
+    }
+    sessionRef.current = next
+    try {
+      await saveStoredAuthSession(next)
+    } catch (error) {
+      console.warn('Could not persist the local profile.', error)
+    }
+  }, [])
+
   const prewarmConversationCaches = useCallback(async (
     accountId: string,
     currentCharacters: Character[]
@@ -349,19 +374,25 @@ export function ChatProvider({ children }: PropsWithChildren) {
     let cancelled = false
     void (async () => {
       let storedSession: StoredAuthSession | undefined
-      let sessionInvalid = false
       try {
         storedSession = await getStoredAuthSession()
         if (!storedSession) return
         if (cancelled) return
         setApiAccessToken(storedSession.accessToken)
         sessionRef.current = storedSession
-        const [storedQuoteDrafts, pinnedIds, nextCharacters, storedContactPreviews] = await Promise.all([
+        // Restore the last known profile before network work starts. This keeps
+        // a saved avatar visible even while the app is offline.
+        setUserId(storedSession.user.id)
+        setUsername(storedSession.user.username)
+        setUserName(storedSession.user.displayName)
+        setUserAvatar(storedSession.user.avatar)
+        const [storedQuoteDrafts, snapshot, storedContactPreviews] = await Promise.all([
           getStoredComposerQuoteDrafts(storedSession.user.id).catch(() => ({})),
-          api.listPinnedCharacterIds(storedSession.user.id),
-          api.listCharacters(storedSession.user.id),
+          api.getSyncSnapshot(storedSession.user.id),
           getStoredContactPreviewCache(API_BASE_URL, storedSession.user.id).catch(() => undefined),
         ])
+        const nextCharacters = snapshot.characters
+        const pinnedIds = snapshot.pinnedCharacterIds
         const warmedConversationCaches = await prewarmConversationCaches(
           storedSession.user.id,
           nextCharacters
@@ -383,30 +414,31 @@ export function ChatProvider({ children }: PropsWithChildren) {
         setProactivePreviews(contactPreviewState.previews)
         setConversationIdsByCharacter(contactPreviewState.conversationIdsByCharacter)
         setLastMessageAtByCharacter(contactPreviewState.lastMessageAtByCharacter)
+        setUserName(snapshot.userName || storedSession.user.displayName)
+        setUserAvatar(snapshot.userAvatar || storedSession.user.avatar)
+        void persistSessionProfile({
+          displayName: snapshot.userName,
+          avatar: snapshot.userAvatar,
+        })
         persistContactPreviewCache(storedSession.user.id, {
           ...contactPreviewState,
           cachedAt: Date.now(),
         })
       } catch (error) {
         if (error instanceof Error && 'status' in error && error.status === 401) {
-          sessionInvalid = true
           setApiAccessToken()
           sessionRef.current = null
           await clearStoredAuthSession()
           setUserId(null)
           setUsername(undefined)
           setUserName(undefined)
+          setUserAvatar(undefined)
         } else {
           const message = messageForError(error)
           console.warn('[workspace] bootstrap_failed', { message })
           setConnectionError(message)
         }
       } finally {
-        if (!cancelled && storedSession && !sessionInvalid) {
-          setUserId(storedSession.user.id)
-          setUsername(storedSession.user.username)
-          setUserName(storedSession.user.displayName)
-        }
         if (!cancelled) setReady(true)
       }
     })()
@@ -414,7 +446,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     return () => {
       cancelled = true
     }
-  }, [persistContactPreviewCache, prewarmConversationCaches])
+  }, [persistContactPreviewCache, persistSessionProfile, prewarmConversationCaches])
 
   const login = useCallback(async (nextUsername: string, password: string) => {
     const session = await api.login(nextUsername, password)
@@ -431,12 +463,13 @@ export function ChatProvider({ children }: PropsWithChildren) {
     await saveStoredAuthSession(storedSession)
 
     try {
-      const [storedQuoteDrafts, pinnedIds, nextCharacters, storedContactPreviews] = await Promise.all([
+      const [storedQuoteDrafts, snapshot, storedContactPreviews] = await Promise.all([
         getStoredComposerQuoteDrafts(storedSession.user.id).catch(() => ({})),
-        api.listPinnedCharacterIds(storedSession.user.id),
-        api.listCharacters(storedSession.user.id),
+        api.getSyncSnapshot(storedSession.user.id),
         getStoredContactPreviewCache(API_BASE_URL, storedSession.user.id).catch(() => undefined),
       ])
+      const nextCharacters = snapshot.characters
+      const pinnedIds = snapshot.pinnedCharacterIds
       const warmedConversationCaches = await prewarmConversationCaches(
         storedSession.user.id,
         nextCharacters
@@ -457,6 +490,12 @@ export function ChatProvider({ children }: PropsWithChildren) {
       setProactivePreviews(contactPreviewState.previews)
       setConversationIdsByCharacter(contactPreviewState.conversationIdsByCharacter)
       setLastMessageAtByCharacter(contactPreviewState.lastMessageAtByCharacter)
+      setUserName(snapshot.userName || storedSession.user.displayName)
+      setUserAvatar(snapshot.userAvatar)
+      void persistSessionProfile({
+        displayName: snapshot.userName,
+        avatar: snapshot.userAvatar,
+      })
       persistContactPreviewCache(storedSession.user.id, {
         ...contactPreviewState,
         cachedAt: Date.now(),
@@ -468,9 +507,9 @@ export function ChatProvider({ children }: PropsWithChildren) {
     } finally {
       setUserId(storedSession.user.id)
       setUsername(storedSession.user.username)
-      setUserName(storedSession.user.displayName)
+      setUserName(current => current || storedSession.user.displayName)
     }
-  }, [persistContactPreviewCache, prewarmConversationCaches, resetWorkspaceState])
+  }, [persistContactPreviewCache, persistSessionProfile, prewarmConversationCaches, resetWorkspaceState])
 
   const logout = useCallback(async () => {
     try {
@@ -496,8 +535,14 @@ export function ChatProvider({ children }: PropsWithChildren) {
     try {
       const snapshot = await api.getSyncSnapshot(userId)
       setCharacters(snapshot.characters)
-      setUserName(snapshot.userName)
-      setUserAvatar(snapshot.userAvatar)
+      // A partial or temporarily stale profile response must not blank an
+      // already-restored local profile while the rest of the workspace syncs.
+      setUserName(snapshot.userName || sessionRef.current?.user.displayName)
+      setUserAvatar(snapshot.userAvatar || sessionRef.current?.user.avatar)
+      void persistSessionProfile({
+        displayName: snapshot.userName,
+        avatar: snapshot.userAvatar,
+      })
       setPinnedCharacterIds(new Set(snapshot.pinnedCharacterIds))
       setPinnedCharacterOrder(snapshot.pinnedCharacterIds)
       setConnectionError(null)
@@ -593,7 +638,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     } finally {
       workspaceSyncingRef.current = false
     }
-  }, [characters.length, persistContactPreviewCache, userId])
+  }, [characters.length, persistContactPreviewCache, persistSessionProfile, userId])
 
   useEffect(() => {
     if (!userId) return
@@ -730,26 +775,20 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const saveUserAvatar = useCallback(async (avatar: string) => {
     if (!userId) throw new Error('User is not ready.')
     const result = await api.updateUserAvatar(userId, avatar)
-    setUserAvatar(result.userAvatar || avatar)
-  }, [userId])
+    const nextAvatar = result.userAvatar || avatar
+    setUserAvatar(nextAvatar)
+    await persistSessionProfile({ avatar: nextAvatar })
+  }, [persistSessionProfile, userId])
 
   const saveUserProfile = useCallback(async (input: { displayName: string; avatar?: string }) => {
     if (!userId) throw new Error('User is not ready.')
     const result = await api.updateUserProfile(userId, input)
-    setUserName(result.userName || input.displayName)
-    if (result.userAvatar || input.avatar) setUserAvatar(result.userAvatar || input.avatar)
-    if (sessionRef.current) {
-      const nextSession: StoredAuthSession = {
-        ...sessionRef.current,
-        user: {
-          ...sessionRef.current.user,
-          displayName: result.userName || input.displayName,
-        }
-      }
-      sessionRef.current = nextSession
-      await saveStoredAuthSession(nextSession)
-    }
-  }, [userId])
+    const nextName = result.userName || input.displayName
+    const nextAvatar = result.userAvatar || input.avatar
+    setUserName(nextName)
+    if (nextAvatar) setUserAvatar(nextAvatar)
+    await persistSessionProfile({ displayName: nextName, avatar: nextAvatar })
+  }, [persistSessionProfile, userId])
 
   const markCharacterRead = useCallback((characterId: string) => {
     setUnreadCharacterIds(current => {
