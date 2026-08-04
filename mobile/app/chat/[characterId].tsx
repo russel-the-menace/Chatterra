@@ -776,7 +776,10 @@ function MessageBubbleContent({
         <TextInput
           // This temporary read-only input must never affect the composer or
           // keyboard state that existed before the long press.
-          autoFocus={false}
+          // Focus the temporary selection view so iOS paints the default full
+          // selection highlight; soft-input display stays disabled below, so
+          // the composer and its keyboard state are untouched.
+          autoFocus
           multiline
           // Read-only UITextView keeps UIKit in its text-selection interaction path.
           // The default `selectable` value remains true, so handles and the loupe still work.
