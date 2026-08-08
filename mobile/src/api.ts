@@ -271,6 +271,14 @@ export const api = {
     return result.conversations
   },
 
+  async ensureConversation(userId: string, characterId: string) {
+    const result = await request<{ conversation: Conversation }>(
+      '/api/conversations/ensure',
+      { method: 'POST', body: JSON.stringify({ userId, characterId }) }
+    )
+    return result.conversation
+  },
+
   async listMessagePage(
     conversationId: string,
     options: { limit?: number; before?: MessageHistoryCursor } = {}

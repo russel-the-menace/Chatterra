@@ -4,10 +4,10 @@ import InputBox, { RecordedVoiceMessage } from '../components/InputBox'
 import { AssistantVoiceMessage, ChatMessage, UserVoiceMessage } from '../components/MessageBubble'
 import seedCharacter, {characters as seedCharacters, Character} from '../data/character'
 import { VoiceTranscriptMetadata } from '../voice/types'
-import { starterMessageForCharacter } from '../languagePolicy'
 import {
   apiFetch,
   apiUrl,
+  ensureConversation,
   getStoredSession,
   getSyncSnapshot,
   logout,
@@ -163,6 +163,10 @@ const mergeMessageUiState = (current: ChatMessage[], incoming: ChatMessage[]) =>
   })
 }
 
+const isUnpersistedStarter = (message: ChatMessage) => (
+  message.id.startsWith('starter-') && !message.sourceMessageId
+)
+
 const stableMessagesForCache = (messages: ChatMessage[]) => messages
   .filter(message => !message.loading)
   .map(({ translationLoading: _translationLoading, translationError: _translationError, ...message }) => message)
@@ -315,9 +319,10 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
     const requestId = historyRequestRef.current + 1
     historyRequestRef.current = requestId
     const cached = conversationCacheRef.current[nextCharacter.id]
+    const cachedMessages = cached?.messages.filter(message => !isUnpersistedStarter(message)) || []
     if (cached) {
       setConversationId(cached.conversationId)
-      setMessages(cached.messages)
+      setMessages(cachedMessages)
       setBehaviorStatus(cached.behaviorStatus)
     } else {
       setConversationId(null)
@@ -329,55 +334,47 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
       if (!cRes.ok) throw new Error('no convs')
 
       const cData = await cRes.json()
-      const matchingConversation = (cData.conversations || [])
+      let matchingConversation = (cData.conversations || [])
         .filter((conv: any) => conv.characterId === nextCharacter.id)
         .sort((a: any, b: any) => (b.lastMessageAt || b.updatedAt || b.createdAt || '').localeCompare(a.lastMessageAt || a.updatedAt || a.createdAt || ''))[0]
 
       if (requestId !== historyRequestRef.current || selectedCharacterIdRef.current !== nextCharacter.id) return
 
-      if (matchingConversation) {
-        const mRes = await apiFetch(apiUrl(`/api/conversations/${matchingConversation.id}/messages`))
-        const mData = await mRes.json()
-        if (requestId !== historyRequestRef.current || selectedCharacterIdRef.current !== nextCharacter.id) return
-        const mapped = mergeMessageUiState(cached?.messages || [], mapServerMessages(mData.messages || []))
-        setConversationId(matchingConversation.id)
-        setMessages(mapped)
-        if (mData.messages?.length > 0) {
-          const latest = mData.messages[mData.messages.length - 1]
-          if (latest?.id) {
-            conversationReadTargetsRef.current[nextCharacter.id] = {
-              conversationId: matchingConversation.id,
-              messageId: String(latest.id),
-            }
-            markCharacterRead(nextCharacter.id)
-          }
-        }
-        localStorage.setItem('chatterra_conversationId', matchingConversation.id)
-        conversationCacheRef.current[nextCharacter.id] = {
-          conversationId: matchingConversation.id,
-          messages: mapped,
-          behaviorStatus: cached?.behaviorStatus || 'Online'
-        }
-        return
+      if (!matchingConversation) {
+        matchingConversation = await ensureConversation(nextCharacter.id)
       }
+      if (requestId !== historyRequestRef.current || selectedCharacterIdRef.current !== nextCharacter.id) return
+
+      const mRes = await apiFetch(apiUrl(`/api/conversations/${matchingConversation.id}/messages`))
+      if (!mRes.ok) throw new Error('Could not load the conversation messages.')
+      const mData = await mRes.json()
+      if (requestId !== historyRequestRef.current || selectedCharacterIdRef.current !== nextCharacter.id) return
+      const mapped = mergeMessageUiState(cachedMessages, mapServerMessages(mData.messages || []))
+      setConversationId(matchingConversation.id)
+      setMessages(mapped)
+      if (mData.messages?.length > 0) {
+        const latest = mData.messages[mData.messages.length - 1]
+        if (latest?.id) {
+          conversationReadTargetsRef.current[nextCharacter.id] = {
+            conversationId: matchingConversation.id,
+            messageId: String(latest.id),
+          }
+          markCharacterRead(nextCharacter.id)
+        }
+      }
+      localStorage.setItem('chatterra_conversationId', matchingConversation.id)
+      conversationCacheRef.current[nextCharacter.id] = {
+        conversationId: matchingConversation.id,
+        messages: mapped,
+        behaviorStatus: cached?.behaviorStatus || 'Online'
+      }
+      return
     } catch (e) {
-      // fall through to default greeting
+      // Keep only cached server-backed messages when the network is unavailable.
     }
 
     if (requestId !== historyRequestRef.current || selectedCharacterIdRef.current !== nextCharacter.id) return
-    if (!cached) {
-      const starterMessages: ChatMessage[] = [{
-        id: `starter-${nextCharacter.id}`,
-        sender: 'ai',
-        text: starterMessageForCharacter(nextCharacter),
-      }]
-      setMessages(starterMessages)
-      conversationCacheRef.current[nextCharacter.id] = {
-        conversationId: null,
-        messages: starterMessages,
-        behaviorStatus: 'Online'
-      }
-    }
+    if (!cached) setMessages([])
   }
 
   const openCharacterEditor = (character: Character) => {
@@ -791,20 +788,6 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
           }
           setConversationId(activeConversation.id)
           localStorage.setItem('chatterra_conversationId', activeConversation.id)
-        } else if (!activeConversation && activeCache?.conversationId) {
-          const starterMessages: ChatMessage[] = [{
-            id: `starter-${activeCharacter.id}-${Date.now()}`,
-            sender: 'ai',
-            text: starterMessageForCharacter(activeCharacter),
-          }]
-          conversationCacheRef.current[activeCharacter.id] = {
-            conversationId: null,
-            messages: starterMessages,
-            behaviorStatus: activeCache.behaviorStatus
-          }
-          setConversationId(null)
-          setMessages(starterMessages)
-          localStorage.removeItem('chatterra_conversationId')
         }
       } catch {
         // Keep the last usable local snapshot until connectivity recovers.
@@ -1272,22 +1255,21 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
       body: JSON.stringify({ userId: uid, characterId: targetCharacter.id })
     })
 
-    const starterMessages: ChatMessage[] = [{
-      id: `starter-${targetCharacter.id}-${Date.now()}`,
-      sender: 'ai',
-      text: starterMessageForCharacter(targetCharacter),
-      createdAt: new Date().toISOString(),
-    }]
+    const ensuredConversation = await ensureConversation(targetCharacter.id)
+    const messagesResponse = await apiFetch(apiUrl(`/api/conversations/${ensuredConversation.id}/messages`))
+    if (!messagesResponse.ok) throw new Error('Could not load the new conversation.')
+    const messagesData = await messagesResponse.json()
+    const starterMessages = mapServerMessages(messagesData.messages || [])
     conversationCacheRef.current[targetCharacter.id] = {
-      conversationId: null,
+      conversationId: ensuredConversation.id,
       messages: starterMessages,
       behaviorStatus: 'Online'
     }
     if (selectedCharacterIdRef.current === targetCharacter.id) {
-      setConversationId(null)
+      setConversationId(ensuredConversation.id)
       setMessages(starterMessages)
       setBehaviorStatus('Online')
-      localStorage.removeItem('chatterra_conversationId')
+      localStorage.setItem('chatterra_conversationId', ensuredConversation.id)
     }
   }
 

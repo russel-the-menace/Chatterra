@@ -54,7 +54,6 @@ import {
 } from '@/src/chat-timeline'
 import { contactPreviewForMessage } from '@/src/contact-preview'
 import { mergeMessagePage } from '@/src/message-page-merge'
-import { starterMessageForCharacter } from '@/src/starter-message'
 import { palette } from '@/src/theme'
 import { useVoiceInput } from '@/src/voice-input'
 import { useVoiceMessageRecorder } from '@/src/voice-message-recorder'
@@ -105,15 +104,10 @@ const cloudWaveformHeight = (metering?: number) => {
 }
 
 const visibleHistoryWindow = (messages: ChatMessage[], messageCount = HISTORY_PAGE_SIZE) => (
-  messages.slice(-Math.max(1, messageCount))
+  messages
+    .filter(message => !(message.id.startsWith('starter-') && !message.sourceMessageId))
+    .slice(-Math.max(1, messageCount))
 )
-
-const localStarterMessage = (character: Character, id: string): ChatMessage => ({
-  id,
-  sender: 'assistant',
-  text: starterMessageForCharacter(character),
-  createdAt: new Date().toISOString(),
-})
 
 const cursorForMessage = (message?: ChatMessage): MessageHistoryCursor | undefined => (
   message?.createdAt
@@ -1772,7 +1766,7 @@ export default function ChatScreen() {
 
     try {
       const conversations = await api.listConversations(userId)
-      const matching = conversations
+      let matching = conversations
         .filter(conversation => conversation.characterId === character.id)
         .sort((left, right) => (
           (right.lastMessageAt || right.updatedAt || right.createdAt)
@@ -1786,67 +1780,47 @@ export default function ChatScreen() {
       }
 
       if (!matching) {
-        const cachedHistory = getConversationCache(character.id)
-        if (cachedHistory?.messages.length) {
-          const cachedMessages = visibleHistoryWindow(cachedHistory.messages)
-          setConversationId(cachedHistory.conversationId)
-          setHasMoreHistory(Boolean(
-            cachedHistory.hasMoreHistory || cachedMessages.length < cachedHistory.messages.length
-          ))
-          setOldestMessageCursor(cursorForMessage(cachedMessages[0]) || cachedHistory.oldestMessageCursor)
-          setMessages(cachedMessages)
-          setError(null)
-          return
-        }
-        setConversationId(null)
-        setHasMoreHistory(false)
-        setOldestMessageCursor(undefined)
-        const starterMessages = [localStarterMessage(character, `starter-${character.id}`)]
-        setMessages(starterMessages)
-        setConversationCache(character.id, {
-          conversationId: null,
-          messages: starterMessages,
-          hasMoreHistory: false,
-          cachedAt: Date.now(),
-        })
-      } else {
-        const messagePage = await api.listMessagePage(matching.id, { limit: HISTORY_PAGE_SIZE })
-        if (!requestIsCurrent()) return
-        if (quiet && hasPendingLocalDelivery()) return
-        const cachedHistory = getConversationCache(character.id)
-        const serverMessages = mapMessages(messagePage.messages)
-        const mappedMessages = quiet
-          ? mergeMessagePage(messagesRef.current, serverMessages, 'append')
-          : serverMessages
-        const nextHasMoreHistory = Boolean(cachedHistory?.hasMoreHistory || messagePage.hasMore)
-        const nextOldestMessageCursor = cursorForMessage(mappedMessages[0])
-          || cachedHistory?.oldestMessageCursor
-          || messagePage.nextCursor
-        if (quiet) {
-          const existingIds = new Set(messagesRef.current.map(message => message.id))
-          const newAssistantMessageCount = mappedMessages.filter(message => (
-            message.sender === 'assistant' && !existingIds.has(message.id)
-          )).length
-          if (newAssistantMessageCount > 0
-            && !initialScrollRef.current
-            && messagesRef.current.length > 0) {
-            prepareForIncomingMessage(newAssistantMessageCount)
-          }
-        }
-        setConversationId(matching.id)
-        setHasMoreHistory(nextHasMoreHistory)
-        setOldestMessageCursor(nextOldestMessageCursor)
-        setMessages(mappedMessages)
-        setConversationCache(character.id, {
-          conversationId: matching.id,
-          messages: mappedMessages,
-          hasMoreHistory: nextHasMoreHistory,
-          oldestMessageCursor: nextOldestMessageCursor,
-          cachedAt: Date.now(),
-        })
-        const latestMessage = messagePage.messages.at(-1)
-        if (latestMessage) markCharacterRead(character.id, matching.id, latestMessage.id)
+        matching = await api.ensureConversation(userId, character.id)
       }
+      if (!requestIsCurrent()) return
+      if (quiet && hasPendingLocalDelivery()) return
+
+      const messagePage = await api.listMessagePage(matching.id, { limit: HISTORY_PAGE_SIZE })
+      if (!requestIsCurrent()) return
+      if (quiet && hasPendingLocalDelivery()) return
+      const cachedHistory = getConversationCache(character.id)
+      const serverMessages = mapMessages(messagePage.messages)
+      const mappedMessages = quiet
+        ? mergeMessagePage(messagesRef.current, serverMessages, 'append')
+        : serverMessages
+      const nextHasMoreHistory = Boolean(cachedHistory?.hasMoreHistory || messagePage.hasMore)
+      const nextOldestMessageCursor = cursorForMessage(mappedMessages[0])
+        || cachedHistory?.oldestMessageCursor
+        || messagePage.nextCursor
+      if (quiet) {
+        const existingIds = new Set(messagesRef.current.map(message => message.id))
+        const newAssistantMessageCount = mappedMessages.filter(message => (
+          message.sender === 'assistant' && !existingIds.has(message.id)
+        )).length
+        if (newAssistantMessageCount > 0
+          && !initialScrollRef.current
+          && messagesRef.current.length > 0) {
+          prepareForIncomingMessage(newAssistantMessageCount)
+        }
+      }
+      setConversationId(matching.id)
+      setHasMoreHistory(nextHasMoreHistory)
+      setOldestMessageCursor(nextOldestMessageCursor)
+      setMessages(mappedMessages)
+      setConversationCache(character.id, {
+        conversationId: matching.id,
+        messages: mappedMessages,
+        hasMoreHistory: nextHasMoreHistory,
+        oldestMessageCursor: nextOldestMessageCursor,
+        cachedAt: Date.now(),
+      })
+      const latestMessage = messagePage.messages.at(-1)
+      if (latestMessage) markCharacterRead(character.id, matching.id, latestMessage.id)
       setError(null)
     } catch (loadError) {
       if (!requestIsCurrent()) return
@@ -2102,10 +2076,21 @@ export default function ChatScreen() {
       messageSyncRequestRef.current += 1
       loadingOlderHistoryRef.current = false
       clearConversationCache(character.id)
-      setConversationId(null)
-      setHasMoreHistory(false)
-      setOldestMessageCursor(undefined)
-      setMessages([localStarterMessage(character, `starter-${character.id}-${Date.now()}`)])
+      const conversation = await api.ensureConversation(userId, character.id)
+      const messagePage = await api.listMessagePage(conversation.id, { limit: HISTORY_PAGE_SIZE })
+      const messages = mapMessages(messagePage.messages)
+      const oldestMessageCursor = cursorForMessage(messages[0]) || messagePage.nextCursor
+      setConversationId(conversation.id)
+      setHasMoreHistory(messagePage.hasMore)
+      setOldestMessageCursor(oldestMessageCursor)
+      setMessages(messages)
+      setConversationCache(character.id, {
+        conversationId: conversation.id,
+        messages,
+        hasMoreHistory: messagePage.hasMore,
+        oldestMessageCursor,
+        cachedAt: Date.now(),
+      })
       resetInitialScroll()
       quoteDraftRevisionRef.current += 1
       setQuoteDraft(character.id, null)

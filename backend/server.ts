@@ -649,6 +649,38 @@ app.get('/api/conversations', asyncRoute(async (req, res) => {
   return res.json({ conversations })
 }))
 
+app.post('/api/conversations/ensure', asyncRoute(async (req, res) => {
+  const userId = authenticatedUserId(req)
+  const characterId = typeof req.body?.characterId === 'string' ? req.body.characterId.trim() : ''
+  if (!characterId) return res.status(400).json({ error: 'characterId is required' })
+
+  const character = await getCharacterForUser(userId, characterId)
+  if (!character) return res.status(404).json({ error: 'character not found' })
+
+  const now = new Date().toISOString()
+  const conversationId = newId()
+  const result = await getOrCreateConversationWithStarter(
+    {
+      id: conversationId,
+      userId,
+      characterId: character.id,
+      title: `${character.name} chat`,
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: newId(),
+      conversationId,
+      senderRole: 'assistant',
+      senderId: character.id,
+      content: getStarterMessage(character),
+      createdAt: now,
+    }
+  )
+  return res.status(result.created ? 201 : 200).json(result)
+}))
+
 app.get('/api/conversations/:id/messages', asyncRoute(async (req, res) => {
   const conversation = await getConversation(req.params.id)
   if (!conversation || conversation.userId !== authenticatedUserId(req)) {

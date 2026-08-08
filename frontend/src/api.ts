@@ -46,6 +46,19 @@ export const markConversationRead = async (conversationId: string, messageId: st
   if (!response.ok) throw new Error('Could not mark conversation as read.')
 }
 
+export const ensureConversation = async (characterId: string): Promise<SyncConversation> => {
+  const response = await apiFetch(apiUrl('/api/conversations/ensure'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ characterId }),
+  })
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok || !data.conversation?.id) {
+    throw new Error(typeof data.error === 'string' ? data.error : 'Could not start the conversation.')
+  }
+  return data.conversation as SyncConversation
+}
+
 const normalizeBaseUrl = (value: string) => value.trim().replace(/\/+$/, '')
 
 export const API_BASE_URL = normalizeBaseUrl(
