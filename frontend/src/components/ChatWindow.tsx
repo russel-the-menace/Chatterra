@@ -19,7 +19,9 @@ export default function ChatWindow({
   onLoadOlderMessages,
   onLatestStateChange,
   onToggleTranslation,
-  onToggleVoiceTranscript
+  onToggleVoiceTranscript,
+  onQuoteMessage,
+  onForwardMessage
 }:{
   messages: ChatMessage[]
   character: Character
@@ -31,6 +33,8 @@ export default function ChatWindow({
   onLatestStateChange: (atLatest: boolean) => void
   onToggleTranslation: (message: ChatMessage) => void
   onToggleVoiceTranscript: (message: ChatMessage) => void
+  onQuoteMessage: (message: ChatMessage) => void
+  onForwardMessage: (message: ChatMessage) => void
 }): JSX.Element{
   const ref = useRef<HTMLDivElement | null>(null)
   const scrollPositionsRef = useRef<Record<string, ScrollPosition>>({})
@@ -120,8 +124,8 @@ export default function ChatWindow({
   const openMessageMenu = (event: React.MouseEvent<HTMLDivElement>, message: ChatMessage) => {
     if (message.loading) return
     event.preventDefault()
-    const menuWidth = message.voice?.status === 'ready' ? 154 : 190
-    const menuHeight = 48
+    const menuWidth = message.voice?.status === 'ready' ? 154 : 272
+    const menuHeight = message.voice?.status === 'ready' ? 48 : 92
     setMessageMenu({
       message,
       x: Math.max(8, Math.min(event.clientX, window.innerWidth - menuWidth - 8)),
@@ -197,7 +201,12 @@ export default function ChatWindow({
             className="message-context-menu"
             role="menu"
             aria-label="Message actions"
-            style={{ left: messageMenu.x, top: messageMenu.y }}
+            style={{
+              left: messageMenu.x,
+              top: messageMenu.y,
+              width: messageMenu.message.voice?.status === 'ready' ? 154 : 272,
+              minHeight: messageMenu.message.voice?.status === 'ready' ? 44 : 88,
+            }}
             onMouseDown={event => event.stopPropagation()}
           >
             {messageMenu.message.voice?.status === 'ready' ? (
@@ -217,6 +226,28 @@ export default function ChatWindow({
               </button>
             ) : (
               <>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    const message = messageMenu.message
+                    setMessageMenu(null)
+                    onForwardMessage(message)
+                  }}
+                >
+                  Forward
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    const message = messageMenu.message
+                    setMessageMenu(null)
+                    onQuoteMessage(message)
+                  }}
+                >
+                  Quote
+                </button>
                 <button type="button" role="menuitem" onClick={() => void copyMessage(messageMenu.message)}>
                   Copy
                 </button>

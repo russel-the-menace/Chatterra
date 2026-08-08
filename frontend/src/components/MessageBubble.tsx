@@ -25,6 +25,14 @@ export type UserVoiceMessage = {
 
 export type MessageVoice = AssistantVoiceMessage | UserVoiceMessage
 
+export type MessageQuote = {
+  sourceMessageId?: string
+  segmentIndex: number
+  senderRole: 'user' | 'assistant'
+  senderName: string
+  text: string
+}
+
 export type ChatMessage = {
   id: string
   sender: 'ai' | 'user'
@@ -39,6 +47,7 @@ export type ChatMessage = {
   voice?: MessageVoice
   voiceTranscriptVisible?: boolean
   voiceTranscriptionLoading?: boolean
+  quote?: MessageQuote
   createdAt?: string
 }
 
@@ -157,6 +166,11 @@ export default function MessageBubble({
             msg.text
           )}
         </div>
+        {msg.quote && (
+          <div className={`sent-quote${isUser ? ' sent-quote-user' : ''}`}>
+            <strong>{msg.quote.senderName}: </strong>{msg.quote.text}
+          </div>
+        )}
         {readyVoice && msg.voiceTranscriptVisible && (
           <div className={`voice-transcript${isUser ? ' user-voice-transcript' : ''}`} role="status">
             {msg.voiceTranscriptionLoading ? 'Converting to text...' : msg.text}

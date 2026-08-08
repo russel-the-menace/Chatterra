@@ -1,7 +1,7 @@
 import React, {useCallback, useState, useEffect, useMemo, useRef} from 'react'
 import ChatWindow from '../components/ChatWindow'
 import InputBox, { RecordedVoiceMessage } from '../components/InputBox'
-import { AssistantVoiceMessage, ChatMessage, UserVoiceMessage } from '../components/MessageBubble'
+import { AssistantVoiceMessage, ChatMessage, MessageQuote, UserVoiceMessage } from '../components/MessageBubble'
 import seedCharacter, {characters as seedCharacters, Character} from '../data/character'
 import { VoiceTranscriptMetadata } from '../voice/types'
 import {
@@ -107,8 +107,24 @@ const deliverySegments = (message: any): string[] => {
   }
   return [String(message?.content || '')]
 }
+const parseMessageQuote = (value: unknown): MessageQuote | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const quote = value as Record<string, unknown>
+  if (quote.senderRole !== 'user' && quote.senderRole !== 'assistant') return undefined
+  if (typeof quote.senderName !== 'string' || !quote.senderName.trim()) return undefined
+  if (typeof quote.text !== 'string' || !quote.text.trim()) return undefined
+  if (!Number.isInteger(quote.segmentIndex) || Number(quote.segmentIndex) < 0) return undefined
+  return {
+    sourceMessageId: typeof quote.sourceMessageId === 'string' ? quote.sourceMessageId : undefined,
+    segmentIndex: Number(quote.segmentIndex),
+    senderRole: quote.senderRole,
+    senderName: quote.senderName,
+    text: quote.text,
+  }
+}
 const mapServerMessages = (items: any[]): ChatMessage[] => items.flatMap((message: any) => {
   const segments = deliverySegments(message)
+  const quote = parseMessageQuote(message?.contentJson?.quote)
   const englishTranslations = message?.contentJson?.translations?.en
   const assistantVoice = parseAssistantVoiceMessage(message?.contentJson?.voice)
   const userVoice = parseUserVoiceMessage(message?.contentJson?.voice)
@@ -127,6 +143,7 @@ const mapServerMessages = (items: any[]): ChatMessage[] => items.flatMap((messag
       ? userVoice
       : assistantVoice?.segmentIndex === index ? assistantVoice : undefined,
     voiceTranscriptVisible: false,
+    quote,
   }))
 })
 
@@ -337,6 +354,13 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
   const [characters, setCharacters] = useState<Character[]>(seedCharacters)
   const [selectedCharacter, setSelectedCharacter] = useState<Character>(seedCharacter)
   const [messageDrafts, setMessageDrafts] = useState<Record<string, string>>({})
+  const [quoteDraft, setQuoteDraft] = useState<MessageQuote | null>(null)
+  const [forwardingMessage, setForwardingMessage] = useState<ChatMessage | null>(null)
+  const [forwardTarget, setForwardTarget] = useState<Character | null>(null)
+  const [forwardSearch, setForwardSearch] = useState('')
+  const [forwardNote, setForwardNote] = useState('')
+  const [forwardSubmitting, setForwardSubmitting] = useState(false)
+  const [forwardError, setForwardError] = useState('')
   const [scrollToEndRequest, setScrollToEndRequest] = useState(0)
   const [unseenLatestCount, setUnseenLatestCount] = useState(0)
   const [behaviorStatus, setBehaviorStatus] = useState('Online')
@@ -465,6 +489,17 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
       })
       .map(({ character }) => character)
   }, [characters, lastMessageAtByCharacter, pinnedCharacterIds, pinnedCharacterOrder, searchText])
+
+  const forwardableCharacters = useMemo(() => {
+    const query = forwardSearch.trim().toLowerCase()
+    return characters.filter(character => character.id !== selectedCharacter.id && (!query || (
+      [character.name, character.role, character.company, character.personality]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+        .includes(query)
+    )))
+  }, [characters, forwardSearch, selectedCharacter.id])
 
   const markCharacterActive = (characterId: string, timestamp = new Date().toISOString()) => {
     setLastMessageAtByCharacter(current => {
@@ -1308,6 +1343,7 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
     selectedCharacterIdRef.current = nextCharacter.id
     isAtLatestRef.current = true
     setUnseenLatestCount(0)
+    setQuoteDraft(null)
     setSelectedCharacter(nextCharacter)
     setShowConversationMenu(false)
     const cached = conversationCacheRef.current[nextCharacter.id]
@@ -1521,6 +1557,65 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
       updateMessagesForCharacter(characterId, current => current.map(item => (
         item.id === message.id ? { ...item, voiceTranscriptionLoading: false } : item
       )))
+    }
+  }
+
+  const quoteMessage = (message: ChatMessage) => {
+    const text = message.text.trim()
+    if (!text) return
+    setQuoteDraft({
+      sourceMessageId: message.sourceMessageId,
+      segmentIndex: message.segmentIndex || 0,
+      senderRole: message.sender === 'ai' ? 'assistant' : 'user',
+      senderName: message.sender === 'ai' ? selectedCharacter.name : (userName || 'You'),
+      text,
+    })
+  }
+
+  const closeForwardPicker = (force = false) => {
+    if (forwardSubmitting && !force) return
+    setForwardingMessage(null)
+    setForwardTarget(null)
+    setForwardSearch('')
+    setForwardNote('')
+    setForwardError('')
+  }
+
+  const openForwardPicker = (message: ChatMessage) => {
+    if (!message.text.trim()) return
+    setForwardingMessage(message)
+    setForwardTarget(null)
+    setForwardSearch('')
+    setForwardNote('')
+    setForwardError('')
+  }
+
+  const sendForwardMessage = async () => {
+    const text = forwardingMessage?.text.trim()
+    if (!text || !forwardTarget || forwardSubmitting) return
+    setForwardSubmitting(true)
+    setForwardError('')
+    try {
+      const response = await apiFetch(apiUrl('/api/messages/forward'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetCharacterId: forwardTarget.id,
+          message: text,
+          note: forwardNote.trim() || undefined,
+        }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Could not forward this message.')
+      const latest = data.assistantMessage || (Array.isArray(data.messages) ? data.messages.at(-1) : undefined)
+      const latestText = typeof latest?.content === 'string' && latest.content.trim() ? latest.content.trim() : text
+      markCharacterActive(forwardTarget.id, typeof latest?.createdAt === 'string' ? latest.createdAt : new Date().toISOString())
+      setProactivePreviews(current => ({ ...current, [forwardTarget.id]: latestText }))
+      closeForwardPicker(true)
+    } catch (error) {
+      setForwardError(error instanceof Error ? error.message : 'Could not forward this message.')
+    } finally {
+      setForwardSubmitting(false)
     }
   }
 
@@ -1743,13 +1838,22 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
     const targetCharacterId = targetCharacter.id
     const targetConversationId = conversationId
     const messageCreatedAt = new Date().toISOString()
+    const messageQuote = voice ? undefined : quoteDraft || undefined
     markCharacterActive(targetCharacterId)
     scrollToLatest()
-    const userMsg: ChatMessage = { id: makeMessageId(), sender: 'user', text, segmentIndex: 0, createdAt: messageCreatedAt }
+    const userMsg: ChatMessage = {
+      id: makeMessageId(),
+      sender: 'user',
+      text,
+      segmentIndex: 0,
+      quote: messageQuote,
+      createdAt: messageCreatedAt,
+    }
     const loadingId = makeMessageId()
     const loadingMsg: ChatMessage = { id: loadingId, sender: 'ai', text: '', loading: true, createdAt: messageCreatedAt }
 
     setMessages(prev => [...prev, userMsg, loadingMsg])
+    if (messageQuote) setQuoteDraft(null)
 
     void (async () => {
       try {
@@ -1761,6 +1865,7 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
             character: targetCharacter,
             userId,
             conversationId: targetConversationId,
+            quote: messageQuote,
             voice: voice
               ? {
                   originalText: voice.originalText,
@@ -1988,6 +2093,8 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
           onLatestStateChange={handleLatestStateChange}
           onToggleTranslation={toggleMessageTranslation}
           onToggleVoiceTranscript={toggleVoiceTranscript}
+          onQuoteMessage={quoteMessage}
+          onForwardMessage={openForwardPicker}
         />
         {unseenLatestCount > 0 && (
           <div className="new-messages-control">
@@ -2001,6 +2108,23 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
             </button>
           </div>
         )}
+        {quoteDraft && (
+          <div className="quote-draft" role="status">
+            <div className="quote-draft-copy">
+              <span className="quote-draft-label">Replying to {quoteDraft.senderName}</span>
+              <span className="quote-draft-text">{quoteDraft.text}</span>
+            </div>
+            <button
+              type="button"
+              className="quote-draft-close"
+              onClick={() => setQuoteDraft(null)}
+              aria-label="Cancel quote"
+              title="Cancel quote"
+            >
+              ×
+            </button>
+          </div>
+        )}
         <InputBox
           key={selectedCharacter.id}
           onSend={sendMessage}
@@ -2010,6 +2134,84 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
           onDraftChange={handleDraftChange}
         />
       </main>
+
+      {forwardingMessage && (
+        <div className="forward-modal-backdrop" onClick={() => closeForwardPicker()}>
+          <div
+            className="forward-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="forward-modal-title"
+            onClick={event => event.stopPropagation()}
+          >
+            <div className="forward-modal-header">
+              <div id="forward-modal-title" className="forward-modal-title">Forward to</div>
+              <button
+                type="button"
+                className="forward-modal-close"
+                onClick={() => closeForwardPicker()}
+                disabled={forwardSubmitting}
+                aria-label="Close forwarding"
+              >
+                ×
+              </button>
+            </div>
+            <div className="forward-message-preview">
+              <span className="forward-message-preview-label">Message</span>
+              <span className="forward-message-preview-text">{forwardingMessage.text}</span>
+            </div>
+            <input
+              className="forward-search"
+              value={forwardSearch}
+              onChange={event => setForwardSearch(event.target.value)}
+              placeholder="Search contacts"
+              aria-label="Search contacts"
+            />
+            <div className="forward-contact-list">
+              {forwardableCharacters.length === 0 ? (
+                <div className="forward-empty">No matching contacts.</div>
+              ) : forwardableCharacters.map(character => (
+                <button
+                  type="button"
+                  key={character.id}
+                  className={`forward-contact${forwardTarget?.id === character.id ? ' selected' : ''}`}
+                  onClick={() => setForwardTarget(character)}
+                  disabled={forwardSubmitting}
+                >
+                  <span className="forward-contact-avatar">{avatarContent(character)}</span>
+                  <span className="forward-contact-name">{character.name}</span>
+                  {forwardTarget?.id === character.id && <span className="forward-contact-check" aria-hidden="true">✓</span>}
+                </button>
+              ))}
+            </div>
+            {forwardTarget && (
+              <div className="forward-target-summary">
+                <span>To {forwardTarget.name}</span>
+                <textarea
+                  value={forwardNote}
+                  onChange={event => setForwardNote(event.target.value)}
+                  placeholder="Add a message"
+                  maxLength={20000}
+                  rows={2}
+                  aria-label="Forward note"
+                />
+              </div>
+            )}
+            {forwardError && <div className="forward-error" role="alert">{forwardError}</div>}
+            <div className="forward-modal-actions">
+              <button type="button" className="secondary" onClick={() => closeForwardPicker()} disabled={forwardSubmitting}>Cancel</button>
+              <button
+                type="button"
+                className="primary"
+                onClick={() => void sendForwardMessage()}
+                disabled={!forwardTarget || forwardSubmitting}
+              >
+                {forwardSubmitting ? 'Sending...' : 'Send'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showCharacterEditor && editingCharacter && (
         <div className="character-modal-backdrop" onClick={closeCharacterEditor}>
