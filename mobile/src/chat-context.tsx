@@ -1031,12 +1031,12 @@ export function ChatProvider({ children }: PropsWithChildren) {
     conversationCacheRef.current.set(characterId, stableEntry)
     scheduleConversationCachePersistence(characterId, persistentConversationEntry(stableEntry))
     const latestCachedMessage = latestDisplayableMessage(stableEntry)
-    if (latestCachedMessage) {
+    if (latestCachedMessage?.createdAt) {
       updateContactPreviews([{
         characterId,
         conversationId: stableEntry.conversationId || undefined,
         preview: contactPreviewForMessage(latestCachedMessage),
-        timestamp: latestCachedMessage.createdAt || new Date(stableEntry.cachedAt).toISOString(),
+        timestamp: latestCachedMessage.createdAt,
       }])
     }
   }, [scheduleConversationCachePersistence, updateContactPreviews])

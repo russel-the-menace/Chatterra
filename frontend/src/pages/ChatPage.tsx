@@ -370,7 +370,6 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
         id: `starter-${nextCharacter.id}`,
         sender: 'ai',
         text: starterMessageForCharacter(nextCharacter),
-        createdAt: new Date().toISOString(),
       }]
       setMessages(starterMessages)
       conversationCacheRef.current[nextCharacter.id] = {
@@ -797,7 +796,6 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
             id: `starter-${activeCharacter.id}-${Date.now()}`,
             sender: 'ai',
             text: starterMessageForCharacter(activeCharacter),
-            createdAt: new Date().toISOString(),
           }]
           conversationCacheRef.current[activeCharacter.id] = {
             conversationId: null,

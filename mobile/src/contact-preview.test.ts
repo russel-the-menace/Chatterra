@@ -75,6 +75,8 @@ const voiceCache: ConversationHistoryCache = {
 const voiceState = buildContactPreviewState([maya], undefined, new Map([[maya.id, voiceCache]]))
 expect(voiceState.previews[maya.id] === '[Audio] 18\"',
   'a latest voice message should display its rounded audio duration')
+expect(voiceState.lastMessageAtByCharacter[maya.id] === undefined,
+  'a cached message without a persisted timestamp must not be shown as recent')
 
 expect(contactPreviewForServerMessage({
   content: 'hey, i am just lying here.\nmy brain is finally quiet for once 🥺💕\nwhat are you up to?',

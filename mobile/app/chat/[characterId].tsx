@@ -108,15 +108,6 @@ const visibleHistoryWindow = (messages: ChatMessage[], messageCount = HISTORY_PA
   messages.slice(-Math.max(1, messageCount))
 )
 
-const stampLegacyStarterMessages = (messages: ChatMessage[]) => {
-  const createdAt = new Date().toISOString()
-  return messages.map(message => (
-    message.id.startsWith('starter-') && !message.createdAt
-      ? { ...message, createdAt }
-      : message
-  ))
-}
-
 const localStarterMessage = (character: Character, id: string): ChatMessage => ({
   id,
   sender: 'assistant',
@@ -1139,7 +1130,7 @@ export default function ChatScreen() {
   const initialListViewStateRef = useRef(
     characterId ? getConversationListViewState(characterId) : undefined
   )
-  const initialCachedMessages = stampLegacyStarterMessages(initialCacheRef.current?.messages || [])
+  const initialCachedMessages = initialCacheRef.current?.messages || []
   const initialCachedLatestMessage = initialCachedMessages.at(-1)
   const initialListViewState = initialListViewStateRef.current
   const hasInitialListViewState = Boolean(
@@ -1797,7 +1788,7 @@ export default function ChatScreen() {
       if (!matching) {
         const cachedHistory = getConversationCache(character.id)
         if (cachedHistory?.messages.length) {
-          const cachedMessages = visibleHistoryWindow(stampLegacyStarterMessages(cachedHistory.messages))
+          const cachedMessages = visibleHistoryWindow(cachedHistory.messages)
           setConversationId(cachedHistory.conversationId)
           setHasMoreHistory(Boolean(
             cachedHistory.hasMoreHistory || cachedMessages.length < cachedHistory.messages.length
@@ -1908,7 +1899,7 @@ export default function ChatScreen() {
         // Cached history can be painted immediately. The inverted list starts
         // at its latest edge without waiting for dynamic row measurement.
         const cachedMessages = visibleHistoryWindow(
-          stampLegacyStarterMessages(cachedHistory.messages),
+          cachedHistory.messages,
           hasInitialListViewState ? initialDisplayMessageCount : HISTORY_PAGE_SIZE
         )
         messagesRef.current = cachedMessages
