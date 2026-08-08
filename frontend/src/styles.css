@@ -131,8 +131,8 @@ body.modal-open{overflow:hidden}
 }
 .workspace-rail-settings:hover{background:rgba(255,255,255,0.1);color:#fff}
 .workspace-rail-settings svg{
-  width:30px;
-  height:30px;
+  width:27px;
+  height:27px;
   display:block;
   fill:none;
   stroke:currentColor;
