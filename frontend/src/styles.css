@@ -521,7 +521,7 @@ body.modal-open{overflow:hidden}
 .chat-window{
   flex:1;
   min-height:0;
-  padding:24px 22px 18px;
+  padding:24px 22px 0;
   overflow-y:auto;
   overflow-x:hidden;
   overscroll-behavior:contain;
@@ -1402,7 +1402,7 @@ body.modal-open{overflow:hidden}
   .workspace-rail{display:none}
   .contacts-pane{display:none}
   .chat-pane{min-height:100vh}
-  .chat-window{padding:18px 14px 16px}
+  .chat-window{padding:18px 14px 0}
   .input-box{padding:14px}
   .message-content{max-width:82%}
 }
