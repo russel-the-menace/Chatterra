@@ -99,6 +99,7 @@ body.modal-open{overflow:hidden}
 }
 
 .contacts-header{
+  --contacts-header-control-size:39.2px;
   display:flex;
   align-items:center;
   gap:12px;
@@ -111,7 +112,7 @@ body.modal-open{overflow:hidden}
   display:flex;
   align-items:center;
   gap:10px;
-  height:56px;
+  height:var(--contacts-header-control-size);
   padding:0 16px;
   background:#f5f6f8;
   border-radius:16px;
@@ -139,8 +140,8 @@ body.modal-open{overflow:hidden}
 }
 
 .wechat-add-button{
-  width:39.2px;
-  height:39.2px;
+  width:var(--contacts-header-control-size);
+  height:var(--contacts-header-control-size);
   border-radius:50%;
   border:2px solid #555;
   background:#fff;
