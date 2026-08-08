@@ -194,6 +194,14 @@ export const getAuthenticatedUser = async (accessToken: string): Promise<Authent
   }
 }
 
+export const getUserCreatedAt = async (userId: string): Promise<string | undefined> => {
+  const result = await query(
+    'SELECT created_at FROM users WHERE id = $1 LIMIT 1',
+    [userId]
+  )
+  return result.rows[0] ? iso(result.rows[0].created_at) : undefined
+}
+
 export const deleteAuthenticatedSession = async (accessToken: string) => {
   if (!accessToken) return
   await query('DELETE FROM auth_sessions WHERE token_hash = $1', [hashAccessToken(accessToken)])
@@ -1185,7 +1193,8 @@ export const normalizeConversationStarterCreatedAt = async (
   userId: string,
   characterId: string,
   starterText: string,
-  createdAt: string
+  createdAt: string,
+  starterTimestampPolicy: string
 ) => {
   return withTransaction(async client => {
     const result = await client.query(
@@ -1199,6 +1208,7 @@ export const normalizeConversationStarterCreatedAt = async (
          WHERE c.user_id = $1
            AND c.character_id = $2
            AND c.status = 'active'
+           AND c.metadata->>'starterTimestampPolicy' IS DISTINCT FROM $5
            AND m.sender_role = 'assistant'
            AND m.content = $3
          ORDER BY m.conversation_id, m.created_at ASC, m.id ASC
@@ -1218,11 +1228,17 @@ export const normalizeConversationStarterCreatedAt = async (
          last_read_message_at = CASE
            WHEN c.last_read_message_at = u.previous_created_at THEN $4::timestamptz
            ELSE c.last_read_message_at
-         END
+         END,
+         metadata = jsonb_set(
+           COALESCE(c.metadata, '{}'::jsonb),
+           '{starterTimestampPolicy}',
+           to_jsonb($5::text),
+           TRUE
+         )
        FROM updated_starters u
        WHERE c.id = u.conversation_id
        RETURNING c.id`,
-      [userId, characterId, starterText, createdAt]
+      [userId, characterId, starterText, createdAt, starterTimestampPolicy]
     )
     return result.rowCount > 0
   })

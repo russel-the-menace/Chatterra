@@ -72,6 +72,7 @@ import {
   listPinnedCharacterIds,
   normalizeConversationStarterCreatedAt,
   newId,
+  getUserCreatedAt,
   setBuiltInCharacterAvatar,
   setCharacterPinned,
   setUserAvatar,
@@ -236,20 +237,38 @@ const getStarterMessage = (character?: Character) => {
   return starterMessageForPolicy(character?.name || 'Interviewer', languagePolicy)
 }
 
+const STARTER_TIMESTAMP_POLICY = 'account-or-character-created-at-v1'
+
 const fixedStarterMessageCreatedAt = () => {
   const year = new Date().getFullYear()
   return new Date(`${year}-07-01T12:00:00+08:00`).toISOString()
 }
 
-const starterMessageCreatedAt = (character: Character) => (
-  character.ownerUserId ? new Date().toISOString() : fixedStarterMessageCreatedAt()
+const starterMessageCreatedAt = (userCreatedAt: string, character: Character) => (
+  character.ownerUserId ? character.createdAt : userCreatedAt
 )
+
+const starterMessageCreatedAtForUser = async (userId: string, character: Character) => {
+  const userCreatedAt = await getUserCreatedAt(userId)
+  if (!userCreatedAt) throw new Error('authenticated user not found')
+  return starterMessageCreatedAt(userCreatedAt, character)
+}
+
+const starterConversationMetadata = {
+  starterTimestampPolicy: STARTER_TIMESTAMP_POLICY
+}
 
 const ensuredStarterKeys = new Set<string>()
 
-const ensureConversationForCharacter = async (userId: string, character: Character) => {
+const ensureConversationForCharacter = async (
+  userId: string,
+  character: Character,
+  userCreatedAt?: string
+) => {
+  const accountCreatedAt = userCreatedAt || await getUserCreatedAt(userId)
+  if (!accountCreatedAt) throw new Error('authenticated user not found')
   const now = new Date().toISOString()
-  const starterCreatedAt = starterMessageCreatedAt(character)
+  const starterCreatedAt = starterMessageCreatedAt(accountCreatedAt, character)
   const conversationId = newId()
   const result = await getOrCreateConversationWithStarter(
     {
@@ -258,6 +277,7 @@ const ensureConversationForCharacter = async (userId: string, character: Charact
       characterId: character.id,
       title: `${character.name} chat`,
       status: 'active',
+      metadata: starterConversationMetadata,
       createdAt: now,
       updatedAt: now,
     },
@@ -270,12 +290,15 @@ const ensureConversationForCharacter = async (userId: string, character: Charact
       createdAt: starterCreatedAt,
     }
   )
-  if (!character.ownerUserId) {
+  if (
+    result.conversation.metadata?.starterTimestampPolicy !== STARTER_TIMESTAMP_POLICY
+  ) {
     await normalizeConversationStarterCreatedAt(
       userId,
       character.id,
       getStarterMessage(character),
-      fixedStarterMessageCreatedAt()
+      fixedStarterMessageCreatedAt(),
+      STARTER_TIMESTAMP_POLICY
     )
   }
   ensuredStarterKeys.add(`${userId}:${character.id}`)
@@ -285,7 +308,9 @@ const ensureConversationForCharacter = async (userId: string, character: Charact
 const ensureContactStarters = async (userId: string, characters: Character[]) => {
   const pending = characters.filter(character => !ensuredStarterKeys.has(`${userId}:${character.id}`))
   if (pending.length === 0) return false
-  await Promise.all(pending.map(character => ensureConversationForCharacter(userId, character)))
+  const userCreatedAt = await getUserCreatedAt(userId)
+  if (!userCreatedAt) throw new Error('authenticated user not found')
+  await Promise.all(pending.map(character => ensureConversationForCharacter(userId, character, userCreatedAt)))
   return true
 }
 
@@ -868,6 +893,7 @@ app.post(
           userId,
           characterId: character.id,
           status: 'active',
+          metadata: starterConversationMetadata,
           createdAt: now,
           updatedAt: now,
         },
@@ -877,7 +903,7 @@ app.post(
           senderRole: 'assistant',
           senderId: character.id,
           content: getStarterMessage(character),
-          createdAt: starterMessageCreatedAt(character),
+          createdAt: await starterMessageCreatedAtForUser(userId, character),
         }
       )
       conversation = created.conversation
@@ -1283,6 +1309,7 @@ app.post('/api/messages/forward', asyncRoute(async (req, res) => {
       characterId: character.id,
       title: `${character.name} chat`,
       status: 'active',
+      metadata: starterConversationMetadata,
       createdAt: now.toISOString(),
       updatedAt: now.toISOString(),
     },
@@ -1292,7 +1319,7 @@ app.post('/api/messages/forward', asyncRoute(async (req, res) => {
       senderRole: 'assistant',
       senderId: character.id,
       content: getStarterMessage(character),
-      createdAt: starterMessageCreatedAt(character),
+      createdAt: await starterMessageCreatedAtForUser(userId, character),
     }
   )
 
@@ -1509,6 +1536,7 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
       characterId: storedCharacter.id,
       title: `${storedCharacter.name} chat`,
       status: 'active',
+      metadata: starterConversationMetadata,
       createdAt: now,
       updatedAt: now
     }
@@ -1518,7 +1546,7 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
       senderRole: 'assistant',
       senderId: storedCharacter.id,
       content: getStarterMessage(storedCharacter),
-      createdAt: starterMessageCreatedAt(storedCharacter)
+      createdAt: await starterMessageCreatedAtForUser(normalizedUserId, storedCharacter)
     }
     if (quoteInput && !quoteInput.sourceMessageId) {
       try {
