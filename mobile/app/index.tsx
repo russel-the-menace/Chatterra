@@ -405,6 +405,8 @@ const styles = StyleSheet.create({
   },
   contactPinned: {
     backgroundColor: '#F6F7F8',
+    marginHorizontal: -8,
+    paddingHorizontal: 16,
   },
   contactContent: {
     flex: 1,
