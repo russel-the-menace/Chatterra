@@ -237,6 +237,17 @@ const getStarterMessage = (character?: Character) => {
   return starterMessageForPolicy(character?.name || 'Interviewer', languagePolicy)
 }
 
+const starterMessagesForNormalization = (character: Character) => {
+  const messages = [getStarterMessage(character)]
+  if (character.id === 'seed-minjun-friend') {
+    messages.push('안녕, 민준이야. 오늘 수업 어땠어? 난 선형대수 과제에 아직도 붙잡혀 있어.')
+  }
+  if (character.id === 'seed-ren-friend') {
+    messages.push('やあ、蓮だよ。今日の授業どうだった？こっちは解析の課題にずっと捕まってた。')
+  }
+  return [...new Set(messages)]
+}
+
 // v2 marks conversations after the one-time legacy starter correction has run.
 const STARTER_TIMESTAMP_POLICY = 'account-or-character-created-at-v2'
 
@@ -297,7 +308,7 @@ const ensureConversationForCharacter = async (
     await normalizeConversationStarterCreatedAt(
       userId,
       character.id,
-      getStarterMessage(character),
+      starterMessagesForNormalization(character),
       fixedStarterMessageCreatedAt(),
       STARTER_TIMESTAMP_POLICY
     )

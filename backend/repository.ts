@@ -1192,7 +1192,7 @@ export const getOrCreateConversationWithStarter = async (
 export const normalizeConversationStarterCreatedAt = async (
   userId: string,
   characterId: string,
-  starterText: string,
+  starterTexts: string[],
   createdAt: string,
   starterTimestampPolicy: string
 ) => {
@@ -1210,7 +1210,7 @@ export const normalizeConversationStarterCreatedAt = async (
            AND c.status = 'active'
            AND c.metadata->>'starterTimestampPolicy' IS DISTINCT FROM $5
            AND m.sender_role = 'assistant'
-           AND m.content = $3
+           AND m.content = ANY($3::text[])
          ORDER BY m.conversation_id, m.created_at ASC, m.id ASC
        ), updated_starters AS (
          UPDATE messages m
@@ -1238,7 +1238,7 @@ export const normalizeConversationStarterCreatedAt = async (
        FROM updated_starters u
        WHERE c.id = u.conversation_id
        RETURNING c.id`,
-      [userId, characterId, starterText, createdAt, starterTimestampPolicy]
+      [userId, characterId, starterTexts, createdAt, starterTimestampPolicy]
     )
     return result.rowCount > 0
   })

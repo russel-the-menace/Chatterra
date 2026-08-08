@@ -5,6 +5,7 @@ import { AssistantVoiceMessage, ChatMessage, UserVoiceMessage } from '../compone
 import seedCharacter, {characters as seedCharacters, Character} from '../data/character'
 import { VoiceTranscriptMetadata } from '../voice/types'
 import {
+  API_BASE_URL,
   apiFetch,
   apiUrl,
   ensureConversation,
@@ -20,15 +21,18 @@ import {
 
 type CharacterTextKey = 'name' | 'role' | 'company' | 'scenario' | 'goal' | 'language' | 'personality' | 'background' | 'systemPromptTemplate'
 type Point = { x: number; y: number }
+type MessageHistoryCursor = {
+  createdAt: string
+  id: string
+}
+
 type ConversationCacheEntry = {
   conversationId: string | null
   messages: ChatMessage[]
   behaviorStatus: string
-}
-
-type MessageHistoryCursor = {
-  createdAt: string
-  id: string
+  hasMoreHistory?: boolean
+  oldestMessageCursor?: MessageHistoryCursor
+  cachedAt?: number
 }
 
 type MessageHistoryState = {
@@ -39,6 +43,7 @@ type MessageHistoryState = {
 }
 
 const makeMessageId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`
+const HISTORY_PAGE_SIZE = 20
 const hasSameOrder = (left: string[], right: string[]) => (
   left.length === right.length && left.every((value, index) => value === right[index])
 )
@@ -193,6 +198,88 @@ const stableMessagesForCache = (messages: ChatMessage[]) => messages
   .filter(message => !message.loading)
   .map(({ translationLoading: _translationLoading, translationError: _translationError, ...message }) => message)
 
+const conversationCacheKey = (userId: string, characterId: string) => (
+  `chatterra.web.conversationCache.v1.${encodeURIComponent(API_BASE_URL)}.${encodeURIComponent(userId)}.${encodeURIComponent(characterId)}`
+)
+
+const persistentConversationCache = (entry: ConversationCacheEntry): ConversationCacheEntry => {
+  const messages = stableMessagesForCache(entry.messages)
+    .filter(message => !isUnpersistedStarter(message))
+    .filter(message => Boolean(message.sourceMessageId))
+    .slice(-200)
+    .map(message => (
+      message.voice?.audioUrl?.startsWith('blob:')
+        ? { ...message, voice: undefined }
+        : message
+    ))
+  const oldestMessage = messages[0]
+  return {
+    conversationId: entry.conversationId,
+    messages,
+    behaviorStatus: entry.behaviorStatus,
+    hasMoreHistory: entry.hasMoreHistory,
+    oldestMessageCursor: oldestMessage?.createdAt
+      ? {
+          createdAt: oldestMessage.createdAt,
+          id: oldestMessage.sourceMessageId || oldestMessage.id,
+        }
+      : entry.oldestMessageCursor,
+    cachedAt: entry.cachedAt || Date.now(),
+  }
+}
+
+const validCachedMessage = (value: unknown): value is ChatMessage => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const message = value as Record<string, unknown>
+  return typeof message.id === 'string'
+    && Boolean(message.id)
+    && (message.sender === 'ai' || message.sender === 'user')
+    && typeof message.text === 'string'
+}
+
+const readStoredConversationCache = (userId: string, characterId: string): ConversationCacheEntry | undefined => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(conversationCacheKey(userId, characterId)) || 'null')
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined
+    const cache = parsed as Record<string, unknown>
+    if (cache.conversationId !== null && typeof cache.conversationId !== 'string') return undefined
+    if (!Array.isArray(cache.messages) || !Number.isFinite(cache.cachedAt)) return undefined
+    const oldestMessageCursor = cache.oldestMessageCursor
+    const cursor = oldestMessageCursor
+      && typeof oldestMessageCursor === 'object'
+      && !Array.isArray(oldestMessageCursor)
+      && typeof (oldestMessageCursor as Record<string, unknown>).createdAt === 'string'
+      && typeof (oldestMessageCursor as Record<string, unknown>).id === 'string'
+        ? oldestMessageCursor as MessageHistoryCursor
+        : undefined
+    return {
+      conversationId: cache.conversationId,
+      messages: cache.messages.filter(validCachedMessage) as ChatMessage[],
+      behaviorStatus: typeof cache.behaviorStatus === 'string' ? cache.behaviorStatus : 'Online',
+      hasMoreHistory: cache.hasMoreHistory === true,
+      oldestMessageCursor: cursor,
+      cachedAt: Number(cache.cachedAt),
+    }
+  } catch {
+    return undefined
+  }
+}
+
+const writeStoredConversationCache = (
+  userId: string,
+  characterId: string,
+  entry: ConversationCacheEntry
+) => {
+  try {
+    localStorage.setItem(
+      conversationCacheKey(userId, characterId),
+      JSON.stringify(persistentConversationCache(entry))
+    )
+  } catch {
+    // The live transcript remains usable when browser storage is unavailable.
+  }
+}
+
 const avatarContent = (character: Pick<Character, 'avatar' | 'name'>) => {
   if (isImageAvatar(character.avatar)) {
     return <img src={character.avatar} alt="" />
@@ -291,6 +378,12 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
   const conversationReadTargetsRef = useRef<Record<string, { conversationId: string; messageId: string }>>({})
   const readRequestTargetsRef = useRef<Record<string, string>>({})
   const isAtLatestRef = useRef(true)
+  const conversationCacheTimersRef = useRef(new Map<string, number>())
+  const pendingConversationCachesRef = useRef(new Map<string, {
+    userId: string
+    characterId: string
+    entry: ConversationCacheEntry
+  }>())
 
   const handleLatestStateChange = useCallback((atLatest: boolean) => {
     isAtLatestRef.current = atLatest
@@ -303,9 +396,50 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
     setScrollToEndRequest(current => current + 1)
   }, [])
 
+  const flushConversationCacheWrites = useCallback(() => {
+    conversationCacheTimersRef.current.forEach(timer => window.clearTimeout(timer))
+    conversationCacheTimersRef.current.clear()
+    pendingConversationCachesRef.current.forEach(({ userId: cacheUserId, characterId, entry }) => {
+      writeStoredConversationCache(cacheUserId, characterId, entry)
+    })
+    pendingConversationCachesRef.current.clear()
+  }, [])
+
+  const scheduleConversationCacheWrite = useCallback((
+    cacheUserId: string,
+    characterId: string,
+    entry: ConversationCacheEntry
+  ) => {
+    const key = `${cacheUserId}:${characterId}`
+    pendingConversationCachesRef.current.set(key, {
+      userId: cacheUserId,
+      characterId,
+      entry: persistentConversationCache(entry)
+    })
+    if (conversationCacheTimersRef.current.has(key)) return
+    const timer = window.setTimeout(() => {
+      conversationCacheTimersRef.current.delete(key)
+      const pending = pendingConversationCachesRef.current.get(key)
+      pendingConversationCachesRef.current.delete(key)
+      if (pending) writeStoredConversationCache(pending.userId, pending.characterId, pending.entry)
+    }, 250)
+    conversationCacheTimersRef.current.set(key, timer)
+  }, [])
+
   useEffect(() => {
     messagesRef.current = messages
   }, [messages])
+
+  useEffect(() => {
+    const flushOnHidden = () => {
+      if (document.visibilityState === 'hidden') flushConversationCacheWrites()
+    }
+    document.addEventListener('visibilitychange', flushOnHidden)
+    return () => {
+      document.removeEventListener('visibilitychange', flushOnHidden)
+      flushConversationCacheWrites()
+    }
+  }, [flushConversationCacheWrites])
 
   const visibleCharacters = useMemo(() => {
     const query = searchText.trim().toLowerCase()
@@ -359,12 +493,24 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
   const loadHistoryForCharacter = async (uid: string, nextCharacter: Character) => {
     const requestId = historyRequestRef.current + 1
     historyRequestRef.current = requestId
-    const cached = conversationCacheRef.current[nextCharacter.id]
+    let cached: ConversationCacheEntry | undefined = conversationCacheRef.current[nextCharacter.id]
+    if (!cached) {
+      cached = readStoredConversationCache(uid, nextCharacter.id)
+      if (cached) conversationCacheRef.current[nextCharacter.id] = cached
+    }
     const cachedMessages = cached?.messages.filter(message => !isUnpersistedStarter(message)) || []
     if (cached) {
       setConversationId(cached.conversationId)
       setMessages(cachedMessages)
       setBehaviorStatus(cached.behaviorStatus)
+      if (cached.conversationId) {
+        messageHistoryRef.current[nextCharacter.id] = {
+          conversationId: cached.conversationId,
+          hasMore: Boolean(cached.hasMoreHistory),
+          nextCursor: cached.oldestMessageCursor,
+          loading: false
+        }
+      }
     } else {
       setConversationId(null)
       setMessages([])
@@ -386,11 +532,16 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
       }
       if (requestId !== historyRequestRef.current || selectedCharacterIdRef.current !== nextCharacter.id) return
 
-      const mRes = await apiFetch(apiUrl(`/api/conversations/${matchingConversation.id}/messages`))
+      const mRes = await apiFetch(
+        apiUrl(`/api/conversations/${matchingConversation.id}/messages?limit=${HISTORY_PAGE_SIZE}`)
+      )
       if (!mRes.ok) throw new Error('Could not load the conversation messages.')
       const mData = await mRes.json()
       if (requestId !== historyRequestRef.current || selectedCharacterIdRef.current !== nextCharacter.id) return
-      const mapped = mergeMessageUiState(cachedMessages, mapServerMessages(mData.messages || []))
+      const cachedMessagesForConversation = cached?.conversationId === matchingConversation.id
+        ? cachedMessages
+        : []
+      const mapped = mergeMessageUiState(cachedMessagesForConversation, mapServerMessages(mData.messages || []))
       const existingHistory = messageHistoryRef.current[nextCharacter.id]
       if (!existingHistory || existingHistory.conversationId !== matchingConversation.id) {
         messageHistoryRef.current[nextCharacter.id] = {
@@ -399,6 +550,9 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
           nextCursor: mData.nextCursor,
           loading: false
         }
+      } else {
+        existingHistory.hasMore = existingHistory.hasMore || Boolean(mData.hasMore)
+        existingHistory.nextCursor = existingHistory.nextCursor || mData.nextCursor
       }
       setConversationId(matchingConversation.id)
       setMessages(mapped)
@@ -417,8 +571,12 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
       conversationCacheRef.current[nextCharacter.id] = {
         conversationId: matchingConversation.id,
         messages: mapped,
-        behaviorStatus: cached?.behaviorStatus || 'Online'
+        behaviorStatus: cached?.behaviorStatus || 'Online',
+        hasMoreHistory: messageHistoryRef.current[nextCharacter.id]?.hasMore,
+        oldestMessageCursor: messageHistoryRef.current[nextCharacter.id]?.nextCursor,
+        cachedAt: Date.now()
       }
+      scheduleConversationCacheWrite(uid, nextCharacter.id, conversationCacheRef.current[nextCharacter.id])
       return
     } catch (e) {
       // Keep only cached server-backed messages when the network is unavailable.
@@ -426,6 +584,65 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
 
     if (requestId !== historyRequestRef.current || selectedCharacterIdRef.current !== nextCharacter.id) return
     if (!cached) setMessages([])
+  }
+
+  const preloadContactFirstPages = async (
+    uid: string,
+    contacts: Character[],
+    activeCharacterId: string
+  ) => {
+    try {
+      const conversationsResponse = await apiFetch(apiUrl('/api/conversations'))
+      if (!conversationsResponse.ok) return
+      const conversationsData = await conversationsResponse.json()
+      const conversationsByCharacter = new Map<string, any>()
+      ;(conversationsData.conversations || []).forEach((conversation: any) => {
+        const current = conversationsByCharacter.get(conversation.characterId)
+        const currentTimestamp = current?.lastMessageAt || current?.updatedAt || current?.createdAt || ''
+        const nextTimestamp = conversation.lastMessageAt || conversation.updatedAt || conversation.createdAt || ''
+        if (!current || nextTimestamp > currentTimestamp) {
+          conversationsByCharacter.set(conversation.characterId, conversation)
+        }
+      })
+
+      const contactsToPreload = contacts.filter(character => character.id !== activeCharacterId)
+      for (let index = 0; index < contactsToPreload.length; index += 3) {
+        await Promise.all(contactsToPreload.slice(index, index + 3).map(async character => {
+          let conversation = conversationsByCharacter.get(character.id)
+          if (!conversation) conversation = await ensureConversation(character.id)
+          const response = await apiFetch(
+            apiUrl(`/api/conversations/${encodeURIComponent(conversation.id)}/messages?limit=${HISTORY_PAGE_SIZE}`)
+          )
+          if (!response.ok) return
+          const page = await response.json()
+          const existing = conversationCacheRef.current[character.id]
+            || readStoredConversationCache(uid, character.id)
+          const existingMessages = existing?.conversationId === conversation.id
+            ? existing.messages.filter(message => !isUnpersistedStarter(message))
+            : []
+          const mergedMessages = mergeMessageUiState(
+            existingMessages,
+            mapServerMessages(Array.isArray(page.messages) ? page.messages : [])
+          )
+          const entry: ConversationCacheEntry = {
+            conversationId: conversation.id,
+            messages: mergedMessages,
+            behaviorStatus: existing?.behaviorStatus || 'Online',
+            hasMoreHistory: Boolean(
+              (existing?.conversationId === conversation.id && existing.hasMoreHistory) || page.hasMore
+            ),
+            oldestMessageCursor: existing?.conversationId === conversation.id
+              ? existing.oldestMessageCursor || page.nextCursor
+              : page.nextCursor,
+            cachedAt: Date.now()
+          }
+          conversationCacheRef.current[character.id] = entry
+          scheduleConversationCacheWrite(uid, character.id, entry)
+        }))
+      }
+    } catch {
+      // Cached conversations stay available while background preloading fails.
+    }
   }
 
   const loadOlderMessages = async () => {
@@ -442,7 +659,7 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
     state.loading = true
     try {
       const params = new URLSearchParams({
-        limit: '50',
+        limit: String(HISTORY_PAGE_SIZE),
         beforeCreatedAt: state.nextCursor.createdAt,
         beforeId: state.nextCursor.id,
       })
@@ -701,6 +918,12 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
     if (!uid) return
     setUserName(getStoredSession()?.user.displayName)
     setUserIdentifier(uid)
+    const savedCharacterId = localStorage.getItem('chatterra_characterId')
+    const cachedInitialCharacter = seedCharacters.find(character => character.id === savedCharacterId)
+      || seedCharacter
+    selectedCharacterIdRef.current = cachedInitialCharacter.id
+    setSelectedCharacter(cachedInitialCharacter)
+    void loadHistoryForCharacter(uid, cachedInitialCharacter)
     const loadContactPreferences = async () => {
       try {
         const response = await apiFetch(apiUrl(`/api/users/${encodeURIComponent(uid)}/contact-preferences`))
@@ -722,11 +945,11 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
           const data = await res.json()
           if (Array.isArray(data.characters) && data.characters.length > 0) {
             setCharacters(data.characters)
-            const savedCharacterId = localStorage.getItem('chatterra_characterId')
             const initialCharacter = data.characters.find((c: Character) => c.id === savedCharacterId) || data.characters[0]
             selectedCharacterIdRef.current = initialCharacter.id
             setSelectedCharacter(initialCharacter)
             await loadHistoryForCharacter(uid, initialCharacter)
+            void preloadContactFirstPages(uid, data.characters, initialCharacter.id)
             return
           }
         }
@@ -734,12 +957,13 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
         // fall back to seed characters below
       }
 
-      const savedCharacterId = localStorage.getItem('chatterra_characterId')
       const initialCharacter = seedCharacters.find(c => c.id === savedCharacterId) || seedCharacter
       selectedCharacterIdRef.current = initialCharacter.id
       setCharacters(seedCharacters)
       setSelectedCharacter(initialCharacter)
-      void loadHistoryForCharacter(uid, initialCharacter)
+      void loadHistoryForCharacter(uid, initialCharacter).then(() => (
+        preloadContactFirstPages(uid, seedCharacters, initialCharacter.id)
+      ))
     }
 
     void loadContactPreferences()
@@ -901,12 +1125,18 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
 
   useEffect(() => {
     if (selectedCharacterIdRef.current !== selectedCharacter.id) return
-    conversationCacheRef.current[selectedCharacter.id] = {
+    const history = messageHistoryRef.current[selectedCharacter.id]
+    const cacheEntry: ConversationCacheEntry = {
       conversationId,
       messages: stableMessagesForCache(messages),
-      behaviorStatus
+      behaviorStatus,
+      hasMoreHistory: history?.hasMore,
+      oldestMessageCursor: history?.nextCursor,
+      cachedAt: Date.now()
     }
-  }, [behaviorStatus, conversationId, messages, selectedCharacter.id])
+    conversationCacheRef.current[selectedCharacter.id] = cacheEntry
+    if (userId) scheduleConversationCacheWrite(userId, selectedCharacter.id, cacheEntry)
+  }, [behaviorStatus, conversationId, messages, scheduleConversationCacheWrite, selectedCharacter.id, userId])
 
   useEffect(() => {
     if (!userId) return
@@ -997,7 +1227,9 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
       if (syncing || document.visibilityState === 'hidden') return
       syncing = true
       try {
-        const response = await apiFetch(apiUrl(`/api/conversations/${conversationId}/messages`))
+        const response = await apiFetch(
+          apiUrl(`/api/conversations/${conversationId}/messages?limit=${HISTORY_PAGE_SIZE}`)
+        )
         if (!response.ok) return
         const data = await response.json()
         if (stopped || !Array.isArray(data.messages)) return
@@ -1372,14 +1604,19 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
     })
 
     const ensuredConversation = await ensureConversation(targetCharacter.id)
-    const messagesResponse = await apiFetch(apiUrl(`/api/conversations/${ensuredConversation.id}/messages`))
+    const messagesResponse = await apiFetch(
+      apiUrl(`/api/conversations/${ensuredConversation.id}/messages?limit=${HISTORY_PAGE_SIZE}`)
+    )
     if (!messagesResponse.ok) throw new Error('Could not load the new conversation.')
     const messagesData = await messagesResponse.json()
     const starterMessages = mapServerMessages(messagesData.messages || [])
     conversationCacheRef.current[targetCharacter.id] = {
       conversationId: ensuredConversation.id,
       messages: starterMessages,
-      behaviorStatus: 'Online'
+      behaviorStatus: 'Online',
+      hasMoreHistory: Boolean(messagesData.hasMore),
+      oldestMessageCursor: messagesData.nextCursor,
+      cachedAt: Date.now()
     }
     messageHistoryRef.current[targetCharacter.id] = {
       conversationId: ensuredConversation.id,
@@ -1387,6 +1624,7 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
       nextCursor: messagesData.nextCursor,
       loading: false
     }
+    scheduleConversationCacheWrite(uid, targetCharacter.id, conversationCacheRef.current[targetCharacter.id])
     if (selectedCharacterIdRef.current === targetCharacter.id) {
       setConversationId(ensuredConversation.id)
       setMessages(starterMessages)
