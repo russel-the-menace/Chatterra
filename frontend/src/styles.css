@@ -296,18 +296,17 @@ body.modal-open{overflow:hidden}
   border-radius:999px;
   background:#ff4d55;
   color:#fff;
-  border:2px solid #fff;
   box-shadow:0 2px 6px rgba(255,77,85,.24);
-  font-size:12px;
-  line-height:16px;
+  font-size:9.6px;
+  line-height:13px;
   font-weight:800;
   font-variant-numeric:tabular-nums;
 }
-.contact-item.active .contact-unread{background:#ff4d55;color:#fff;border-color:var(--accent)}
+.contact-item.active .contact-unread{background:#ff4d55;color:#fff}
 .contact-preview{font-size:12px;color:#6b7280;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:3px}
 .contact-item.active .contact-preview{color:rgba(255,255,255,0.85)}
 .contact-item.pinned.active .contact-preview{color:#6b7280}
-.contact-item.pinned.active .contact-unread{background:#ff4d55;border-color:#ebeef0}
+.contact-item.pinned.active .contact-unread{background:#ff4d55}
 
 .chat-pane{
   display:flex;
