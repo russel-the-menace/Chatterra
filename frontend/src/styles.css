@@ -130,6 +130,15 @@ body.modal-open{overflow:hidden}
   transition:background 160ms ease,color 160ms ease;
 }
 .workspace-rail-settings:hover{background:rgba(255,255,255,0.1);color:#fff}
+.workspace-rail-settings span{
+  width:100%;
+  height:100%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  line-height:1;
+  transform:translateY(1px);
+}
 .workspace-rail-avatar:focus-visible,
 .workspace-rail-settings:focus-visible{outline:3px solid rgba(255,255,255,0.35);outline-offset:2px}
 
