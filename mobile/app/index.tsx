@@ -23,7 +23,7 @@ import { Character } from '@/src/types'
 function ContactRow({ character, pinned }: { character: Character; pinned: boolean }) {
   const {
     proactivePreviews,
-    unreadCharacterIds,
+    unreadCountsByCharacter,
     markCharacterRead,
   } = useChat()
 
@@ -43,13 +43,22 @@ function ContactRow({ character, pinned }: { character: Character; pinned: boole
         pressed && styles.contactPressed,
       ]}
     >
-      <Avatar avatar={character.avatar} name={character.name} size={layout.avatarSize} />
+      <View style={styles.contactAvatarWrap}>
+        <Avatar avatar={character.avatar} name={character.name} size={layout.avatarSize} />
+        {unreadCountsByCharacter[character.id] > 0 && (
+          <View
+            style={styles.unreadBadge}
+            accessibilityLabel={`${unreadCountsByCharacter[character.id]} unread messages`}
+          >
+            <Text style={styles.unreadBadgeText}>
+              {unreadCountsByCharacter[character.id] > 99 ? '99+' : unreadCountsByCharacter[character.id]}
+            </Text>
+          </View>
+        )}
+      </View>
       <View style={styles.contactContent}>
         <View style={styles.contactTitleRow}>
           <Text style={styles.contactName} numberOfLines={1}>{character.name}</Text>
-          {unreadCharacterIds.has(character.id) && (
-            <View style={styles.unreadDot} accessibilityLabel="New message" />
-          )}
         </View>
         <Text style={styles.contactPreview} numberOfLines={1}>
           {proactivePreviews[character.id] || starterMessageForCharacter(character)}
@@ -401,6 +410,12 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
+  contactAvatarWrap: {
+    width: layout.avatarSize,
+    height: layout.avatarSize,
+    flexShrink: 0,
+    position: 'relative',
+  },
   contactTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -419,11 +434,32 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginTop: 3,
   },
-  unreadDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#D92D20',
+  unreadBadge: {
+    position: 'absolute',
+    top: -7,
+    right: -8,
+    zIndex: 1,
+    minWidth: 22,
+    height: 22,
+    paddingHorizontal: 6,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FF4D55',
+    borderWidth: 2,
+    borderColor: palette.surface,
+    shadowColor: '#FF4D55',
+    shadowOpacity: 0.18,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 2,
+  },
+  unreadBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
   },
   centerState: {
     flex: 1,

@@ -24,6 +24,7 @@ export type SyncConversation = {
     content: string
     createdAt: string
   }
+  unreadCount?: number
 }
 
 export type SyncSnapshot = {
@@ -33,6 +34,15 @@ export type SyncSnapshot = {
   characters: Character[]
   conversations: SyncConversation[]
   pinnedCharacterIds: string[]
+}
+
+export const markConversationRead = async (conversationId: string, messageId: string) => {
+  const response = await apiFetch(apiUrl(`/api/conversations/${encodeURIComponent(conversationId)}/read`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messageId }),
+  })
+  if (!response.ok) throw new Error('Could not mark conversation as read.')
 }
 
 const normalizeBaseUrl = (value: string) => value.trim().replace(/\/+$/, '')

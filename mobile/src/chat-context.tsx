@@ -32,6 +32,7 @@ import {
   ComposerQuoteDraft,
   ContactPreviewCache,
   ConversationHistoryCache,
+  SyncSnapshot,
 } from './types'
 import {
   applyContactPreviewUpdates,
@@ -53,6 +54,11 @@ export type ConversationListViewState = {
   withinImmersiveRange: boolean
 }
 
+type ConversationReadTarget = {
+  conversationId: string
+  messageId: string
+}
+
 type ChatContextValue = {
   apiBaseUrl: string
   ready: boolean
@@ -64,7 +70,7 @@ type ChatContextValue = {
   connectionError: string | null
   voiceInputMode: 'cloud' | 'local'
   proactivePreviews: Record<string, string>
-  unreadCharacterIds: Set<string>
+  unreadCountsByCharacter: Record<string, number>
   conversationVersions: Record<string, number>
   conversationIdsByCharacter: Record<string, string | null>
   pinnedCharacterIds: Set<string>
@@ -89,7 +95,7 @@ type ChatContextValue = {
   saveBuiltInCharacterAvatar: (characterId: string, avatar: string) => Promise<Character>
   saveUserAvatar: (avatar: string) => Promise<void>
   saveUserProfile: (input: { displayName: string; avatar?: string }) => Promise<void>
-  markCharacterRead: (characterId: string) => void
+  markCharacterRead: (characterId: string, conversationId?: string, messageId?: string) => void
   setActiveCharacter: (characterId: string | null) => void
   setCharacterPinned: (characterId: string, pinned: boolean) => Promise<void>
   markConversationActive: (
@@ -159,6 +165,34 @@ const sameContactPreviewCache = (left: ContactPreviewCache, right: ContactPrevie
   && sameStringRecord(left.lastMessageAtByCharacter, right.lastMessageAtByCharacter)
 )
 
+const sameNumberRecord = (left: Record<string, number>, right: Record<string, number>) => {
+  const leftKeys = Object.keys(left)
+  const rightKeys = Object.keys(right)
+  return leftKeys.length === rightKeys.length
+    && leftKeys.every(key => left[key] === right[key])
+}
+
+const unreadStateForSnapshot = (snapshot: SyncSnapshot) => {
+  const counts: Record<string, number> = {}
+  const targets: Record<string, ConversationReadTarget> = {}
+
+  snapshot.conversations.forEach(conversation => {
+    if (conversation.characterId in targets) return
+    const unreadCount = Number.isSafeInteger(conversation.unreadCount)
+      ? Math.max(0, Number(conversation.unreadCount))
+      : 0
+    if (unreadCount > 0) counts[conversation.characterId] = unreadCount
+    if (conversation.latestMessage?.id) {
+      targets[conversation.characterId] = {
+        conversationId: conversation.id,
+        messageId: conversation.latestMessage.id,
+      }
+    }
+  })
+
+  return { counts, targets }
+}
+
 export function ChatProvider({ children }: PropsWithChildren) {
   const [ready, setReady] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
@@ -171,7 +205,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [quoteDrafts, setQuoteDrafts] = useState<Record<string, ComposerQuoteDraft>>({})
   const [proactivePreviews, setProactivePreviews] = useState<Record<string, string>>({})
-  const [unreadCharacterIds, setUnreadCharacterIds] = useState<Set<string>>(() => new Set())
+  const [unreadCountsByCharacter, setUnreadCountsByCharacter] = useState<Record<string, number>>({})
   const [conversationVersions, setConversationVersions] = useState<Record<string, number>>({})
   const [conversationIdsByCharacter, setConversationIdsByCharacter] = useState<Record<string, string | null>>({})
   const [pinnedCharacterIds, setPinnedCharacterIds] = useState<Set<string>>(() => new Set())
@@ -189,6 +223,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const workspaceSyncingRef = useRef(false)
   const hasWorkspaceSnapshotRef = useRef(false)
   const conversationMetadataRef = useRef<Map<string, string>>(new Map())
+  const conversationReadTargetsRef = useRef<Record<string, ConversationReadTarget>>({})
+  const readRequestTargetsRef = useRef<Record<string, string>>({})
   const appStateRef = useRef<AppStateStatus>(AppState.currentState)
   const quoteDraftsRef = useRef<Record<string, ComposerQuoteDraft>>({})
   const quoteDraftWriteRef = useRef<Promise<void>>(Promise.resolve())
@@ -205,6 +241,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
     contactPreviewCacheWriteRef.current = Promise.resolve()
     contactPreviewCacheRef.current = null
     conversationMetadataRef.current.clear()
+    conversationReadTargetsRef.current = {}
+    readRequestTargetsRef.current = {}
     quoteDraftsRef.current = {}
     quoteDraftDirtyRef.current = null
     activeCharacterRef.current = null
@@ -213,7 +251,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     setDrafts({})
     setQuoteDrafts({})
     setProactivePreviews({})
-    setUnreadCharacterIds(new Set())
+    setUnreadCountsByCharacter({})
     setConversationVersions({})
     setConversationIdsByCharacter({})
     setPinnedCharacterIds(new Set())
@@ -303,6 +341,33 @@ export function ChatProvider({ children }: PropsWithChildren) {
     setLastMessageAtByCharacter(next.lastMessageAtByCharacter)
     persistContactPreviewCache(userId, next)
   }, [persistContactPreviewCache, userId])
+
+  const markCharacterRead = useCallback((
+    characterId: string,
+    conversationId?: string,
+    messageId?: string
+  ) => {
+    setUnreadCountsByCharacter(current => {
+      if (!(characterId in current)) return current
+      const next = { ...current }
+      delete next[characterId]
+      return next
+    })
+
+    const target = conversationId && messageId
+      ? { conversationId, messageId }
+      : conversationReadTargetsRef.current[characterId]
+    if (!target) return
+
+    const requestTarget = `${target.conversationId}:${target.messageId}`
+    if (readRequestTargetsRef.current[characterId] === requestTarget) return
+    readRequestTargetsRef.current[characterId] = requestTarget
+    void api.markConversationRead(target.conversationId, target.messageId).catch(() => {
+      if (readRequestTargetsRef.current[characterId] === requestTarget) {
+        delete readRequestTargetsRef.current[characterId]
+      }
+    })
+  }, [])
 
   const refreshVoiceInputCapability = useCallback(async () => {
     try {
@@ -406,6 +471,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
           storedContactPreviews,
           warmedConversationCaches
         )
+        const unreadState = unreadStateForSnapshot(snapshot)
         quoteDraftsRef.current = storedQuoteDrafts
         setQuoteDrafts(storedQuoteDrafts)
         setCharacters(nextCharacters)
@@ -414,6 +480,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
         setProactivePreviews(contactPreviewState.previews)
         setConversationIdsByCharacter(contactPreviewState.conversationIdsByCharacter)
         setLastMessageAtByCharacter(contactPreviewState.lastMessageAtByCharacter)
+        conversationReadTargetsRef.current = unreadState.targets
+        setUnreadCountsByCharacter(unreadState.counts)
         setUserName(snapshot.userName || storedSession.user.displayName)
         setUserAvatar(snapshot.userAvatar || storedSession.user.avatar)
         void persistSessionProfile({
@@ -482,6 +550,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         storedContactPreviews,
         warmedConversationCaches
       )
+      const unreadState = unreadStateForSnapshot(snapshot)
       quoteDraftsRef.current = storedQuoteDrafts
       setQuoteDrafts(storedQuoteDrafts)
       setPinnedCharacterIds(new Set(pinnedIds))
@@ -490,6 +559,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
       setProactivePreviews(contactPreviewState.previews)
       setConversationIdsByCharacter(contactPreviewState.conversationIdsByCharacter)
       setLastMessageAtByCharacter(contactPreviewState.lastMessageAtByCharacter)
+      conversationReadTargetsRef.current = unreadState.targets
+      setUnreadCountsByCharacter(unreadState.counts)
       setUserName(snapshot.userName || storedSession.user.displayName)
       setUserAvatar(snapshot.userAvatar)
       void persistSessionProfile({
@@ -553,6 +624,15 @@ export function ChatProvider({ children }: PropsWithChildren) {
           newestConversationByCharacter.set(conversation.characterId, conversation)
         }
       })
+      const unreadState = unreadStateForSnapshot(snapshot)
+      conversationReadTargetsRef.current = unreadState.targets
+      setUnreadCountsByCharacter(current => (
+        sameNumberRecord(current, unreadState.counts) ? current : unreadState.counts
+      ))
+      const activeCharacterId = activeCharacterRef.current
+      if (activeCharacterId && unreadState.counts[activeCharacterId] > 0) {
+        markCharacterRead(activeCharacterId)
+      }
 
       const defaultContactPreviewState = buildContactPreviewState(
         snapshot.characters,
@@ -624,13 +704,6 @@ export function ChatProvider({ children }: PropsWithChildren) {
           })
           return next
         })
-        setUnreadCharacterIds(current => {
-          const next = new Set(current)
-          changedCharacterIds.forEach(characterId => {
-            if (characterId !== activeCharacterRef.current) next.add(characterId)
-          })
-          return next
-        })
       }
       hasWorkspaceSnapshotRef.current = true
     } catch (error) {
@@ -638,7 +711,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     } finally {
       workspaceSyncingRef.current = false
     }
-  }, [characters.length, persistContactPreviewCache, persistSessionProfile, userId])
+  }, [characters.length, markCharacterRead, persistContactPreviewCache, persistSessionProfile, userId])
 
   useEffect(() => {
     if (!userId) return
@@ -677,21 +750,34 @@ export function ChatProvider({ children }: PropsWithChildren) {
         })
         return next
       })
-      setUnreadCharacterIds(current => {
-        const next = new Set(current)
+      deliveries.forEach(delivery => {
+        if (delivery.conversationId && delivery.messageId) {
+          conversationReadTargetsRef.current[delivery.characterId] = {
+            conversationId: delivery.conversationId,
+            messageId: delivery.messageId,
+          }
+        }
+      })
+      setUnreadCountsByCharacter(current => {
+        const next = { ...current }
         deliveries.forEach(delivery => {
           if (delivery.characterId !== activeCharacterRef.current) {
-            next.add(delivery.characterId)
+            next[delivery.characterId] = (next[delivery.characterId] || 0) + 1
           }
         })
         return next
+      })
+      deliveries.forEach(delivery => {
+        if (delivery.characterId === activeCharacterRef.current) {
+          markCharacterRead(delivery.characterId, delivery.conversationId, delivery.messageId)
+        }
       })
     } catch {
       // Normal foreground requests surface connection failures to the relevant screen.
     } finally {
       pollingRef.current = false
     }
-  }, [updateContactPreviews, userId])
+  }, [markCharacterRead, updateContactPreviews, userId])
 
   useEffect(() => {
     if (!userId) return
@@ -789,15 +875,6 @@ export function ChatProvider({ children }: PropsWithChildren) {
     if (nextAvatar) setUserAvatar(nextAvatar)
     await persistSessionProfile({ displayName: nextName, avatar: nextAvatar })
   }, [persistSessionProfile, userId])
-
-  const markCharacterRead = useCallback((characterId: string) => {
-    setUnreadCharacterIds(current => {
-      if (!current.has(characterId)) return current
-      const next = new Set(current)
-      next.delete(characterId)
-      return next
-    })
-  }, [])
 
   const setActiveCharacter = useCallback((characterId: string | null) => {
     activeCharacterRef.current = characterId
@@ -1006,7 +1083,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     connectionError,
     voiceInputMode,
     proactivePreviews,
-    unreadCharacterIds,
+    unreadCountsByCharacter,
     conversationVersions,
     conversationIdsByCharacter,
     pinnedCharacterIds,
@@ -1067,7 +1144,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     setConversationListViewState,
     setDraft,
     setQuoteDraft,
-    unreadCharacterIds,
+    unreadCountsByCharacter,
     userName,
     userAvatar,
     userId,

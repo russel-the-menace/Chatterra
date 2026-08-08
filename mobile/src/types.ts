@@ -81,6 +81,7 @@ export type Conversation = {
 
 export type SyncConversation = Conversation & {
   latestMessage?: Pick<ServerMessage, 'id' | 'senderRole' | 'content' | 'contentJson' | 'createdAt'>
+  unreadCount?: number
 }
 
 export type SyncSnapshot = {

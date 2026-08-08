@@ -63,6 +63,7 @@ import {
   getConversation,
   getMessageTranslation,
   getOwnedMessage,
+  markConversationRead,
   getSyncSnapshot,
   getUserPreferences,
   listCharacters,
@@ -674,6 +675,19 @@ app.get('/api/conversations/:id/messages', asyncRoute(async (req, res) => {
     before: beforeCreatedAt && beforeId ? { createdAt: beforeCreatedAt, id: beforeId } : undefined
   })
   return res.json(page)
+}))
+
+app.post('/api/conversations/:id/read', asyncRoute(async (req, res) => {
+  const messageId = typeof req.body?.messageId === 'string' ? req.body.messageId.trim() : ''
+  if (!messageId) return res.status(400).json({ error: 'messageId is required' })
+
+  const updated = await markConversationRead(
+    authenticatedUserId(req),
+    req.params.id,
+    messageId
+  )
+  if (!updated) return res.status(404).json({ error: 'conversation or message not found' })
+  return res.status(204).end()
 }))
 
 app.get('/api/messages/:id/delivery-status', asyncRoute(async (req, res) => {

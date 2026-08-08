@@ -559,7 +559,8 @@ export const getSyncSnapshot = async (userId: string): Promise<SyncSnapshot> => 
          latest_message.sender_role AS latest_message_sender_role,
          latest_message.content AS latest_message_content,
          latest_message.content_json AS latest_message_content_json,
-         latest_message.created_at AS latest_message_created_at
+         latest_message.created_at AS latest_message_created_at,
+         unread_messages.unread_count
        FROM conversations
        LEFT JOIN LATERAL (
          SELECT id, sender_role, content, content_json, created_at
@@ -568,6 +569,19 @@ export const getSyncSnapshot = async (userId: string): Promise<SyncSnapshot> => 
          ORDER BY created_at DESC, id DESC
          LIMIT 1
        ) latest_message ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT COUNT(*)::integer AS unread_count
+         FROM messages unread_message
+         WHERE unread_message.conversation_id = conversations.id
+           AND unread_message.sender_role = 'assistant'
+           AND (
+             unread_message.created_at > conversations.last_read_message_at
+             OR (
+               unread_message.created_at = conversations.last_read_message_at
+               AND unread_message.id > COALESCE(conversations.last_read_message_id, '')
+             )
+           )
+       ) unread_messages ON TRUE
        WHERE conversations.user_id = $1
          AND conversations.status = 'active'
        ORDER BY conversations.last_message_at DESC NULLS LAST, conversations.created_at DESC`,
@@ -585,6 +599,7 @@ export const getSyncSnapshot = async (userId: string): Promise<SyncSnapshot> => 
       const conversation = mapConversation(row)
       return {
         ...conversation,
+        unreadCount: Number(row.unread_count || 0),
         latestMessage: row.latest_message_id
           ? {
               id: String(row.latest_message_id),
@@ -616,6 +631,44 @@ export const getSyncSnapshot = async (userId: string): Promise<SyncSnapshot> => 
 export const getConversation = async (id: string): Promise<Conversation | undefined> => {
   const result = await query('SELECT * FROM conversations WHERE id = $1', [id])
   return result.rows[0] ? mapConversation(result.rows[0]) : undefined
+}
+
+export const markConversationRead = async (
+  userId: string,
+  conversationId: string,
+  messageId: string
+): Promise<boolean> => {
+  return withTransaction(async client => {
+    const messageResult = await client.query(
+      `SELECT messages.id, messages.created_at
+       FROM messages
+       JOIN conversations ON conversations.id = messages.conversation_id
+       WHERE messages.id = $1
+         AND messages.conversation_id = $2
+         AND conversations.user_id = $3`,
+      [messageId, conversationId, userId]
+    )
+    const message = messageResult.rows[0]
+    if (!message) return false
+
+    await client.query(
+      `UPDATE conversations
+       SET last_read_message_at = $3,
+           last_read_message_id = $4
+       WHERE id = $1
+         AND user_id = $2
+         AND (
+           last_read_message_at IS NULL
+           OR last_read_message_at < $3::timestamptz
+           OR (
+             last_read_message_at = $3::timestamptz
+             AND COALESCE(last_read_message_id, '') < $4
+           )
+         )`,
+      [conversationId, userId, message.created_at, message.id]
+    )
+    return true
+  })
 }
 
 export type MessageHistoryCursor = {
@@ -1020,8 +1073,9 @@ export const createConversationWithStarter = async (
     await ensureUser(client, conversation.userId)
     const conversationResult = await client.query(
       `INSERT INTO conversations (
-         id, user_id, character_id, title, status, last_message_at, metadata, created_at, updated_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9)
+         id, user_id, character_id, title, status, last_message_at,
+         last_read_message_at, last_read_message_id, metadata, created_at, updated_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11)
        RETURNING *`,
       [
         conversation.id,
@@ -1030,6 +1084,8 @@ export const createConversationWithStarter = async (
         conversation.title ?? null,
         conversation.status || 'active',
         starterMessage.createdAt,
+        starterMessage.createdAt,
+        starterMessage.id,
         JSON.stringify(conversation.metadata || {}),
         conversation.createdAt,
         conversation.updatedAt
@@ -1084,8 +1140,9 @@ export const getOrCreateConversationWithStarter = async (
 
     const conversationResult = await client.query(
       `INSERT INTO conversations (
-         id, user_id, character_id, title, status, last_message_at, metadata, created_at, updated_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9)
+         id, user_id, character_id, title, status, last_message_at,
+         last_read_message_at, last_read_message_id, metadata, created_at, updated_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11)
        RETURNING *`,
       [
         conversation.id,
@@ -1094,6 +1151,8 @@ export const getOrCreateConversationWithStarter = async (
         conversation.title ?? null,
         conversation.status || 'active',
         starterMessage.createdAt,
+        starterMessage.createdAt,
+        starterMessage.id,
         JSON.stringify(conversation.metadata || {}),
         conversation.createdAt,
         conversation.updatedAt

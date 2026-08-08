@@ -63,6 +63,7 @@ export interface Conversation {
 
 export interface ConversationSyncRecord extends Conversation {
   latestMessage?: Pick<Message, 'id' | 'senderRole' | 'content' | 'contentJson' | 'createdAt'>
+  unreadCount: number
 }
 
 export interface SyncSnapshot {

@@ -285,6 +285,13 @@ export const api = {
     )
   },
 
+  async markConversationRead(conversationId: string, messageId: string) {
+    await request<void>(`/api/conversations/${encodeURIComponent(conversationId)}/read`, {
+      method: 'POST',
+      body: JSON.stringify({ messageId }),
+    })
+  },
+
   async getMessageDeliveryStatus(userId: string, messageId: string) {
     return request<{
       persisted: boolean

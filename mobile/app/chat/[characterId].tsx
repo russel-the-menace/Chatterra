@@ -1118,6 +1118,7 @@ export default function ChatScreen() {
     getQuoteDraft,
     setQuoteDraft,
     setActiveCharacter,
+    markCharacterRead,
     pinnedCharacterIds,
     setCharacterPinned,
     markConversationActive,
@@ -1614,6 +1615,9 @@ export default function ChatScreen() {
         message.createdAt || new Date().toISOString(),
         contactPreviewForMessage(message)
       )
+      if (message.sender === 'assistant') {
+        markCharacterRead(characterId, conversationId || undefined, message.sourceMessageId || message.id)
+      }
     }
 
     const queueMessage = (index: number) => {
@@ -1677,7 +1681,7 @@ export default function ChatScreen() {
     } else {
       revealFirstMessage()
     }
-  }, [characterId, markConversationActive, prepareForIncomingMessage, scheduleDeliveryTask])
+  }, [characterId, conversationId, markCharacterRead, markConversationActive, prepareForIncomingMessage, scheduleDeliveryTask])
 
   useEffect(() => () => {
     stagedDeliveryTimersRef.current.forEach(timer => clearTimeout(timer))
@@ -1849,6 +1853,8 @@ export default function ChatScreen() {
           oldestMessageCursor: nextOldestMessageCursor,
           cachedAt: Date.now(),
         })
+        const latestMessage = messagePage.messages.at(-1)
+        if (latestMessage) markCharacterRead(character.id, matching.id, latestMessage.id)
       }
       setError(null)
     } catch (loadError) {
@@ -1863,6 +1869,7 @@ export default function ChatScreen() {
     prepareForIncomingMessage,
     resetInitialScroll,
     setConversationCache,
+    markCharacterRead,
     userId,
   ])
 
@@ -1967,6 +1974,10 @@ export default function ChatScreen() {
         || deliveryGeneration !== localDeliveryGenerationRef.current
         || sendingRef.current) return
       const mapped = mapMessages(messagePage.messages)
+      const latestMessage = messagePage.messages.at(-1)
+      if (characterId && latestMessage) {
+        markCharacterRead(characterId, conversationId, latestMessage.id)
+      }
       const currentMessages = messagesRef.current
       if (currentMessages.some(message => message.loading)
         || stagedDeliveryTimersRef.current.size > 0) {
@@ -2007,7 +2018,7 @@ export default function ChatScreen() {
     } catch {
       // Keep the current local transcript while connectivity recovers.
     }
-  }, [conversationId, prepareForIncomingMessage])
+  }, [characterId, conversationId, markCharacterRead, prepareForIncomingMessage])
 
   useEffect(() => {
     if (!conversationId) return
@@ -2798,6 +2809,9 @@ export default function ChatScreen() {
       } else if (typeof response.reply === 'string') {
         const incomingMessages = responseMessages(response)
         if (incomingMessages.length === 0) throw new Error('The server returned no usable response.')
+        if (response.messageId) {
+          markCharacterRead(character.id, response.conversationId, response.messageId)
+        }
         stageAssistantMessages(
           loadingId,
           incomingMessages,

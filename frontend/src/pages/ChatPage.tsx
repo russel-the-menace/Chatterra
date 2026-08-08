@@ -1,4 +1,4 @@
-import React, {useState, useEffect, useMemo, useRef} from 'react'
+import React, {useCallback, useState, useEffect, useMemo, useRef} from 'react'
 import ChatWindow from '../components/ChatWindow'
 import InputBox, { RecordedVoiceMessage } from '../components/InputBox'
 import { AssistantVoiceMessage, ChatMessage, UserVoiceMessage } from '../components/MessageBubble'
@@ -10,6 +10,7 @@ import {
   apiUrl,
   getStoredSession,
   getSyncSnapshot,
+  markConversationRead,
   transcribeVoiceRecording,
   uploadVoiceMessage,
 } from '../api'
@@ -221,7 +222,7 @@ export default function ChatPage(): JSX.Element{
   const [behaviorStatus, setBehaviorStatus] = useState('Online')
   const [searchText, setSearchText] = useState('')
   const [proactivePreviews, setProactivePreviews] = useState<Record<string, string>>({})
-  const [unreadCharacterIds, setUnreadCharacterIds] = useState<Set<string>>(() => new Set())
+  const [unreadCountsByCharacter, setUnreadCountsByCharacter] = useState<Record<string, number>>({})
   const [pinnedCharacterIds, setPinnedCharacterIds] = useState<Set<string>>(() => new Set())
   const [pinnedCharacterOrder, setPinnedCharacterOrder] = useState<string[]>([])
   const [lastMessageAtByCharacter, setLastMessageAtByCharacter] = useState<Record<string, string>>({})
@@ -245,6 +246,8 @@ export default function ChatPage(): JSX.Element{
   const hasWorkspaceSnapshotRef = useRef(false)
   const historyRequestRef = useRef(0)
   const selectedCharacterIdRef = useRef(selectedCharacter.id)
+  const conversationReadTargetsRef = useRef<Record<string, { conversationId: string; messageId: string }>>({})
+  const readRequestTargetsRef = useRef<Record<string, string>>({})
 
   const visibleCharacters = useMemo(() => {
     const query = searchText.trim().toLowerCase()
@@ -278,6 +281,23 @@ export default function ChatPage(): JSX.Element{
     })
   }
 
+  const markCharacterRead = useCallback((characterId: string, target?: { conversationId: string; messageId: string }) => {
+    setUnreadCountsByCharacter(current => {
+      if (!(characterId in current)) return current
+      const next = { ...current }
+      delete next[characterId]
+      return next
+    })
+    const readTarget = target || conversationReadTargetsRef.current[characterId]
+    if (!readTarget) return
+    const requestTarget = `${readTarget.conversationId}:${readTarget.messageId}`
+    if (readRequestTargetsRef.current[characterId] === requestTarget) return
+    readRequestTargetsRef.current[characterId] = requestTarget
+    void markConversationRead(readTarget.conversationId, readTarget.messageId).catch(() => {
+      if (readRequestTargetsRef.current[characterId] === requestTarget) delete readRequestTargetsRef.current[characterId]
+    })
+  }, [])
+
   const loadHistoryForCharacter = async (uid: string, nextCharacter: Character) => {
     const requestId = historyRequestRef.current + 1
     historyRequestRef.current = requestId
@@ -309,6 +329,16 @@ export default function ChatPage(): JSX.Element{
         const mapped = mergeMessageUiState(cached?.messages || [], mapServerMessages(mData.messages || []))
         setConversationId(matchingConversation.id)
         setMessages(mapped)
+        if (mData.messages?.length > 0) {
+          const latest = mData.messages[mData.messages.length - 1]
+          if (latest?.id) {
+            conversationReadTargetsRef.current[nextCharacter.id] = {
+              conversationId: matchingConversation.id,
+              messageId: String(latest.id),
+            }
+            markCharacterRead(nextCharacter.id)
+          }
+        }
         localStorage.setItem('chatterra_conversationId', matchingConversation.id)
         conversationCacheRef.current[nextCharacter.id] = {
           conversationId: matchingConversation.id,
@@ -592,6 +622,8 @@ export default function ChatPage(): JSX.Element{
         })
 
         const nextMetadata: Record<string, string> = {}
+        const nextUnreadCounts: Record<string, number> = {}
+        const nextReadTargets: Record<string, { conversationId: string; messageId: string }> = {}
         const nextPreviews: Record<string, string> = {}
         const nextLastMessageAtByCharacter: Record<string, string> = {}
         const changedCharacterIds = new Set<string>()
@@ -606,6 +638,14 @@ export default function ChatPage(): JSX.Element{
           if (preview) nextPreviews[characterId] = preview
           const lastMessageAt = conversation.lastMessageAt || conversation.latestMessage?.createdAt
           if (lastMessageAt) nextLastMessageAtByCharacter[characterId] = lastMessageAt
+          const unreadCount = Number(conversation.unreadCount || 0)
+          if (unreadCount > 0) nextUnreadCounts[characterId] = unreadCount
+          if (conversation.latestMessage?.id) {
+            nextReadTargets[characterId] = {
+              conversationId: conversation.id,
+              messageId: conversation.latestMessage.id,
+            }
+          }
           if (conversationMetadataRef.current[characterId] !== version) {
             changedCharacterIds.add(characterId)
           }
@@ -615,13 +655,6 @@ export default function ChatPage(): JSX.Element{
         })
 
         if (hasWorkspaceSnapshotRef.current && changedCharacterIds.size > 0) {
-          setUnreadCharacterIds(current => {
-            const next = new Set(current)
-            changedCharacterIds.forEach(characterId => {
-              if (characterId !== selectedCharacterIdRef.current) next.add(characterId)
-            })
-            return next
-          })
           changedCharacterIds.forEach(characterId => {
             if (characterId === selectedCharacterIdRef.current) return
             const cached = conversationCacheRef.current[characterId]
@@ -633,6 +666,19 @@ export default function ChatPage(): JSX.Element{
         }
 
         conversationMetadataRef.current = nextMetadata
+        conversationReadTargetsRef.current = nextReadTargets
+        setUnreadCountsByCharacter(current => {
+          const keys = Object.keys(current)
+          const nextKeys = Object.keys(nextUnreadCounts)
+          return keys.length === nextKeys.length
+            && keys.every(key => current[key] === nextUnreadCounts[key])
+            ? current
+            : nextUnreadCounts
+        })
+        const activeUnreadCount = nextUnreadCounts[selectedCharacterIdRef.current] || 0
+        if (activeUnreadCount > 0) {
+          markCharacterRead(selectedCharacterIdRef.current, nextReadTargets[selectedCharacterIdRef.current])
+        }
         setProactivePreviews(nextPreviews)
         setLastMessageAtByCharacter(current => (
           hasSameTimestamps(current, nextLastMessageAtByCharacter)
@@ -685,7 +731,7 @@ export default function ChatPage(): JSX.Element{
       window.clearInterval(interval)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-  }, [userId])
+  }, [markCharacterRead, userId])
 
   useEffect(() => {
     if (selectedCharacterIdRef.current !== selectedCharacter.id) return
@@ -729,14 +775,31 @@ export default function ChatPage(): JSX.Element{
               : new Date().toISOString())
           }
         })
-        setUnreadCharacterIds(current => {
-          const next = new Set(current)
+        data.deliveries.forEach((delivery: any) => {
+          if (typeof delivery.characterId === 'string' && delivery.conversationId && delivery.messageId) {
+            conversationReadTargetsRef.current[delivery.characterId] = {
+              conversationId: String(delivery.conversationId),
+              messageId: String(delivery.messageId),
+            }
+          }
+        })
+        setUnreadCountsByCharacter(current => {
+          const next = { ...current }
           data.deliveries.forEach((delivery: any) => {
             if (delivery.characterId && delivery.characterId !== selectedCharacter.id) {
-              next.add(String(delivery.characterId))
+              const id = String(delivery.characterId)
+              next[id] = (next[id] || 0) + 1
             }
           })
           return next
+        })
+        data.deliveries.forEach((delivery: any) => {
+          if (delivery.characterId === selectedCharacter.id) {
+            markCharacterRead(String(delivery.characterId), {
+              conversationId: String(delivery.conversationId),
+              messageId: String(delivery.messageId),
+            })
+          }
         })
       } catch {
         // The regular chat request will surface backend availability when the user sends.
@@ -757,7 +820,7 @@ export default function ChatPage(): JSX.Element{
       window.clearInterval(interval)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-  }, [userId, selectedCharacter.id])
+  }, [markCharacterRead, userId, selectedCharacter.id])
 
   useEffect(() => {
     if (!conversationId) return
@@ -772,6 +835,13 @@ export default function ChatPage(): JSX.Element{
         if (!response.ok) return
         const data = await response.json()
         if (stopped || !Array.isArray(data.messages)) return
+        const latestMessage = data.messages.at(-1)
+        if (latestMessage?.id) {
+          markCharacterRead(selectedCharacter.id, {
+            conversationId,
+            messageId: String(latestMessage.id),
+          })
+        }
         const serverMessages = mapServerMessages(data.messages)
         setMessages(current => {
           if (current.some(message => message.loading)) return current
@@ -807,7 +877,7 @@ export default function ChatPage(): JSX.Element{
       window.clearInterval(interval)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-  }, [conversationId])
+  }, [conversationId, markCharacterRead, selectedCharacter.id])
 
   const handleCharacterSelect = (nextCharacter: Character) => {
     conversationCacheRef.current[selectedCharacter.id] = {
@@ -823,12 +893,7 @@ export default function ChatPage(): JSX.Element{
     setMessages(cached?.messages || [])
     setBehaviorStatus(cached?.behaviorStatus || 'Online')
     localStorage.setItem('chatterra_characterId', nextCharacter.id)
-    setUnreadCharacterIds(current => {
-      if (!current.has(nextCharacter.id)) return current
-      const next = new Set(current)
-      next.delete(nextCharacter.id)
-      return next
-    })
+    markCharacterRead(nextCharacter.id)
     const uid = userId
     if (uid) void loadHistoryForCharacter(uid, nextCharacter)
   }
@@ -1347,13 +1412,22 @@ export default function ChatPage(): JSX.Element{
               ].filter(Boolean).join(' ')}
               onClick={() => handleCharacterSelect(ch)}
             >
-              <div className="contact-avatar">
-                {avatarContent(ch)}
+              <div className="contact-avatar-wrap">
+                <div className="contact-avatar">
+                  {avatarContent(ch)}
+                </div>
+                {unreadCountsByCharacter[ch.id] > 0 && (
+                  <span
+                    className="contact-unread"
+                    aria-label={`${unreadCountsByCharacter[ch.id]} unread messages`}
+                  >
+                    {unreadCountsByCharacter[ch.id] > 99 ? '99+' : unreadCountsByCharacter[ch.id]}
+                  </span>
+                )}
               </div>
               <div className="contact-meta">
                 <div className="contact-name-row">
                   <div className="contact-name">{ch.name}</div>
-                  {unreadCharacterIds.has(ch.id) && <span className="contact-unread" aria-label="New message" />}
                 </div>
                 <div className="contact-preview">{proactivePreviews[ch.id] || ch.personality}</div>
               </div>

@@ -40,6 +40,8 @@ CREATE TABLE conversations (
   title TEXT,
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
   last_message_at TIMESTAMPTZ,
+  last_read_message_at TIMESTAMPTZ,
+  last_read_message_id TEXT,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
