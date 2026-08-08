@@ -530,7 +530,7 @@ body.modal-open{overflow:hidden}
     radial-gradient(circle at bottom right, rgba(var(--accent-rgb),0.04), transparent 24%);
 }
 
-.message-row{display:flex;align-items:flex-end;gap:10px;margin-bottom:18px}
+.message-row{display:flex;align-items:flex-end;gap:10px;margin-bottom:14px}
 .message-row.left{justify-content:flex-start}
 .message-row.right{justify-content:flex-end}
 .message-row.right .avatar{order:2}
