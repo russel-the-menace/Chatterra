@@ -580,6 +580,7 @@ body.modal-open{overflow:hidden}
   display:flex;
   align-items:center;
 }
+.avatar.assistant.single-line,
 .avatar.user.single-line{width:43px;height:43px}
 .voice-note{
   min-width:132px;
