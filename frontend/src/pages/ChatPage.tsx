@@ -242,6 +242,7 @@ const createCharacterDraft = (): Character => ({
 
 export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): JSX.Element{
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const messagesRef = useRef(messages)
   const [userId, setUserIdentifier] = useState<string | null>(null)
   const [userName, setUserName] = useState<string | undefined>(() => getStoredSession()?.user.displayName)
   const [userAvatar, setUserAvatar] = useState<string | undefined>()
@@ -250,6 +251,7 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
   const [selectedCharacter, setSelectedCharacter] = useState<Character>(seedCharacter)
   const [messageDrafts, setMessageDrafts] = useState<Record<string, string>>({})
   const [scrollToEndRequest, setScrollToEndRequest] = useState(0)
+  const [unseenLatestCount, setUnseenLatestCount] = useState(0)
   const [behaviorStatus, setBehaviorStatus] = useState('Online')
   const [searchText, setSearchText] = useState('')
   const [proactivePreviews, setProactivePreviews] = useState<Record<string, string>>({})
@@ -288,6 +290,22 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
   const selectedCharacterIdRef = useRef(selectedCharacter.id)
   const conversationReadTargetsRef = useRef<Record<string, { conversationId: string; messageId: string }>>({})
   const readRequestTargetsRef = useRef<Record<string, string>>({})
+  const isAtLatestRef = useRef(true)
+
+  const handleLatestStateChange = useCallback((atLatest: boolean) => {
+    isAtLatestRef.current = atLatest
+    if (atLatest) setUnseenLatestCount(0)
+  }, [])
+
+  const scrollToLatest = useCallback(() => {
+    isAtLatestRef.current = true
+    setUnseenLatestCount(0)
+    setScrollToEndRequest(current => current + 1)
+  }, [])
+
+  useEffect(() => {
+    messagesRef.current = messages
+  }, [messages])
 
   const visibleCharacters = useMemo(() => {
     const query = searchText.trim().toLowerCase()
@@ -384,6 +402,7 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
       }
       setConversationId(matchingConversation.id)
       setMessages(mapped)
+      setUnseenLatestCount(0)
       if (mData.messages?.length > 0) {
         const latest = mData.messages[mData.messages.length - 1]
         if (latest?.id) {
@@ -999,6 +1018,19 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
             loading: false
           }
         }
+        const currentMessages = messagesRef.current
+        const knownIds = new Set(currentMessages.map(message => message.id))
+        const newAssistantMessageCount = serverMessages.filter(message => (
+          message.sender === 'ai' && !knownIds.has(message.id)
+        )).length
+        if (
+          newAssistantMessageCount > 0
+          && currentMessages.length > 0
+          && !currentMessages.some(message => message.loading)
+          && !isAtLatestRef.current
+        ) {
+          setUnseenLatestCount(count => count + newAssistantMessageCount)
+        }
         setMessages(current => {
           if (current.some(message => message.loading)) return current
           const mergedMessages = mergeMessageUiState(current, serverMessages)
@@ -1042,6 +1074,8 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
       behaviorStatus
     }
     selectedCharacterIdRef.current = nextCharacter.id
+    isAtLatestRef.current = true
+    setUnseenLatestCount(0)
     setSelectedCharacter(nextCharacter)
     setShowConversationMenu(false)
     const cached = conversationCacheRef.current[nextCharacter.id]
@@ -1416,7 +1450,7 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
     const loadingMessage: ChatMessage = { id: loadingId, sender: 'ai', text: '', loading: true, createdAt: messageCreatedAt }
 
     markCharacterActive(targetCharacterId)
-    setScrollToEndRequest(current => current + 1)
+    scrollToLatest()
     setMessages(current => [...current, localMessage, loadingMessage])
     try {
       const data = await uploadVoiceMessage({
@@ -1472,7 +1506,7 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
     const targetConversationId = conversationId
     const messageCreatedAt = new Date().toISOString()
     markCharacterActive(targetCharacterId)
-    setScrollToEndRequest(current => current + 1)
+    scrollToLatest()
     const userMsg: ChatMessage = { id: makeMessageId(), sender: 'user', text, segmentIndex: 0, createdAt: messageCreatedAt }
     const loadingId = makeMessageId()
     const loadingMsg: ChatMessage = { id: loadingId, sender: 'ai', text: '', loading: true, createdAt: messageCreatedAt }
@@ -1710,9 +1744,22 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
           onEditCharacter={() => openCharacterEditor(selectedCharacter)}
           scrollToEndRequest={scrollToEndRequest}
           onLoadOlderMessages={loadOlderMessages}
+          onLatestStateChange={handleLatestStateChange}
           onToggleTranslation={toggleMessageTranslation}
           onToggleVoiceTranscript={toggleVoiceTranscript}
         />
+        {unseenLatestCount > 0 && (
+          <div className="new-messages-control">
+            <button
+              type="button"
+              className="new-messages-button"
+              onClick={scrollToLatest}
+            >
+              <span aria-hidden="true">&#8595;</span>
+              <span>{unseenLatestCount > 1 ? `${unseenLatestCount} new messages` : 'New messages'}</span>
+            </button>
+          </div>
+        )}
         <InputBox
           key={selectedCharacter.id}
           onSend={sendMessage}

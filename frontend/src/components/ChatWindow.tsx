@@ -7,7 +7,7 @@ import { chatTimeline } from '../chatTimeline'
 type ScrollPosition = { top: number; atBottom: boolean }
 type MessageMenu = { message: ChatMessage; x: number; y: number }
 
-const bottomThreshold = 4
+const nearLatestThreshold = 96
 
 export default function ChatWindow({
   messages,
@@ -17,6 +17,7 @@ export default function ChatWindow({
   onEditCharacter,
   scrollToEndRequest,
   onLoadOlderMessages,
+  onLatestStateChange,
   onToggleTranslation,
   onToggleVoiceTranscript
 }:{
@@ -27,6 +28,7 @@ export default function ChatWindow({
   onEditCharacter: () => void
   scrollToEndRequest: number
   onLoadOlderMessages: () => Promise<void>
+  onLatestStateChange: (atLatest: boolean) => void
   onToggleTranslation: (message: ChatMessage) => void
   onToggleVoiceTranscript: (message: ChatMessage) => void
 }): JSX.Element{
@@ -79,8 +81,9 @@ export default function ChatWindow({
 
     if (!characterChanged && sendRequested) {
       const wasAtBottom = savedPosition?.atBottom
-        ?? element.scrollHeight - element.clientHeight - element.scrollTop <= bottomThreshold
+        ?? element.scrollHeight - element.clientHeight - element.scrollTop <= nearLatestThreshold
       scrollPositionsRef.current[character.id] = { top: maxScrollTop, atBottom: true }
+      onLatestStateChange(true)
       scrollTo(maxScrollTop, wasAtBottom ? 'auto' : 'smooth')
       return
     }
@@ -91,8 +94,9 @@ export default function ChatWindow({
     if (!savedPosition) {
       scrollPositionsRef.current[character.id] = { top: maxScrollTop, atBottom: true }
     }
+    onLatestStateChange(!savedPosition || savedPosition.atBottom)
     scrollTo(restoredTop, 'auto')
-  }, [character.id, messages, scrollToEndRequest])
+  }, [character.id, messages, onLatestStateChange, scrollToEndRequest])
 
   useEffect(() => () => {
     if (scrollReleaseTimerRef.current !== null) {
@@ -141,8 +145,9 @@ export default function ChatWindow({
     const distanceFromBottom = element.scrollHeight - element.clientHeight - element.scrollTop
     scrollPositionsRef.current[character.id] = {
       top: element.scrollTop,
-      atBottom: distanceFromBottom <= bottomThreshold
+      atBottom: distanceFromBottom <= nearLatestThreshold
     }
+    onLatestStateChange(distanceFromBottom <= nearLatestThreshold)
     if (element.scrollTop <= 32) void loadOlderMessages()
   }
 

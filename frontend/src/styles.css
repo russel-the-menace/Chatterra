@@ -576,6 +576,38 @@ body.modal-open{overflow:hidden}
   font-weight:600;
   text-align:center;
 }
+.new-messages-control{
+  position:relative;
+  z-index:4;
+  height:0;
+  display:flex;
+  justify-content:flex-end;
+  pointer-events:none;
+}
+.new-messages-button{
+  min-width:40px;
+  height:36px;
+  margin-right:22px;
+  transform:translateY(-46px);
+  padding:0 10px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:5px;
+  border:1px solid #d5dbe4;
+  border-radius:8px;
+  background:#fff;
+  color:#1f2937;
+  box-shadow:0 2px 5px rgba(16,24,40,.14);
+  cursor:pointer;
+  pointer-events:auto;
+  font-size:12px;
+  font-weight:600;
+  line-height:16px;
+}
+.new-messages-button:hover{background:#f2f4f7}
+.new-messages-button:focus-visible{outline:3px solid rgba(var(--accent-rgb),.24);outline-offset:2px}
+.new-messages-button span:first-child{font-size:18px;line-height:1}
 .voice-note{
   min-width:132px;
   min-height:42px;
