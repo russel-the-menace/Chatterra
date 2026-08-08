@@ -592,7 +592,7 @@ body.modal-open{overflow:hidden}
 }
 .bubble.ai{background:#ffffff;border-bottom-left-radius:4px;color:#111827}
 .bubble.user{background:var(--accent);color:#fff;border-bottom-right-radius:4px}
-.bubble.user.single-line{
+.bubble.single-line{
   min-height:40.5px;
   padding-top:8.65px;
   padding-bottom:8.65px;
@@ -764,10 +764,10 @@ body.modal-open{overflow:hidden}
 }
 .message-context-menu{
   position:fixed;
-  width:272px;
+  width:296px;
   height:auto;
   display:grid;
-  grid-template-columns:repeat(2,minmax(0,1fr));
+  grid-template-columns:repeat(4,minmax(0,1fr));
   overflow:hidden;
   border:1px solid rgba(15,23,42,0.16);
   border-radius:7px;
@@ -778,8 +778,13 @@ body.modal-open{overflow:hidden}
   grid-column:auto;
   grid-row:auto;
   min-width:0;
-  min-height:44px;
-  padding:0 12px;
+  min-height:78px;
+  padding:0 8px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
   border:0;
   background:transparent;
   color:#fff;
@@ -789,10 +794,11 @@ body.modal-open{overflow:hidden}
 }
 .message-context-menu::after{display:none}
 .message-context-menu button:first-child,.message-context-menu button:last-child{grid-column:auto}
-.message-context-menu button + button{border-left:0}
+.message-context-menu button + button{border-left:1px solid rgba(255,255,255,0.14)}
 .message-context-menu button:nth-child(even){border-left:1px solid rgba(255,255,255,0.14)}
-.message-context-menu button:nth-child(n + 3){border-top:1px solid rgba(255,255,255,0.14)}
+.message-context-menu button:nth-child(n + 3){border-top:0}
 .message-context-menu button:only-child{grid-column:1 / -1;width:100%}
+.message-action-icon{width:20px;height:20px;display:block;flex:0 0 auto}
 .message-context-menu button:hover:not(:disabled){background:rgba(255,255,255,0.1)}
 .message-context-menu button:disabled{cursor:wait;color:rgba(255,255,255,0.55)}
 @keyframes voice-wave{from{transform:scaleY(.58)}to{transform:scaleY(1)}}

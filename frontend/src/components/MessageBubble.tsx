@@ -74,8 +74,7 @@ export default function MessageBubble({
   const [playing, setPlaying] = useState(false)
   const [waveLevel, setWaveLevel] = useState(3)
   const readyVoice = msg.voice?.status === 'ready' && Boolean(msg.voice.audioUrl)
-  const isSingleLineUserMessage = isUser
-    && !msg.loading
+  const isSingleLineMessage = !msg.loading
     && !readyVoice
     && !/[\r\n]/.test(msg.text)
     && msg.text.length <= 42
@@ -131,7 +130,7 @@ export default function MessageBubble({
       )}
       <div className="message-content">
         <div
-          className={`${bubbleClass}${isSingleLineUserMessage ? ' single-line' : ''}`}
+          className={`${bubbleClass}${isSingleLineMessage ? ' single-line' : ''}`}
           onContextMenu={event => onMessageContextMenu(event, msg)}
         >
           {msg.loading ? (

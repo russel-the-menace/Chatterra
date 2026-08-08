@@ -6,6 +6,33 @@ import { chatTimeline } from '../chatTimeline'
 
 type ScrollPosition = { top: number; atBottom: boolean }
 type MessageMenu = { message: ChatMessage; x: number; y: number }
+type MessageActionIconName = 'copy' | 'document' | 'forward' | 'quote' | 'translate'
+
+const MessageActionIcon = ({ name }: { name: MessageActionIconName }) => {
+  const common = {
+    className: 'message-action-icon',
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.8,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    'aria-hidden': true,
+  }
+  if (name === 'copy') {
+    return <svg {...common}><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+  }
+  if (name === 'document') {
+    return <svg {...common}><path d="M6 3.5h8l4 4V20a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z"/><path d="M14 3.5V8h4M8 12h8M8 16h6"/></svg>
+  }
+  if (name === 'forward') {
+    return <svg {...common}><path d="M14 5l6 6-6 6"/><path d="M20 11H9a5 5 0 0 0-5 5v3"/></svg>
+  }
+  if (name === 'quote') {
+    return <svg {...common}><path d="M9 11H5.5A2.5 2.5 0 0 0 3 13.5v1A2.5 2.5 0 0 0 5.5 17H7a2 2 0 0 0 2-2v-4Z"/><path d="M21 11h-3.5a2.5 2.5 0 0 0-2.5 2.5v1a2.5 2.5 0 0 0 2.5 2.5H19a2 2 0 0 0 2-2v-4Z"/></svg>
+  }
+  return <svg {...common}><path d="M4 5h16M12 5v14M7 19h10"/><path d="M7 5c.7 4.7 3.5 7.5 8.5 8.5M17 5c-.7 4.7-3.5 7.5-8.5 8.5"/></svg>
+}
 
 const nearLatestThreshold = 96
 
@@ -124,8 +151,8 @@ export default function ChatWindow({
   const openMessageMenu = (event: React.MouseEvent<HTMLDivElement>, message: ChatMessage) => {
     if (message.loading) return
     event.preventDefault()
-    const menuWidth = message.voice?.status === 'ready' ? 154 : 272
-    const menuHeight = message.voice?.status === 'ready' ? 48 : 92
+    const menuWidth = message.voice?.status === 'ready' ? 154 : 296
+    const menuHeight = message.voice?.status === 'ready' ? 78 : 82
     setMessageMenu({
       message,
       x: Math.max(8, Math.min(event.clientX, window.innerWidth - menuWidth - 8)),
@@ -204,8 +231,8 @@ export default function ChatWindow({
             style={{
               left: messageMenu.x,
               top: messageMenu.y,
-              width: messageMenu.message.voice?.status === 'ready' ? 154 : 272,
-              minHeight: messageMenu.message.voice?.status === 'ready' ? 44 : 88,
+              width: messageMenu.message.voice?.status === 'ready' ? 154 : 296,
+              minHeight: messageMenu.message.voice?.status === 'ready' ? 76 : 78,
             }}
             onMouseDown={event => event.stopPropagation()}
           >
@@ -220,9 +247,10 @@ export default function ChatWindow({
                   void onToggleVoiceTranscript(message)
                 }}
               >
-                {messageMenu.message.voiceTranscriptionLoading
+                <MessageActionIcon name="document" />
+                <span>{messageMenu.message.voiceTranscriptionLoading
                   ? 'Converting...'
-                  : messageMenu.message.voiceTranscriptVisible ? 'Hide text' : 'Convert to Text'}
+                  : messageMenu.message.voiceTranscriptVisible ? 'Hide text' : 'Convert to Text'}</span>
               </button>
             ) : (
               <>
@@ -235,7 +263,8 @@ export default function ChatWindow({
                     onForwardMessage(message)
                   }}
                 >
-                  Forward
+                  <MessageActionIcon name="forward" />
+                  <span>Forward</span>
                 </button>
                 <button
                   type="button"
@@ -246,10 +275,12 @@ export default function ChatWindow({
                     onQuoteMessage(message)
                   }}
                 >
-                  Quote
+                  <MessageActionIcon name="quote" />
+                  <span>Quote</span>
                 </button>
                 <button type="button" role="menuitem" onClick={() => void copyMessage(messageMenu.message)}>
-                  Copy
+                  <MessageActionIcon name="copy" />
+                  <span>Copy</span>
                 </button>
                 <button
                   type="button"
@@ -260,7 +291,8 @@ export default function ChatWindow({
                     onToggleTranslation(message)
                   }}
                 >
-                  {messageMenu.message.translationVisible ? 'Hide translation' : 'Translate'}
+                  <MessageActionIcon name="translate" />
+                  <span>{messageMenu.message.translationVisible ? 'Hide translation' : 'Translate'}</span>
                 </button>
               </>
             )}
