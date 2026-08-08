@@ -64,6 +64,11 @@ export default function MessageBubble({
   const [playing, setPlaying] = useState(false)
   const [waveLevel, setWaveLevel] = useState(3)
   const readyVoice = msg.voice?.status === 'ready' && Boolean(msg.voice.audioUrl)
+  const isSingleLineUserMessage = isUser
+    && !msg.loading
+    && !readyVoice
+    && !/[\r\n]/.test(msg.text)
+    && msg.text.length <= 42
   const duration = Math.max(1, Math.round(msg.voice?.durationSeconds || 1))
   const isUserVoice = msg.voice?.provider === 'user-recording'
   const characterAvatar = isImageAvatar(character.avatar)
@@ -126,7 +131,7 @@ export default function MessageBubble({
           </button>
         )}
         <div
-          className={bubbleClass}
+          className={`${bubbleClass}${isSingleLineUserMessage ? ' single-line' : ''}`}
           onContextMenu={event => onMessageContextMenu(event, msg)}
         >
           {msg.loading ? (
@@ -184,7 +189,7 @@ export default function MessageBubble({
           </div>
         )}
       </div>
-      {isUser && <div className="avatar user">{userAvatarContent}</div>}
+      {isUser && <div className={`avatar user${isSingleLineUserMessage ? ' single-line' : ''}`}>{userAvatarContent}</div>}
     </div>
   )
 }

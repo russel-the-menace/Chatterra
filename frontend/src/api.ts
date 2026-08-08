@@ -7,6 +7,7 @@ export type WebLoginSession = {
     id: string
     username: string
     displayName: string
+    avatar?: string
   }
 }
 
@@ -112,6 +113,20 @@ export const logout = async () => {
   } finally {
     clearStoredSession()
   }
+}
+
+export const updateUserProfile = async (
+  userId: string,
+  input: { displayName: string; avatar?: string }
+): Promise<{ userName?: string; userAvatar?: string }> => {
+  const response = await apiFetch(apiUrl(`/api/users/${encodeURIComponent(userId)}/profile`), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Could not save your profile.')
+  return data
 }
 
 export const getSyncSnapshot = async (_userId?: string): Promise<SyncSnapshot> => {

@@ -10,8 +10,11 @@ import {
   apiUrl,
   getStoredSession,
   getSyncSnapshot,
+  logout,
   markConversationRead,
+  saveStoredSession,
   transcribeVoiceRecording,
+  updateUserProfile,
   uploadVoiceMessage,
 } from '../api'
 
@@ -209,7 +212,7 @@ const createCharacterDraft = (): Character => ({
   systemPromptTemplate: customCharacterDocumentTemplate
 })
 
-export default function ChatPage(): JSX.Element{
+export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): JSX.Element{
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [userId, setUserIdentifier] = useState<string | null>(null)
   const [userName, setUserName] = useState<string | undefined>(() => getStoredSession()?.user.displayName)
@@ -229,10 +232,17 @@ export default function ChatPage(): JSX.Element{
   const [showAddDrawer, setShowAddDrawer] = useState(false)
   const [showConversationMenu, setShowConversationMenu] = useState(false)
   const [showCharacterEditor, setShowCharacterEditor] = useState(false)
+  const [showProfileEditor, setShowProfileEditor] = useState(false)
   const [editingCharacter, setEditingCharacter] = useState<Character | null>(null)
   const [isSavingCharacter, setIsSavingCharacter] = useState(false)
   const [characterEditorError, setCharacterEditorError] = useState('')
+  const [profileName, setProfileName] = useState('')
+  const [profileAvatar, setProfileAvatar] = useState('')
+  const [profileEditorError, setProfileEditorError] = useState('')
+  const [isSavingProfile, setIsSavingProfile] = useState(false)
+  const [isSigningOut, setIsSigningOut] = useState(false)
   const [avatarCropSource, setAvatarCropSource] = useState<string | null>(null)
+  const [avatarCropTarget, setAvatarCropTarget] = useState<'character' | 'profile' | null>(null)
   const [avatarCropScale, setAvatarCropScale] = useState(1)
   const [avatarCropPosition, setAvatarCropPosition] = useState<Point>({ x: 0, y: 0 })
   const [avatarCropFit, setAvatarCropFit] = useState<'wide' | 'tall'>('tall')
@@ -241,6 +251,7 @@ export default function ChatPage(): JSX.Element{
   const avatarCropViewportRef = useRef<HTMLDivElement | null>(null)
   const avatarCropImageRef = useRef<HTMLImageElement | null>(null)
   const avatarDragRef = useRef<{ pointerId: number; pointerX: number; pointerY: number; x: number; y: number } | null>(null)
+  const avatarCropTargetRef = useRef<'character' | 'profile' | null>(null)
   const conversationCacheRef = useRef<Record<string, ConversationCacheEntry>>({})
   const conversationMetadataRef = useRef<Record<string, string>>({})
   const hasWorkspaceSnapshotRef = useRef(false)
@@ -381,6 +392,66 @@ export default function ChatPage(): JSX.Element{
     setCharacterEditorError('')
   }
 
+  const openProfileEditor = () => {
+    setProfileName(userName || getStoredSession()?.user.displayName || '')
+    setProfileAvatar(userAvatar || getStoredSession()?.user.avatar || '')
+    setProfileEditorError('')
+    setShowProfileEditor(true)
+  }
+
+  const closeProfileEditor = () => {
+    if (isSavingProfile || isSigningOut) return
+    setShowProfileEditor(false)
+    setProfileEditorError('')
+  }
+
+  const saveProfile = async () => {
+    const displayName = profileName.trim()
+    if (!displayName) {
+      setProfileEditorError('Name is required.')
+      return
+    }
+    if (!userId) {
+      setProfileEditorError('Your profile is not ready yet.')
+      return
+    }
+
+    try {
+      setIsSavingProfile(true)
+      setProfileEditorError('')
+      const savedProfile = await updateUserProfile(userId, {
+        displayName,
+        avatar: profileAvatar || undefined,
+      })
+      const nextName = savedProfile.userName || displayName
+      const nextAvatar = savedProfile.userAvatar || profileAvatar || undefined
+      setUserName(nextName)
+      setUserAvatar(nextAvatar)
+      const session = getStoredSession()
+      if (session) {
+        saveStoredSession({
+          ...session,
+          user: { ...session.user, displayName: nextName, avatar: nextAvatar },
+        })
+      }
+      setShowProfileEditor(false)
+    } catch (profileError) {
+      setProfileEditorError(profileError instanceof Error ? profileError.message : 'Could not save your profile.')
+    } finally {
+      setIsSavingProfile(false)
+    }
+  }
+
+  const signOut = async () => {
+    try {
+      setIsSigningOut(true)
+      await logout()
+      onLoggedOut()
+    } finally {
+      setIsSigningOut(false)
+    }
+  }
+
   const closeCharacterEditor = () => {
     if (isSavingCharacter) return
     setShowCharacterEditor(false)
@@ -411,6 +482,8 @@ export default function ChatPage(): JSX.Element{
     setAvatarCropScale(1)
     setAvatarCropPosition({ x: 0, y: 0 })
     setAvatarCropFit('tall')
+    setAvatarCropTarget(null)
+    avatarCropTargetRef.current = null
     setIsDraggingAvatar(false)
     avatarDragRef.current = null
     if (avatarFileInputRef.current) avatarFileInputRef.current.value = ''
@@ -420,7 +493,8 @@ export default function ChatPage(): JSX.Element{
     const file = event.target.files?.[0]
     if (!file) return
     if (!file.type.startsWith('image/')) {
-      setCharacterEditorError('Please choose an image file.')
+      if (avatarCropTargetRef.current === 'profile') setProfileEditorError('Please choose an image file.')
+      else setCharacterEditorError('Please choose an image file.')
       return
     }
 
@@ -430,10 +504,20 @@ export default function ChatPage(): JSX.Element{
       setAvatarCropScale(1)
       setAvatarCropPosition({ x: 0, y: 0 })
       setAvatarCropFit('tall')
-      setCharacterEditorError('')
+      if (avatarCropTargetRef.current === 'profile') setProfileEditorError('')
+      else setCharacterEditorError('')
     }
-    reader.onerror = () => setCharacterEditorError('Could not read that image.')
+    reader.onerror = () => {
+      if (avatarCropTargetRef.current === 'profile') setProfileEditorError('Could not read that image.')
+      else setCharacterEditorError('Could not read that image.')
+    }
     reader.readAsDataURL(file)
+  }
+
+  const chooseAvatar = (target: 'character' | 'profile') => {
+    avatarCropTargetRef.current = target
+    setAvatarCropTarget(target)
+    avatarFileInputRef.current?.click()
   }
 
   const handleAvatarCropScaleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -476,7 +560,8 @@ export default function ChatPage(): JSX.Element{
   const applyAvatarCrop = () => {
     const image = avatarCropImageRef.current
     const viewport = avatarCropViewportRef.current
-    if (!image || !viewport || !editingCharacter) return
+    const target = avatarCropTargetRef.current
+    if (!image || !viewport || !target) return
 
     const imageRect = image.getBoundingClientRect()
     const viewportRect = viewport.getBoundingClientRect()
@@ -491,17 +576,23 @@ export default function ChatPage(): JSX.Element{
 
     context.drawImage(image, sourceX, sourceY, sourceSize, sourceSize, 0, 0, canvas.width, canvas.height)
     const croppedAvatar = canvas.toDataURL('image/jpeg', 0.88)
-    setEditingCharacter(prev => prev ? { ...prev, avatar: croppedAvatar } : prev)
+    if (target === 'character') {
+      setEditingCharacter(prev => prev ? { ...prev, avatar: croppedAvatar } : prev)
+    } else {
+      setProfileAvatar(croppedAvatar)
+    }
     closeAvatarCropper()
   }
 
   useEffect(() => {
-    if (!showCharacterEditor) return
+    if (!showCharacterEditor && !showProfileEditor) return
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         if (avatarCropSource) {
           closeAvatarCropper()
+        } else if (showProfileEditor) {
+          closeProfileEditor()
         } else {
           closeCharacterEditor()
         }
@@ -514,7 +605,7 @@ export default function ChatPage(): JSX.Element{
       document.removeEventListener('keydown', handleKeyDown)
       document.body.classList.remove('modal-open')
     }
-  }, [showCharacterEditor, isSavingCharacter, avatarCropSource])
+  }, [showCharacterEditor, showProfileEditor, isSavingCharacter, isSavingProfile, isSigningOut, avatarCropSource])
 
   useEffect(() => {
     const uid = getStoredSession()?.user.id
@@ -1376,8 +1467,33 @@ export default function ChatPage(): JSX.Element{
     })()
   }
 
+  const currentUserAvatar = userAvatar || getStoredSession()?.user.avatar || ''
+  const railAvatarContent = isImageAvatar(currentUserAvatar)
+    ? <img src={currentUserAvatar} alt="" />
+    : <span>{(userName || 'Me').trim().slice(0, 1).toUpperCase() || 'M'}</span>
+
   return (
     <div className="chat-shell">
+      <nav className="workspace-rail" aria-label="Workspace">
+        <button
+          type="button"
+          className="workspace-rail-avatar"
+          onClick={openProfileEditor}
+          aria-label="Edit profile"
+          title="Edit profile"
+        >
+          {railAvatarContent}
+        </button>
+        <button
+          type="button"
+          className="workspace-rail-settings"
+          onClick={openProfileEditor}
+          aria-label="Settings"
+          title="Settings"
+        >
+          <span aria-hidden="true">⚙</span>
+        </button>
+      </nav>
       <aside className="contacts-pane">
         <div className="contacts-header">
           <label className="wechat-search" aria-label="Search conversations">
@@ -1553,7 +1669,7 @@ export default function ChatPage(): JSX.Element{
                   <button
                     type="button"
                     className="character-avatar-picker"
-                    onClick={() => avatarFileInputRef.current?.click()}
+                    onClick={() => chooseAvatar('character')}
                     aria-label="Upload avatar"
                   >
                     {avatarContent(editingCharacter)}
@@ -1570,13 +1686,6 @@ export default function ChatPage(): JSX.Element{
                       </button>
                     )}
                   </div>
-                  <input
-                    ref={avatarFileInputRef}
-                    type="file"
-                    accept="image/*"
-                    className="avatar-file-input"
-                    onChange={handleAvatarFileSelected}
-                  />
                 </div>
               </div>
 
@@ -1622,6 +1731,68 @@ export default function ChatPage(): JSX.Element{
         </div>
       )}
 
+      {showProfileEditor && (
+        <div className="profile-modal-backdrop" onClick={closeProfileEditor}>
+          <div
+            className="profile-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="profile-modal-title"
+            onClick={event => event.stopPropagation()}
+          >
+            <div className="profile-modal-header">
+              <button type="button" className="profile-modal-command" onClick={closeProfileEditor} disabled={isSavingProfile || isSigningOut}>Cancel</button>
+              <div id="profile-modal-title" className="profile-modal-title">Edit profile</div>
+              <button type="button" className="profile-modal-command profile-modal-save" onClick={() => void saveProfile()} disabled={isSavingProfile || isSigningOut}>
+                {isSavingProfile ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+
+            <div className="profile-form">
+              <div className="profile-avatar-section">
+                <button
+                  type="button"
+                  className="profile-avatar-picker"
+                  onClick={() => chooseAvatar('profile')}
+                  aria-label="Upload profile photo"
+                >
+                  {isImageAvatar(profileAvatar)
+                    ? <img src={profileAvatar} alt="" />
+                    : <span>{(profileName || 'Me').trim().slice(0, 1).toUpperCase() || 'M'}</span>}
+                  <span className="profile-avatar-overlay">Change photo</span>
+                </button>
+              </div>
+
+              {profileEditorError && <div className="profile-form-error" role="alert">{profileEditorError}</div>}
+
+              <label className="profile-field">
+                <span>Name</span>
+                <input
+                  autoFocus
+                  autoComplete="name"
+                  value={profileName}
+                  onChange={event => setProfileName(event.target.value)}
+                  maxLength={120}
+                  placeholder="Your name"
+                />
+              </label>
+
+              <button type="button" className="profile-sign-out" onClick={() => void signOut()} disabled={isSavingProfile || isSigningOut}>
+                {isSigningOut ? 'Signing out...' : 'Sign out'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <input
+        ref={avatarFileInputRef}
+        type="file"
+        accept="image/*"
+        className="avatar-file-input"
+        onChange={handleAvatarFileSelected}
+      />
+
       {avatarCropSource && (
         <div className="avatar-crop-backdrop" onClick={closeAvatarCropper}>
           <div
@@ -1632,7 +1803,7 @@ export default function ChatPage(): JSX.Element{
             onClick={(e) => e.stopPropagation()}
           >
             <div className="avatar-crop-header">
-              <div id="avatar-crop-title" className="avatar-crop-title">Crop Avatar</div>
+              <div id="avatar-crop-title" className="avatar-crop-title">{avatarCropTarget === 'profile' ? 'Crop Profile Photo' : 'Crop Avatar'}</div>
               <button type="button" className="character-modal-close" onClick={closeAvatarCropper} aria-label="Close">×</button>
             </div>
             <div
