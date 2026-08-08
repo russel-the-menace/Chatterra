@@ -111,6 +111,8 @@ body.modal-open{overflow:hidden}
   cursor:pointer;
 }
 .workspace-rail-avatar{
+  width:38.5px;
+  height:38.5px;
   overflow:hidden;
   border-radius:12px;
   background:#dbe4ef;
@@ -123,7 +125,7 @@ body.modal-open{overflow:hidden}
   border-radius:12px;
   background:transparent;
   color:rgba(255,255,255,0.62);
-  font-size:28.6px;
+  font-size:30px;
   line-height:1;
   transition:background 160ms ease,color 160ms ease;
 }
@@ -289,7 +291,19 @@ body.modal-open{overflow:hidden}
   margin-left:-8px;
   padding-left:20px;
   padding-right:20px;
+  position:relative;
+  border-bottom-color:transparent;
   background:#f4f5f6;
+}
+.contact-item.pinned::after{
+  content:'';
+  position:absolute;
+  left:8px;
+  right:8px;
+  bottom:-1px;
+  height:1px;
+  background:#d8dee6;
+  pointer-events:none;
 }
 .contact-item.pinned:hover{background:#eef0f2}
 .contact-item.pinned.active{
@@ -484,8 +498,8 @@ body.modal-open{overflow:hidden}
 .conversation-menu button + button{border-top:1px solid #eef0f2}
 .conversation-menu button.danger{color:#b42318}
 .top-bar-avatar{
-  width:44px;
-  height:44px;
+  width:38.5px;
+  height:38.5px;
   padding:0;
   flex:0 0 auto;
   border:0;
@@ -544,7 +558,7 @@ body.modal-open{overflow:hidden}
 .message-content{display:flex;flex-direction:column;align-items:flex-start;min-width:0;max-width:72%}
 .message-row.right .message-content{align-items:flex-end}
 .avatar{
-  width:44px;height:44px;border-radius:10px;
+  width:38.5px;height:38.5px;border-radius:10px;
   padding:0;
   border:0;
   display:flex;align-items:center;justify-content:center;
@@ -569,9 +583,9 @@ body.modal-open{overflow:hidden}
 .bubble.ai{background:#ffffff;border-bottom-left-radius:4px;color:#111827}
 .bubble.user{background:var(--accent);color:#fff;border-bottom-right-radius:4px}
 .bubble.user.single-line{
-  min-height:44px;
-  padding-top:9.9px;
-  padding-bottom:9.9px;
+  min-height:38.5px;
+  padding-top:7.65px;
+  padding-bottom:7.65px;
   display:flex;
   align-items:center;
 }

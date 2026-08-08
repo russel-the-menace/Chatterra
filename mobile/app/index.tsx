@@ -65,6 +65,7 @@ function ContactRow({ character, pinned }: { character: Character; pinned: boole
         </Text>
       </View>
       <Ionicons name="chevron-forward" size={18} color="#98A2B3" />
+      {pinned && <View pointerEvents="none" style={styles.contactPinnedSeparator} />}
     </Pressable>
   )
 }
@@ -407,6 +408,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#F6F7F8',
     marginHorizontal: -8,
     paddingHorizontal: 16,
+    borderBottomColor: 'transparent',
+  },
+  contactPinnedSeparator: {
+    position: 'absolute',
+    left: 8,
+    right: 8,
+    bottom: -StyleSheet.hairlineWidth,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: palette.border,
   },
   contactContent: {
     flex: 1,
