@@ -119,16 +119,6 @@ export default function MessageBubble({
         </button>
       )}
       <div className="message-content">
-        {!isUser && (
-          <button
-            type="button"
-            className="message-character-name chat-character-edit-trigger"
-            onClick={onEditCharacter}
-            title="Edit character"
-          >
-            {character.name}
-          </button>
-        )}
         <div
           className={`${bubbleClass}${isUser && isSingleLineMessage ? ' single-line' : ''}`}
           onContextMenu={event => onMessageContextMenu(event, msg)}

@@ -550,18 +550,6 @@ body.modal-open{overflow:hidden}
 }
 .avatar.assistant{background:var(--accent);color:#fff}
 .avatar.user{background:#dbe4ef;color:#0f172a}
-.message-character-name{
-  max-width:100%;
-  margin:0 0 4px;
-  padding:0;
-  border:0;
-  background:transparent;
-  color:#6b7280;
-  font-size:12px;
-  white-space:nowrap;
-  overflow:hidden;
-  text-overflow:ellipsis;
-}
 .bubble{
   max-width:min(72ch, 100%);
   padding:11px 14px;
