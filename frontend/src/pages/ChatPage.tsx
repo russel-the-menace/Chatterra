@@ -26,6 +26,18 @@ type ConversationCacheEntry = {
   behaviorStatus: string
 }
 
+type MessageHistoryCursor = {
+  createdAt: string
+  id: string
+}
+
+type MessageHistoryState = {
+  conversationId: string
+  hasMore: boolean
+  nextCursor?: MessageHistoryCursor
+  loading: boolean
+}
+
 const makeMessageId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`
 const hasSameOrder = (left: string[], right: string[]) => (
   left.length === right.length && left.every((value, index) => value === right[index])
@@ -145,7 +157,7 @@ const contactPreviewForMessage = (message: any): string | undefined => {
 
 const mergeMessageUiState = (current: ChatMessage[], incoming: ChatMessage[]) => {
   const currentById = new Map(current.map(message => [message.id, message]))
-  return incoming.map(message => {
+  const mergedIncoming = incoming.map(message => {
     const existing = currentById.get(message.id)
     if (!existing) return message
     return {
@@ -160,6 +172,16 @@ const mergeMessageUiState = (current: ChatMessage[], incoming: ChatMessage[]) =>
       translationError: existing.translationError,
       voiceTranscriptVisible: existing.voiceTranscriptVisible && Boolean(message.voice)
     }
+  })
+  const incomingIds = new Set(incoming.map(message => message.id))
+  const preserved = current.filter(message => !incomingIds.has(message.id))
+  return [...preserved, ...mergedIncoming].sort((left, right) => {
+    if (left.createdAt && right.createdAt && left.createdAt !== right.createdAt) {
+      return left.createdAt.localeCompare(right.createdAt)
+    }
+    if (left.createdAt && !right.createdAt) return -1
+    if (!left.createdAt && right.createdAt) return 1
+    return left.id.localeCompare(right.id)
   })
 }
 
@@ -259,6 +281,7 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
   const avatarDragRef = useRef<{ pointerId: number; pointerX: number; pointerY: number; x: number; y: number } | null>(null)
   const avatarCropTargetRef = useRef<'character' | 'profile' | null>(null)
   const conversationCacheRef = useRef<Record<string, ConversationCacheEntry>>({})
+  const messageHistoryRef = useRef<Record<string, MessageHistoryState>>({})
   const conversationMetadataRef = useRef<Record<string, string>>({})
   const hasWorkspaceSnapshotRef = useRef(false)
   const historyRequestRef = useRef(0)
@@ -350,6 +373,15 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
       const mData = await mRes.json()
       if (requestId !== historyRequestRef.current || selectedCharacterIdRef.current !== nextCharacter.id) return
       const mapped = mergeMessageUiState(cachedMessages, mapServerMessages(mData.messages || []))
+      const existingHistory = messageHistoryRef.current[nextCharacter.id]
+      if (!existingHistory || existingHistory.conversationId !== matchingConversation.id) {
+        messageHistoryRef.current[nextCharacter.id] = {
+          conversationId: matchingConversation.id,
+          hasMore: Boolean(mData.hasMore),
+          nextCursor: mData.nextCursor,
+          loading: false
+        }
+      }
       setConversationId(matchingConversation.id)
       setMessages(mapped)
       if (mData.messages?.length > 0) {
@@ -375,6 +407,45 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
 
     if (requestId !== historyRequestRef.current || selectedCharacterIdRef.current !== nextCharacter.id) return
     if (!cached) setMessages([])
+  }
+
+  const loadOlderMessages = async () => {
+    const characterId = selectedCharacterIdRef.current
+    const state = messageHistoryRef.current[characterId]
+    if (
+      !state
+      || !state.hasMore
+      || state.loading
+      || !state.nextCursor
+      || state.conversationId !== conversationId
+    ) return
+
+    state.loading = true
+    try {
+      const params = new URLSearchParams({
+        limit: '50',
+        beforeCreatedAt: state.nextCursor.createdAt,
+        beforeId: state.nextCursor.id,
+      })
+      const response = await apiFetch(
+        apiUrl(`/api/conversations/${encodeURIComponent(state.conversationId)}/messages?${params.toString()}`)
+      )
+      if (!response.ok) throw new Error('Could not load older messages.')
+      const data = await response.json()
+      if (selectedCharacterIdRef.current !== characterId || conversationId !== state.conversationId) return
+      const olderMessages = mapServerMessages(Array.isArray(data.messages) ? data.messages : [])
+      setMessages(current => mergeMessageUiState(current, olderMessages))
+      state.hasMore = Boolean(data.hasMore)
+      state.nextCursor = data.nextCursor
+      const cached = conversationCacheRef.current[characterId]
+      if (cached) {
+        cached.messages = stableMessagesForCache(mergeMessageUiState(cached.messages, olderMessages))
+      }
+    } catch {
+      // Keep the current transcript and allow a later scroll attempt to retry.
+    } finally {
+      state.loading = false
+    }
   }
 
   const openCharacterEditor = (character: Character) => {
@@ -919,6 +990,15 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
           })
         }
         const serverMessages = mapServerMessages(data.messages)
+        const historyState = messageHistoryRef.current[selectedCharacter.id]
+        if (!historyState || historyState.conversationId !== conversationId) {
+          messageHistoryRef.current[selectedCharacter.id] = {
+            conversationId,
+            hasMore: Boolean(data.hasMore),
+            nextCursor: data.nextCursor,
+            loading: false
+          }
+        }
         setMessages(current => {
           if (current.some(message => message.loading)) return current
           const mergedMessages = mergeMessageUiState(current, serverMessages)
@@ -1003,6 +1083,8 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
       ...cached,
       conversationId: nextConversationId
     }
+    const historyState = messageHistoryRef.current[characterId]
+    if (historyState?.conversationId !== nextConversationId) delete messageHistoryRef.current[characterId]
     if (selectedCharacterIdRef.current === characterId) {
       setConversationId(nextConversationId)
       localStorage.setItem('chatterra_conversationId', nextConversationId)
@@ -1264,6 +1346,12 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
       conversationId: ensuredConversation.id,
       messages: starterMessages,
       behaviorStatus: 'Online'
+    }
+    messageHistoryRef.current[targetCharacter.id] = {
+      conversationId: ensuredConversation.id,
+      hasMore: Boolean(messagesData.hasMore),
+      nextCursor: messagesData.nextCursor,
+      loading: false
     }
     if (selectedCharacterIdRef.current === targetCharacter.id) {
       setConversationId(ensuredConversation.id)
@@ -1621,6 +1709,7 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
           userName={userName}
           onEditCharacter={() => openCharacterEditor(selectedCharacter)}
           scrollToEndRequest={scrollToEndRequest}
+          onLoadOlderMessages={loadOlderMessages}
           onToggleTranslation={toggleMessageTranslation}
           onToggleVoiceTranscript={toggleVoiceTranscript}
         />

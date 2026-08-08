@@ -237,7 +237,8 @@ const getStarterMessage = (character?: Character) => {
   return starterMessageForPolicy(character?.name || 'Interviewer', languagePolicy)
 }
 
-const STARTER_TIMESTAMP_POLICY = 'account-or-character-created-at-v1'
+// v2 marks conversations after the one-time legacy starter correction has run.
+const STARTER_TIMESTAMP_POLICY = 'account-or-character-created-at-v2'
 
 const fixedStarterMessageCreatedAt = () => {
   const year = new Date().getFullYear()

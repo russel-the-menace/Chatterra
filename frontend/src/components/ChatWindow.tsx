@@ -16,6 +16,7 @@ export default function ChatWindow({
   userName,
   onEditCharacter,
   scrollToEndRequest,
+  onLoadOlderMessages,
   onToggleTranslation,
   onToggleVoiceTranscript
 }:{
@@ -25,6 +26,7 @@ export default function ChatWindow({
   userName?: string
   onEditCharacter: () => void
   scrollToEndRequest: number
+  onLoadOlderMessages: () => Promise<void>
   onToggleTranslation: (message: ChatMessage) => void
   onToggleVoiceTranscript: (message: ChatMessage) => void
 }): JSX.Element{
@@ -141,6 +143,22 @@ export default function ChatWindow({
       top: element.scrollTop,
       atBottom: distanceFromBottom <= bottomThreshold
     }
+    if (element.scrollTop <= 32) void loadOlderMessages()
+  }
+
+  const loadOlderMessages = async () => {
+    const element = ref.current
+    if (!element) return
+    const previousTop = element.scrollTop
+    const previousHeight = element.scrollHeight
+    await onLoadOlderMessages()
+    requestAnimationFrame(() => {
+      const nextElement = ref.current
+      if (!nextElement) return
+      const nextTop = previousTop + nextElement.scrollHeight - previousHeight
+      nextElement.scrollTop = nextTop
+      scrollPositionsRef.current[character.id] = { top: nextTop, atBottom: false }
+    })
   }
 
   return (
