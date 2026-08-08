@@ -537,7 +537,7 @@ body.modal-open{overflow:hidden}
 .message-content{display:flex;flex-direction:column;align-items:flex-start;min-width:0;max-width:72%}
 .message-row.right .message-content{align-items:flex-end}
 .avatar{
-  width:34px;height:34px;border-radius:10px;
+  width:43px;height:43px;border-radius:10px;
   padding:0;
   border:0;
   display:flex;align-items:center;justify-content:center;
@@ -568,8 +568,14 @@ body.modal-open{overflow:hidden}
   display:flex;
   align-items:center;
 }
-.avatar.assistant.single-line,
-.avatar.user.single-line{width:43px;height:43px}
+.chat-date-divider{
+  padding:3px 0 11px;
+  color:#6b7280;
+  font-size:12px;
+  line-height:16px;
+  font-weight:600;
+  text-align:center;
+}
 .voice-note{
   min-width:132px;
   min-height:42px;

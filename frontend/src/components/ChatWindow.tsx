@@ -2,6 +2,7 @@ import React, {useEffect, useLayoutEffect, useRef, useState} from 'react'
 import { createPortal } from 'react-dom'
 import MessageBubble, { ChatMessage } from './MessageBubble'
 import { Character } from '../data/character'
+import { chatTimeline } from '../chatTimeline'
 
 type ScrollPosition = { top: number; atBottom: boolean }
 type MessageMenu = { message: ChatMessage; x: number; y: number }
@@ -34,6 +35,7 @@ export default function ChatWindow({
   const ignoreScrollEventsRef = useRef(false)
   const scrollReleaseTimerRef = useRef<number | null>(null)
   const [messageMenu, setMessageMenu] = useState<MessageMenu | null>(null)
+  const timelineItems = chatTimeline(messages)
 
   const releaseScrollCapture = (delay: number) => {
     if (scrollReleaseTimerRef.current !== null) {
@@ -153,16 +155,18 @@ export default function ChatWindow({
         if (event.clientX >= bounds.right - 18) allowManualScrolling()
       }}
     >
-      {messages.map(m => (
-        <MessageBubble
-          key={m.id}
-          msg={m}
-          character={character}
-          userAvatar={userAvatar}
-          userName={userName}
-          onEditCharacter={onEditCharacter}
-          onMessageContextMenu={openMessageMenu}
-        />
+      {timelineItems.map(item => (
+        item.kind === 'date'
+          ? <div className="chat-date-divider" key={item.key}>{item.label}</div>
+          : <MessageBubble
+              key={item.key}
+              msg={item.message}
+              character={character}
+              userAvatar={userAvatar}
+              userName={userName}
+              onEditCharacter={onEditCharacter}
+              onMessageContextMenu={openMessageMenu}
+            />
       ))}
       {messageMenu && createPortal(
         <div className="message-menu-backdrop" onMouseDown={() => setMessageMenu(null)}>

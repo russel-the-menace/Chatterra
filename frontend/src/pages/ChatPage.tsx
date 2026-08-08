@@ -101,6 +101,7 @@ const mapServerMessages = (items: any[]): ChatMessage[] => items.flatMap((messag
     text,
     sourceMessageId: String(message.id),
     segmentIndex: index,
+    createdAt: typeof message.createdAt === 'string' ? message.createdAt : undefined,
     translation: typeof englishTranslations?.[String(index)] === 'string'
       ? englishTranslations[String(index)]
       : undefined,
@@ -112,7 +113,7 @@ const mapServerMessages = (items: any[]): ChatMessage[] => items.flatMap((messag
   }))
 })
 
-const responseMessages = (data: any): ChatMessage[] => {
+const responseMessages = (data: any, createdAt = new Date().toISOString()): ChatMessage[] => {
   const segments = Array.isArray(data.replySegments)
     ? data.replySegments.filter((segment: unknown): segment is string => (
         typeof segment === 'string' && Boolean(segment.trim())
@@ -129,7 +130,8 @@ const responseMessages = (data: any): ChatMessage[] => {
     text,
     sourceMessageId: typeof data.messageId === 'string' ? data.messageId : undefined,
     segmentIndex: index,
-    voice: voice?.segmentIndex === index ? voice : undefined
+    voice: voice?.segmentIndex === index ? voice : undefined,
+    createdAt,
   }))
 }
 
@@ -367,7 +369,8 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
       const starterMessages: ChatMessage[] = [{
         id: `starter-${nextCharacter.id}`,
         sender: 'ai',
-        text: starterMessageForCharacter(nextCharacter)
+        text: starterMessageForCharacter(nextCharacter),
+        createdAt: new Date().toISOString(),
       }]
       setMessages(starterMessages)
       conversationCacheRef.current[nextCharacter.id] = {
@@ -793,7 +796,8 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
           const starterMessages: ChatMessage[] = [{
             id: `starter-${activeCharacter.id}-${Date.now()}`,
             sender: 'ai',
-            text: starterMessageForCharacter(activeCharacter)
+            text: starterMessageForCharacter(activeCharacter),
+            createdAt: new Date().toISOString(),
           }]
           conversationCacheRef.current[activeCharacter.id] = {
             conversationId: null,
@@ -1273,7 +1277,8 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
     const starterMessages: ChatMessage[] = [{
       id: `starter-${targetCharacter.id}-${Date.now()}`,
       sender: 'ai',
-      text: starterMessageForCharacter(targetCharacter)
+      text: starterMessageForCharacter(targetCharacter),
+      createdAt: new Date().toISOString(),
     }]
     conversationCacheRef.current[targetCharacter.id] = {
       conversationId: null,
@@ -1324,11 +1329,13 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
     const localUrl = URL.createObjectURL(recording.audio)
     const localMessageId = makeMessageId()
     const loadingId = makeMessageId()
+    const messageCreatedAt = new Date().toISOString()
     const localMessage: ChatMessage = {
       id: localMessageId,
       sender: 'user',
       text: '',
       segmentIndex: 0,
+      createdAt: messageCreatedAt,
       voice: {
         provider: 'user-recording',
         status: 'ready',
@@ -1338,7 +1345,7 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
         transcriptStatus: 'none',
       },
     }
-    const loadingMessage: ChatMessage = { id: loadingId, sender: 'ai', text: '', loading: true }
+    const loadingMessage: ChatMessage = { id: loadingId, sender: 'ai', text: '', loading: true, createdAt: messageCreatedAt }
 
     markCharacterActive(targetCharacterId)
     setScrollToEndRequest(current => current + 1)
@@ -1378,7 +1385,7 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
         updateMessagesForCharacter(targetCharacterId, current => current.filter(message => message.id !== loadingId))
         return
       }
-      const replies = responseMessages(data)
+      const replies = responseMessages(data, messageCreatedAt)
       updateMessagesForCharacter(targetCharacterId, current => current.flatMap(message => (
         message.id === loadingId ? replies : [message]
       )))
@@ -1395,11 +1402,12 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
     const targetCharacter = selectedCharacter
     const targetCharacterId = targetCharacter.id
     const targetConversationId = conversationId
+    const messageCreatedAt = new Date().toISOString()
     markCharacterActive(targetCharacterId)
     setScrollToEndRequest(current => current + 1)
-    const userMsg: ChatMessage = { id: makeMessageId(), sender: 'user', text, segmentIndex: 0 }
+    const userMsg: ChatMessage = { id: makeMessageId(), sender: 'user', text, segmentIndex: 0, createdAt: messageCreatedAt }
     const loadingId = makeMessageId()
-    const loadingMsg: ChatMessage = { id: loadingId, sender: 'ai', text: '', loading: true }
+    const loadingMsg: ChatMessage = { id: loadingId, sender: 'ai', text: '', loading: true, createdAt: messageCreatedAt }
 
     setMessages(prev => [...prev, userMsg, loadingMsg])
 
@@ -1451,7 +1459,7 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
         } else if (typeof data.reply !== 'string') {
           throw new Error('The server returned no usable response.')
         } else {
-          const aiMessages = responseMessages(data)
+          const aiMessages = responseMessages(data, messageCreatedAt)
           if (aiMessages.length === 0) throw new Error('The server returned no usable response.')
           updateMessagesForCharacter(targetCharacterId, prev2 => {
             const hasLoadingMessage = prev2.some(message => message.id === loadingId)
