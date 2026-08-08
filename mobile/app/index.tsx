@@ -285,7 +285,7 @@ const styles = StyleSheet.create({
     color: palette.text,
     fontSize: 26,
     lineHeight: 31,
-    fontWeight: '800',
+    fontWeight: '400',
   },
   subtitle: {
     color: palette.textMuted,

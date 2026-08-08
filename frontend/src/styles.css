@@ -37,7 +37,7 @@ body.modal-open{overflow:hidden}
   background:var(--accent);
   color:#fff;
   font-size:25px;
-  font-weight:800;
+  font-weight:400;
 }
 .login-card h1{margin:0;color:#111827;font-size:28px;line-height:34px}
 .login-card > p{margin:5px 0 28px;color:#667085;font-size:15px;line-height:22px}
