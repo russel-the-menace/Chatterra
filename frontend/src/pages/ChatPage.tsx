@@ -1839,7 +1839,10 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
           aria-label="Settings"
           title="Settings"
         >
-          <span aria-hidden="true">⚙</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" />
+            <path d="m19.4 13.5 1.1.86-1.7 2.94-1.33-.48a1.8 1.8 0 0 0-1.75.3l-.2.15a1.8 1.8 0 0 0-.72 1.57l.13 1.4h-3.4l-.2-1.4a1.8 1.8 0 0 0-1.05-1.4l-.24-.11a1.8 1.8 0 0 0-1.58.05l-1.23.66-1.7-2.94 1.1-.86a1.8 1.8 0 0 0 .65-1.5v-.28a1.8 1.8 0 0 0-.65-1.5l-1.1-.86 1.7-2.94 1.33.48a1.8 1.8 0 0 0 1.75-.3l.2-.15a1.8 1.8 0 0 0 .72-1.57l-.13-1.4h3.4l.2 1.4a1.8 1.8 0 0 0 1.05 1.4l.24.11a1.8 1.8 0 0 0 1.58-.05l1.23-.66 1.7 2.94-1.1.86a1.8 1.8 0 0 0-.65 1.5v.28a1.8 1.8 0 0 0 .65 1.5Z" />
+          </svg>
         </button>
       </nav>
       <aside className="contacts-pane">
