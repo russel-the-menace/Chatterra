@@ -70,6 +70,7 @@ import {
   listConversations,
   listMessagePage,
   listPinnedCharacterIds,
+  normalizeConversationStarterCreatedAt,
   newId,
   setBuiltInCharacterAvatar,
   setCharacterPinned,
@@ -233,6 +234,59 @@ const getStarterMessage = (character?: Character) => {
   }
 
   return starterMessageForPolicy(character?.name || 'Interviewer', languagePolicy)
+}
+
+const fixedStarterMessageCreatedAt = () => {
+  const year = new Date().getFullYear()
+  return new Date(`${year}-07-01T12:00:00+08:00`).toISOString()
+}
+
+const starterMessageCreatedAt = (character: Character) => (
+  character.ownerUserId ? new Date().toISOString() : fixedStarterMessageCreatedAt()
+)
+
+const ensuredStarterKeys = new Set<string>()
+
+const ensureConversationForCharacter = async (userId: string, character: Character) => {
+  const now = new Date().toISOString()
+  const starterCreatedAt = starterMessageCreatedAt(character)
+  const conversationId = newId()
+  const result = await getOrCreateConversationWithStarter(
+    {
+      id: conversationId,
+      userId,
+      characterId: character.id,
+      title: `${character.name} chat`,
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: newId(),
+      conversationId,
+      senderRole: 'assistant',
+      senderId: character.id,
+      content: getStarterMessage(character),
+      createdAt: starterCreatedAt,
+    }
+  )
+  if (!character.ownerUserId) {
+    await normalizeConversationStarterCreatedAt(
+      userId,
+      character.id,
+      getStarterMessage(character),
+      fixedStarterMessageCreatedAt()
+    )
+  }
+  ensuredStarterKeys.add(`${userId}:${character.id}`)
+  return result
+}
+
+const ensureContactStarters = async (userId: string, characters: Character[]) => {
+  const pending = characters.filter(character => !ensuredStarterKeys.has(`${userId}:${character.id}`))
+  if (pending.length === 0) return false
+  await Promise.all(pending.map(character => ensureConversationForCharacter(userId, character)))
+  return true
 }
 
 type ForwardReplyResult = {
@@ -528,7 +582,12 @@ app.get('/api/characters', asyncRoute(async (req, res) => {
 }))
 
 app.get('/api/sync', asyncRoute(async (req, res) => {
-  const snapshot = await getSyncSnapshot(authenticatedUserId(req))
+  const userId = authenticatedUserId(req)
+  const snapshot = await getSyncSnapshot(userId)
+  const startersChanged = await ensureContactStarters(userId, snapshot.characters)
+  if (startersChanged) {
+    return res.json(await getSyncSnapshot(userId))
+  }
   return res.json(snapshot)
 }))
 
@@ -657,27 +716,7 @@ app.post('/api/conversations/ensure', asyncRoute(async (req, res) => {
   const character = await getCharacterForUser(userId, characterId)
   if (!character) return res.status(404).json({ error: 'character not found' })
 
-  const now = new Date().toISOString()
-  const conversationId = newId()
-  const result = await getOrCreateConversationWithStarter(
-    {
-      id: conversationId,
-      userId,
-      characterId: character.id,
-      title: `${character.name} chat`,
-      status: 'active',
-      createdAt: now,
-      updatedAt: now,
-    },
-    {
-      id: newId(),
-      conversationId,
-      senderRole: 'assistant',
-      senderId: character.id,
-      content: getStarterMessage(character),
-      createdAt: now,
-    }
-  )
+  const result = await ensureConversationForCharacter(userId, character)
   return res.status(result.created ? 201 : 200).json(result)
 }))
 
@@ -838,7 +877,7 @@ app.post(
           senderRole: 'assistant',
           senderId: character.id,
           content: getStarterMessage(character),
-          createdAt: now,
+          createdAt: starterMessageCreatedAt(character),
         }
       )
       conversation = created.conversation
@@ -1253,7 +1292,7 @@ app.post('/api/messages/forward', asyncRoute(async (req, res) => {
       senderRole: 'assistant',
       senderId: character.id,
       content: getStarterMessage(character),
-      createdAt: now.toISOString(),
+      createdAt: starterMessageCreatedAt(character),
     }
   )
 
@@ -1479,7 +1518,7 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
       senderRole: 'assistant',
       senderId: storedCharacter.id,
       content: getStarterMessage(storedCharacter),
-      createdAt: now
+      createdAt: starterMessageCreatedAt(storedCharacter)
     }
     if (quoteInput && !quoteInput.sourceMessageId) {
       try {

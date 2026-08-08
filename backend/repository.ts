@@ -1181,6 +1181,53 @@ export const getOrCreateConversationWithStarter = async (
   })
 }
 
+export const normalizeConversationStarterCreatedAt = async (
+  userId: string,
+  characterId: string,
+  starterText: string,
+  createdAt: string
+) => {
+  return withTransaction(async client => {
+    const result = await client.query(
+      `WITH first_starters AS (
+         SELECT DISTINCT ON (m.conversation_id)
+           m.id,
+           m.conversation_id,
+           m.created_at AS previous_created_at
+         FROM messages m
+         JOIN conversations c ON c.id = m.conversation_id
+         WHERE c.user_id = $1
+           AND c.character_id = $2
+           AND c.status = 'active'
+           AND m.sender_role = 'assistant'
+           AND m.content = $3
+         ORDER BY m.conversation_id, m.created_at ASC, m.id ASC
+       ), updated_starters AS (
+         UPDATE messages m
+         SET created_at = $4
+         FROM first_starters f
+         WHERE m.id = f.id
+         RETURNING f.conversation_id, f.previous_created_at
+       )
+       UPDATE conversations c
+       SET
+         last_message_at = CASE
+           WHEN c.last_message_at = u.previous_created_at THEN $4::timestamptz
+           ELSE c.last_message_at
+         END,
+         last_read_message_at = CASE
+           WHEN c.last_read_message_at = u.previous_created_at THEN $4::timestamptz
+           ELSE c.last_read_message_at
+         END
+       FROM updated_starters u
+       WHERE c.id = u.conversation_id
+       RETURNING c.id`,
+      [userId, characterId, starterText, createdAt]
+    )
+    return result.rowCount > 0
+  })
+}
+
 export const appendMessage = async (message: Message): Promise<Message> => {
   return withTransaction(async client => {
     const result = await client.query(
