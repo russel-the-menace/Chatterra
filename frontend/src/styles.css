@@ -273,10 +273,11 @@ body.modal-open{overflow:hidden}
   align-items:center;
   gap:12px;
   border:0;
+  border-bottom:1px solid #d8dee6;
   background:transparent;
   text-align:left;
   padding:12px 12px;
-  border-radius:14px;
+  border-radius:0;
   cursor:pointer;
 }
 .contact-item:hover{background:#f3f6fa}
