@@ -17,7 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { Avatar } from '@/components/avatar'
 import { useChat } from '@/src/chat-context'
 import { starterMessageForCharacter } from '@/src/starter-message'
-import { layout, palette } from '@/src/theme'
+import { layout, Palette, useTheme } from '@/src/theme'
 import { Character } from '@/src/types'
 
 const formatContactTime = (timestamp?: string) => {
@@ -37,6 +37,8 @@ const formatContactTime = (timestamp?: string) => {
 }
 
 function SparkBadge({ characterId }: { characterId: string }) {
+  const { palette } = useTheme()
+  const styles = useMemo(() => createStyles(palette), [palette])
   const { streaksByCharacter } = useChat()
   const streak = streaksByCharacter[characterId]
   if (!streak || streak.status === 'locked' || streak.status === 'expired') return null
@@ -60,6 +62,8 @@ function SparkBadge({ characterId }: { characterId: string }) {
 }
 
 function ContactRow({ character, pinned }: { character: Character; pinned: boolean }) {
+  const { palette } = useTheme()
+  const styles = useMemo(() => createStyles(palette), [palette])
   const {
     proactivePreviews,
     unreadCountsByCharacter,
@@ -113,6 +117,8 @@ function ContactRow({ character, pinned }: { character: Character; pinned: boole
 }
 
 export default function ContactsScreen() {
+  const { appearance, palette, setAppearance } = useTheme()
+  const styles = useMemo(() => createStyles(palette), [palette])
   const {
     ready,
     userId,
@@ -301,6 +307,24 @@ export default function ContactsScreen() {
               <Text style={styles.settingsRowLabel}>edit profile</Text>
               <Ionicons name="chevron-forward" size={19} color={palette.textMuted} />
             </Pressable>
+            <View style={styles.appearanceSection}>
+              <Text style={styles.appearanceLabel}>Appearance</Text>
+              <View style={styles.appearanceOptions}>
+                {(['automatic', 'light', 'dark'] as const).map(option => (
+                  <Pressable
+                    key={option}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: appearance === option }}
+                    onPress={() => setAppearance(option)}
+                    style={[styles.appearanceOption, appearance === option && styles.appearanceOptionSelected]}
+                  >
+                    <Text style={[styles.appearanceOptionText, appearance === option && styles.appearanceOptionTextSelected]}>
+                      {option === 'automatic' ? 'Automatic' : option === 'light' ? 'Light' : 'Dark'}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
           </SafeAreaView>
         </View>
       </Modal>
@@ -308,7 +332,7 @@ export default function ContactsScreen() {
   )
 }
 
-const styles = StyleSheet.create({
+const createStyles = (palette: Palette) => StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: palette.surface,
@@ -406,6 +430,40 @@ const styles = StyleSheet.create({
     color: palette.text,
     fontSize: 16,
     lineHeight: 21,
+  },
+  appearanceSection: {
+    padding: 16,
+    gap: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: palette.border,
+  },
+  appearanceLabel: {
+    color: palette.text,
+    fontSize: 16,
+    lineHeight: 21,
+  },
+  appearanceOptions: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  appearanceOption: {
+    flex: 1,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 7,
+    backgroundColor: palette.surfaceMuted,
+  },
+  appearanceOptionSelected: {
+    backgroundColor: palette.accent,
+  },
+  appearanceOptionText: {
+    color: palette.text,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  appearanceOptionTextSelected: {
+    color: '#FFFFFF',
   },
   searchBox: {
     height: 42,

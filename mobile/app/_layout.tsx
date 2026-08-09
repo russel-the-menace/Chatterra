@@ -5,7 +5,7 @@ import { useEffect } from 'react'
 
 import { ChatProvider, useChat } from '@/src/chat-context'
 import { usePushNotifications } from '@/src/push-notifications'
-import { palette } from '@/src/theme'
+import { ThemeProvider, useTheme } from '@/src/theme'
 
 function PushNotificationRegistration() {
   const { userId } = useChat()
@@ -27,7 +27,8 @@ function SessionRouteGuard() {
   return null
 }
 
-export default function RootLayout() {
+function RootNavigator() {
+  const { palette } = useTheme()
   return (
     <ChatProvider>
       <PushNotificationRegistration />
@@ -54,4 +55,8 @@ export default function RootLayout() {
       <StatusBar style="auto" />
     </ChatProvider>
   )
+}
+
+export default function RootLayout() {
+  return <ThemeProvider><RootNavigator /></ThemeProvider>
 }
