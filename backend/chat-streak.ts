@@ -51,11 +51,16 @@ export const chatStreakStatusFor = (row: {
 const mapStreak = (row: any, today: string): ChatStreak => {
   const lastQualifiedDay = streakDateKey(row.last_qualified_day)
   const rekindleProgress = Number(row.rekindle_progress || 0)
+  const normalSparkRepair = String(row.character_id) === 'c3'
+    && Boolean(row.interacted_today)
+    && rekindleProgress > 0
   const status = chatStreakStatusFor({
-    current_days: Number(row.current_days),
+    current_days: normalSparkRepair ? Number(row.current_days) + 1 : Number(row.current_days),
     last_qualified_day: lastQualifiedDay,
-    rekindle_progress: rekindleProgress,
+    rekindle_progress: normalSparkRepair ? 0 : rekindleProgress,
   }, today)
+  const effectiveDays = normalSparkRepair ? Number(row.current_days) + 1 : Number(row.current_days)
+  const effectiveStatus = normalSparkRepair ? 'active' : status
   const difference = dateDifference(lastQualifiedDay, today)
   const daysLeft = (status === 'pending' || status === 'rekindling') && difference !== undefined
     ? Math.max(1, 4 - difference)
@@ -66,12 +71,12 @@ const mapStreak = (row: any, today: string): ChatStreak => {
   const rekindleExpiresAt = expiryDay ? `${expiryDay}T23:59:59+08:00` : undefined
   return {
     characterId: String(row.character_id),
-    days: Number(row.current_days || 0),
+    days: effectiveDays,
     longestDays: Number(row.longest_days || 0),
-    status,
+    status: effectiveStatus,
     lastQualifiedDay,
-    rekindleExpiresAt: status === 'pending' || status === 'rekindling' ? rekindleExpiresAt : undefined,
-    rekindleProgress: status === 'rekindling' ? rekindleProgress : undefined,
+    rekindleExpiresAt: effectiveStatus === 'pending' || effectiveStatus === 'rekindling' ? rekindleExpiresAt : undefined,
+    rekindleProgress: effectiveStatus === 'rekindling' ? rekindleProgress : undefined,
     daysLeft,
     interactedToday: Boolean(row.interacted_today),
   }
