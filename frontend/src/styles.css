@@ -157,6 +157,8 @@ body.modal-open{overflow:hidden}
   --contacts-header-control-size:39.2px;
   --contacts-header-add-size:31.36px;
   display:flex;
+  height:73px;
+  box-sizing:border-box;
   align-items:center;
   gap:12px;
   padding:18px 18px 14px;
@@ -375,7 +377,7 @@ body.modal-open{overflow:hidden}
 .contact-item.active .contact-avatar{background:#d2d7de;color:#0f172a}
 .contact-item.pinned.active .contact-avatar{background:#cbd1d8;color:#0f172a}
 .contact-meta{min-width:0;flex:1}
-.contact-name-row{display:flex;align-items:center;gap:8px;min-width:0}
+.contact-name-row{display:flex;align-items:center;gap:3.5px;min-width:0}
 .spark-badge{
   position:relative;
   flex:0 0 auto;
@@ -449,6 +451,8 @@ body.modal-open{overflow:hidden}
 .top-bar{
   flex:0 0 auto;
   display:flex;
+  height:73px;
+  box-sizing:border-box;
   align-items:center;
   justify-content:space-between;
   padding:18px 22px 14px;
@@ -576,7 +580,7 @@ body.modal-open{overflow:hidden}
   object-fit:cover;
 }
 .title{min-width:0}
-.title-name-row{display:flex;align-items:center;gap:8px;min-width:0}
+.title-name-row{display:flex;align-items:center;gap:3.5px;min-width:0}
 .title .name{
   display:block;
   max-width:100%;

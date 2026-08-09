@@ -475,7 +475,7 @@ const styles = StyleSheet.create({
   contactTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 7,
+    gap: 3.5,
   },
   contactName: {
     flexShrink: 1,

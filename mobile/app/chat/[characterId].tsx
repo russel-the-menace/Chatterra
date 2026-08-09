@@ -3852,7 +3852,7 @@ const styles = StyleSheet.create({
   headerNameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 7,
+    gap: 3.5,
     minWidth: 0,
   },
   headerName: {
