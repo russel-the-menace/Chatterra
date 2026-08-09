@@ -145,11 +145,28 @@ export const recordChatStreakInteraction = async ({
 
     const lastDay = streakDateKey(existing.last_qualified_day)
     const difference = dateDifference(lastDay, today)
-    const alreadyCounted = insertedDay.rowCount === 0
-    if (alreadyCounted) return mapStreak(existing, today)
-
     const currentDays = Number(existing.current_days)
     const currentProgress = Number(existing.rekindle_progress || 0)
+    const alreadyCounted = insertedDay.rowCount === 0
+    if (alreadyCounted) {
+      // Maya's normal spark was briefly handled by the old relight branch. If
+      // that same day's interaction is retried, repair the persisted row once.
+      if (characterId === 'c3' && currentProgress > 0 && difference !== undefined && difference >= 1 && difference <= 3) {
+        const repaired = await client.query(
+          `UPDATE character_streaks
+           SET current_days = $3,
+               longest_days = GREATEST(longest_days, $3),
+               last_qualified_day = ${beijingDaySql},
+               rekindle_progress = 0,
+               updated_at = NOW()
+           WHERE user_id = $1 AND character_id = $2
+           RETURNING character_id, current_days, longest_days, last_qualified_day, rekindle_progress`,
+          [userId, characterId, currentDays + 1]
+        )
+        return mapStreak(repaired.rows[0], today)
+      }
+      return mapStreak(existing, today)
+    }
     if (difference === 0) return mapStreak(existing, today)
 
     if (currentDays >= 3 && difference !== undefined && difference >= 1 && difference <= 3) {
