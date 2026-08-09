@@ -3,8 +3,8 @@ import { Appearance } from 'react-native'
 const isDark = Appearance.getColorScheme() === 'dark'
 
 const lightPalette = {
-  accent: '#39D866',
-  accentPressed: '#2FBE58',
+  accent: '#34C759',
+  accentPressed: '#2BAE4C',
   accentSoft: '#E4F9E8',
   accentBorder: '#78DA90',
   accentMuted: '#A6E8B5',
