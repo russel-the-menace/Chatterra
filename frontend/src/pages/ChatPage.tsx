@@ -2210,7 +2210,11 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
               aria-expanded={showConversationMenu}
               title="Conversation options"
             >
-              <span aria-hidden="true">...</span>
+              <span className="conversation-menu-dots" aria-hidden="true">
+                <i />
+                <i />
+                <i />
+              </span>
             </button>
             {showConversationMenu && (
               <>

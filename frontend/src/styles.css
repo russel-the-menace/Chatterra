@@ -539,7 +539,8 @@ body.modal-open{overflow:hidden}
   color:#374151;
   cursor:pointer;
 }
-.conversation-menu-button span{font-size:25px;line-height:1;transform:translateY(-4px)}
+.conversation-menu-dots{display:flex;align-items:center;justify-content:center;gap:3px}
+.conversation-menu-dots i{width:5px;height:5px;display:block;border-radius:50%;background:currentColor}
 .conversation-menu-button:hover,
 .conversation-menu-button[aria-expanded='true']{background:#eceff2}
 .conversation-menu-backdrop{
