@@ -471,26 +471,6 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
     entry: ConversationCacheEntry
   }>())
 
-  useEffect(() => {
-    const systemTheme = window.matchMedia('(prefers-color-scheme: dark)')
-    const applyAppearance = () => {
-      const resolved = appearance === 'automatic'
-        ? (systemTheme.matches ? 'dark' : 'light')
-        : appearance
-      document.documentElement.dataset.theme = resolved
-      document.documentElement.style.colorScheme = resolved
-    }
-    applyAppearance()
-    systemTheme.addEventListener('change', applyAppearance)
-    localStorage.setItem(APPEARANCE_STORAGE_KEY, appearance)
-    return () => systemTheme.removeEventListener('change', applyAppearance)
-  }, [appearance])
-
-  useEffect(() => () => {
-    delete document.documentElement.dataset.theme
-    document.documentElement.style.removeProperty('color-scheme')
-  }, [])
-
   useEffect(() => () => {
     stagedDeliveryTimersRef.current.forEach(timer => window.clearTimeout(timer))
     stagedDeliveryTimersRef.current.clear()
@@ -892,6 +872,13 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
 
   const selectAppearance = (nextAppearance: Appearance) => {
     setAppearance(nextAppearance)
+    localStorage.setItem(APPEARANCE_STORAGE_KEY, nextAppearance)
+    const systemTheme = window.matchMedia('(prefers-color-scheme: dark)')
+    const resolved = nextAppearance === 'automatic'
+      ? (systemTheme.matches ? 'dark' : 'light')
+      : nextAppearance
+    document.documentElement.dataset.theme = resolved
+    document.documentElement.style.colorScheme = resolved
     setShowAppearanceMenu(false)
     setShowSettings(false)
   }
