@@ -293,6 +293,14 @@ body.modal-open{overflow:hidden}
   cursor:pointer;
 }
 .contact-item:hover{background:#f3f6fa}
+.contact-item:not(.pinned):not(.active):hover{
+  width:calc(100% + 16px);
+  margin-left:-8px;
+  padding-left:20px;
+  padding-right:20px;
+  position:relative;
+  border-bottom-color:transparent;
+}
 .contact-item.pinned:not(.active){background:#f0f1f3}
 .contact-item.pinned:not(.active):hover{background:#e9ebee}
 .contact-item.active{background:var(--accent);color:#fff}
@@ -305,7 +313,8 @@ body.modal-open{overflow:hidden}
   border-bottom-color:transparent;
   background:#f4f5f6;
 }
-.contact-item.pinned::after{
+.contact-item.pinned::after,
+.contact-item:not(.pinned):not(.active):hover::after{
   content:'';
   position:absolute;
   left:8px;
