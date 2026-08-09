@@ -1,9 +1,11 @@
 import express, { NextFunction, Request, Response } from 'express'
+import { createServer } from 'node:http'
 import cors from 'cors'
 import dotenv from 'dotenv'
 import helmet from 'helmet'
 import { rateLimit } from 'express-rate-limit'
 import { createHash } from 'node:crypto'
+import { WebSocket, WebSocketServer } from 'ws'
 import { closeDatabase, query } from './database'
 import {
   getBehaviorSnapshot,
@@ -118,6 +120,72 @@ import {
 dotenv.config()
 
 const app = express()
+const httpServer = createServer(app)
+
+type RealtimeEvent = {
+  type: 'conversation_updated' | 'history_cleared'
+  characterId: string
+  conversationId?: string
+}
+
+const realtimeConnections = new Map<string, Set<WebSocket>>()
+
+const broadcastRealtimeEvent = (userId: string, event: RealtimeEvent) => {
+  const payload = JSON.stringify(event)
+  realtimeConnections.get(userId)?.forEach(socket => {
+    if (socket.readyState === WebSocket.OPEN) socket.send(payload)
+  })
+}
+
+const realtimeServer = new WebSocketServer({ noServer: true })
+
+realtimeServer.on('connection', socket => {
+  let authenticatedUserId: string | undefined
+  const authenticationTimeout = setTimeout(() => socket.close(1008, 'Authentication required'), 5_000)
+
+  socket.on('message', async payload => {
+    if (authenticatedUserId) return
+    try {
+      const message = JSON.parse(String(payload)) as { type?: unknown; accessToken?: unknown }
+      if (message.type !== 'authenticate' || typeof message.accessToken !== 'string') {
+        socket.close(1008, 'Authentication required')
+        return
+      }
+      const user = await getAuthenticatedUser(message.accessToken)
+      if (!user || socket.readyState !== WebSocket.OPEN) {
+        socket.close(1008, 'Authentication failed')
+        return
+      }
+      authenticatedUserId = user.id
+      clearTimeout(authenticationTimeout)
+      const sockets = realtimeConnections.get(user.id) || new Set<WebSocket>()
+      sockets.add(socket)
+      realtimeConnections.set(user.id, sockets)
+      socket.send(JSON.stringify({ type: 'ready' }))
+    } catch {
+      socket.close(1008, 'Authentication failed')
+    }
+  })
+
+  socket.on('close', () => {
+    clearTimeout(authenticationTimeout)
+    if (!authenticatedUserId) return
+    const sockets = realtimeConnections.get(authenticatedUserId)
+    sockets?.delete(socket)
+    if (sockets?.size === 0) realtimeConnections.delete(authenticatedUserId)
+  })
+})
+
+httpServer.on('upgrade', (request, socket, head) => {
+  const pathname = new URL(request.url || '/', 'http://localhost').pathname
+  if (pathname !== '/api/realtime') {
+    socket.destroy()
+    return
+  }
+  realtimeServer.handleUpgrade(request, socket, head, upgradedSocket => {
+    realtimeServer.emit('connection', upgradedSocket, request)
+  })
+})
 const REJECTED_OUTPUT_LOG_LIMIT = 4000
 const SYNC_PROTOCOL_VERSION = 1
 const TRANSCRIPTION_RATE_LIMIT_WINDOW_MS = 60_000
@@ -1162,6 +1230,11 @@ app.post(
         console.warn('Voice message reply transcription skipped', { ...logDetails, reason: 'rate_limited' })
       }
       const storedMessage = await getOwnedMessage(userId, message.id) || message
+      broadcastRealtimeEvent(userId, {
+        type: 'conversation_updated',
+        characterId: character.id,
+        conversationId: conversation.id,
+      })
       return res.status(201).json({
         conversation,
         message: storedMessage,
@@ -1463,6 +1536,11 @@ app.delete('/api/chat-history', asyncRoute(async (req, res) => {
 
   const result = await clearChatHistory(String(userId), String(characterId))
   await resetBehaviorState(String(userId), String(characterId))
+  broadcastRealtimeEvent(String(userId), {
+    type: 'history_cleared',
+    characterId: String(characterId),
+    conversationId: result.conversation.id,
+  })
   return res.json({ ok: true, characterId, ...result })
 }))
 
@@ -1563,6 +1641,11 @@ app.post('/api/messages/forward', asyncRoute(async (req, res) => {
       console.warn('Could not record chat streak interaction', error)
     })
   }
+  broadcastRealtimeEvent(userId, {
+    type: 'conversation_updated',
+    characterId: character.id,
+    conversationId: conversation.id,
+  })
   return res.status(201).json({
     conversationId: conversation.id,
     characterId: character.id,
@@ -1892,6 +1975,11 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
       })
       throw error
     }
+    broadcastRealtimeEvent(normalizedUserId, {
+      type: 'conversation_updated',
+      characterId: storedCharacter.id,
+      conversationId: conversation.id,
+    })
     return res.json({
       reply: null,
       userMessageId: userMessage.id,
@@ -2115,6 +2203,11 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
       })
   }
 
+  broadcastRealtimeEvent(normalizedUserId, {
+    type: 'conversation_updated',
+    characterId: storedCharacter.id,
+    conversationId: conversation.id,
+  })
   return res.json({
     reply,
     replySegments,
@@ -2221,7 +2314,7 @@ const start = async () => {
   ) {
     throw new Error('Database schema is missing. Run npm run db:migrate first.')
   }
-  app.listen(port, '0.0.0.0', () => console.log(`Chatterra backend listening on ${port}`))
+  httpServer.listen(port, '0.0.0.0', () => console.log(`Chatterra backend listening on ${port}`))
   if (process.env.PROACTIVE_SCHEDULER_ENABLED !== 'false') {
     proactiveTimer = setInterval(() => void runProactiveScheduler(), proactiveIntervalMs)
     proactiveTimer.unref()

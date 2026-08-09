@@ -11,6 +11,7 @@ import {
   apiUrl,
   ensureConversation,
   getStoredSession,
+  realtimeUrl,
   getSyncSnapshot,
   logout,
   markConversationRead,
@@ -470,6 +471,7 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
     characterId: string
     entry: ConversationCacheEntry
   }>())
+  const realtimeRefreshRef = useRef<(event: { characterId?: unknown }) => void>(() => {})
 
   useEffect(() => () => {
     stagedDeliveryTimersRef.current.forEach(timer => window.clearTimeout(timer))
@@ -688,6 +690,49 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
     if (requestId !== historyRequestRef.current || selectedCharacterIdRef.current !== nextCharacter.id) return
     if (!cached) setMessages([])
   }
+
+  realtimeRefreshRef.current = event => {
+    const uid = userId
+    if (!uid || event.characterId !== selectedCharacterIdRef.current) return
+    const activeCharacter = characters.find(character => character.id === event.characterId)
+    if (activeCharacter) void loadHistoryForCharacter(uid, activeCharacter)
+  }
+
+  useEffect(() => {
+    if (!userId) return
+    let stopped = false
+    let socket: WebSocket | undefined
+    let reconnectTimer: number | undefined
+
+    const connect = () => {
+      if (stopped) return
+      socket = new WebSocket(realtimeUrl())
+      socket.onopen = () => {
+        const accessToken = getStoredSession()?.accessToken
+        if (accessToken) socket?.send(JSON.stringify({ type: 'authenticate', accessToken }))
+      }
+      socket.onmessage = message => {
+        try {
+          const event = JSON.parse(String(message.data)) as { type?: unknown; characterId?: unknown }
+          if (event.type === 'conversation_updated' || event.type === 'history_cleared') {
+            realtimeRefreshRef.current(event)
+          }
+        } catch {
+          // Ignore malformed events and rely on the recovery sync.
+        }
+      }
+      socket.onclose = () => {
+        if (!stopped) reconnectTimer = window.setTimeout(connect, 2_000)
+      }
+    }
+
+    connect()
+    return () => {
+      stopped = true
+      if (reconnectTimer) window.clearTimeout(reconnectTimer)
+      socket?.close()
+    }
+  }, [userId])
 
   const preloadContactFirstPages = async (
     uid: string,
@@ -1245,7 +1290,7 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
     }
 
     void syncWorkspace()
-    const interval = window.setInterval(() => void syncWorkspace(), 3_000)
+    const interval = window.setInterval(() => void syncWorkspace(), 60_000)
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') void syncWorkspace()
     }
@@ -1424,7 +1469,7 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
     }
 
     void syncConversation()
-    const interval = window.setInterval(() => void syncConversation(), 3_000)
+    const interval = window.setInterval(() => void syncConversation(), 60_000)
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') void syncConversation()
     }

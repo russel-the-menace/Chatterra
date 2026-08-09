@@ -33,6 +33,12 @@ export const API_BASE_URL = normalizeBaseUrl(
   configuredUrl || (metroHost() ? `http://${metroHost()}:3000` : 'http://localhost:3000')
 )
 
+export const realtimeUrl = () => {
+  const url = new URL(`${API_BASE_URL}/api/realtime`)
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  return url.toString()
+}
+
 export const mediaUrl = (value: string) => (
   /^https?:\/\//i.test(value) ? value : `${API_BASE_URL}${value.startsWith('/') ? value : `/${value}`}`
 )

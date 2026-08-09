@@ -13,7 +13,7 @@ import {
   useState,
 } from 'react'
 
-import { API_BASE_URL, api, setApiAccessToken, setApiUnauthorizedHandler } from './api'
+import { API_BASE_URL, api, realtimeUrl, setApiAccessToken, setApiUnauthorizedHandler } from './api'
 import {
   clearStoredAuthSession,
   getStoredAuthSession,
@@ -235,6 +235,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const quoteDraftWriteRef = useRef<Promise<void>>(Promise.resolve())
   const quoteDraftDirtyRef = useRef<Record<string, ComposerQuoteDraft> | null>(null)
   const sessionRef = useRef<StoredAuthSession | null>(null)
+  const realtimeRefreshRef = useRef<() => void>(() => {})
 
   const resetWorkspaceState = useCallback(() => {
     conversationCacheTimerRef.current.forEach(timer => clearTimeout(timer))
@@ -744,10 +745,48 @@ export function ChatProvider({ children }: PropsWithChildren) {
     }
   }, [characters.length, markCharacterRead, persistContactPreviewCache, persistSessionProfile, userId])
 
+  realtimeRefreshRef.current = () => void syncWorkspace()
+
+  useEffect(() => {
+    if (!userId) return
+    let stopped = false
+    let socket: WebSocket | undefined
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined
+
+    const connect = () => {
+      if (stopped) return
+      socket = new WebSocket(realtimeUrl())
+      socket.onopen = () => {
+        const accessToken = sessionRef.current?.accessToken
+        if (accessToken) socket?.send(JSON.stringify({ type: 'authenticate', accessToken }))
+      }
+      socket.onmessage = event => {
+        try {
+          const message = JSON.parse(String(event.data)) as { type?: unknown }
+          if (message.type === 'conversation_updated' || message.type === 'history_cleared') {
+            realtimeRefreshRef.current()
+          }
+        } catch {
+          // Ignore malformed events and rely on the recovery sync.
+        }
+      }
+      socket.onclose = () => {
+        if (!stopped) reconnectTimer = setTimeout(connect, 2_000)
+      }
+    }
+
+    connect()
+    return () => {
+      stopped = true
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+      socket?.close()
+    }
+  }, [userId])
+
   useEffect(() => {
     if (!userId) return
     void syncWorkspace()
-    const interval = setInterval(() => void syncWorkspace(), 3_000)
+    const interval = setInterval(() => void syncWorkspace(), 60_000)
     const subscription = AppState.addEventListener('change', nextState => {
       appStateRef.current = nextState
       if (nextState === 'active') void syncWorkspace()

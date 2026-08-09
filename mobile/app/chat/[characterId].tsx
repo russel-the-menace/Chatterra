@@ -1995,7 +1995,7 @@ export default function ChatScreen() {
 
   useEffect(() => {
     if (!conversationId) return
-    const interval = setInterval(() => void syncMessages(), 3_000)
+    const interval = setInterval(() => void syncMessages(), 60_000)
     return () => clearInterval(interval)
   }, [conversationId, syncMessages])
 

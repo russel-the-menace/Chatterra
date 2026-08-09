@@ -81,6 +81,12 @@ export const API_BASE_URL = normalizeBaseUrl(
 
 export const apiUrl = (path: string) => `${API_BASE_URL}${path}`
 
+export const realtimeUrl = () => {
+  const url = new URL(apiUrl('/api/realtime'))
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  return url.toString()
+}
+
 const SESSION_STORAGE_KEY = 'chatterra.web.authSession.v1'
 
 const validSession = (value: unknown): value is WebLoginSession => {
