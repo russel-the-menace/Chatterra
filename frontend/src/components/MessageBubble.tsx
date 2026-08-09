@@ -59,6 +59,7 @@ export default function MessageBubble({
   userAvatar,
   userName,
   onEditCharacter,
+  onPreviewAvatar,
   onMessageContextMenu
 }:{
   msg: ChatMessage
@@ -66,6 +67,7 @@ export default function MessageBubble({
   userAvatar?: string
   userName?: string
   onEditCharacter: () => void
+  onPreviewAvatar: (avatar: string | undefined, name: string, muted?: boolean) => void
   onMessageContextMenu: (event: React.MouseEvent<HTMLDivElement>, message: ChatMessage) => void
 }): JSX.Element{
   const isUser = msg.sender === 'user'
@@ -119,10 +121,10 @@ export default function MessageBubble({
       {!isUser && (
         <button
           type="button"
-          className="avatar assistant chat-character-edit-trigger"
-          onClick={onEditCharacter}
-          aria-label={`Edit ${character.name}`}
-          title="Edit character"
+          className="avatar assistant avatar-preview-trigger"
+          onClick={() => onPreviewAvatar(character.avatar, character.name)}
+          aria-label={`Preview ${character.name}'s avatar`}
+          title={`Preview ${character.name}'s avatar`}
         >
           {characterAvatar}
         </button>
@@ -192,7 +194,17 @@ export default function MessageBubble({
           </div>
         )}
       </div>
-      {isUser && <div className="avatar user">{userAvatarContent}</div>}
+      {isUser && (
+        <button
+          type="button"
+          className="avatar user avatar-preview-trigger"
+          onClick={() => onPreviewAvatar(userAvatar, userName || 'Me', true)}
+          aria-label="Preview your avatar"
+          title="Preview your avatar"
+        >
+          {userAvatarContent}
+        </button>
+      )}
     </div>
   )
 }

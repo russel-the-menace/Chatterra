@@ -6,6 +6,7 @@ import { chatTimeline } from '../chatTimeline'
 
 type ScrollPosition = { top: number; atBottom: boolean }
 type MessageMenu = { message: ChatMessage; x: number; y: number }
+type AvatarPreview = { avatar?: string; name: string; muted?: boolean }
 type MessageActionIconName = 'copy' | 'document' | 'forward' | 'quote' | 'translate'
 
 const MessageActionIcon = ({ name }: { name: MessageActionIconName }) => {
@@ -35,6 +36,7 @@ const MessageActionIcon = ({ name }: { name: MessageActionIconName }) => {
 }
 
 const nearLatestThreshold = 96
+const isImageAvatar = (avatar?: string) => Boolean(avatar && /^(data:image\/|blob:|https?:\/\/|\/)/.test(avatar))
 
 export default function ChatWindow({
   messages,
@@ -70,6 +72,7 @@ export default function ChatWindow({
   const ignoreScrollEventsRef = useRef(false)
   const scrollReleaseTimerRef = useRef<number | null>(null)
   const [messageMenu, setMessageMenu] = useState<MessageMenu | null>(null)
+  const [avatarPreview, setAvatarPreview] = useState<AvatarPreview | null>(null)
   const timelineItems = chatTimeline(messages)
 
   const releaseScrollCapture = (delay: number) => {
@@ -148,6 +151,15 @@ export default function ChatWindow({
     return () => window.removeEventListener('keydown', closeOnEscape)
   }, [messageMenu])
 
+  useEffect(() => {
+    if (!avatarPreview) return
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setAvatarPreview(null)
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [avatarPreview])
+
   const openMessageMenu = (event: React.MouseEvent<HTMLDivElement>, message: ChatMessage) => {
     if (message.loading) return
     event.preventDefault()
@@ -219,6 +231,7 @@ export default function ChatWindow({
               userAvatar={userAvatar}
               userName={userName}
               onEditCharacter={onEditCharacter}
+              onPreviewAvatar={(avatar, name, muted) => setAvatarPreview({ avatar, name, muted })}
               onMessageContextMenu={openMessageMenu}
             />
       ))}
@@ -296,6 +309,16 @@ export default function ChatWindow({
                 </button>
               </>
             )}
+          </div>
+        </div>,
+        document.body
+      )}
+      {avatarPreview && createPortal(
+        <div className="avatar-preview-backdrop" role="dialog" aria-modal="true" aria-label={`${avatarPreview.name}'s avatar`} onMouseDown={() => setAvatarPreview(null)}>
+          <div className="avatar-preview-frame" onMouseDown={event => event.stopPropagation()}>
+            {isImageAvatar(avatarPreview.avatar)
+              ? <img src={avatarPreview.avatar} alt={`${avatarPreview.name}'s avatar`} />
+              : <span className={avatarPreview.muted ? 'avatar-preview-initial muted' : 'avatar-preview-initial'}>{(avatarPreview.avatar || avatarPreview.name.trim().slice(0, 1) || '?').toUpperCase()}</span>}
           </div>
         </div>,
         document.body
