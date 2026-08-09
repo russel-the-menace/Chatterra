@@ -53,10 +53,10 @@ function SparkBadge({ characterId }: { characterId: string }) {
       style={styles.sparkBadge}
       accessibilityLabel={text}
     >
-      {rekindling && <View pointerEvents="none" style={styles.sparkRekindlingBackground} />}
-      <Ionicons name={rekindling ? 'flame-outline' : 'flame'} size={16} color={color} style={rekindling && styles.sparkRekindlingFlame} />
-      {rekindling && <Ionicons name="sparkles" size={8} color="#F6A23C" style={styles.sparklesIcon} />}
-      <Text style={[styles.sparkDays, { color }]} numberOfLines={1}>{text}</Text>
+      {pending ? <Ionicons name="flame" size={16} color={color} /> : <Text style={styles.sparkFlame}>🔥</Text>}
+      {rekindling
+        ? <View style={styles.sparkRekindlingText}><Text style={[styles.sparkDays, { color }]} numberOfLines={1}>{text}</Text></View>
+        : <Text style={[styles.sparkDays, { color }]} numberOfLines={1}>{text}</Text>}
     </View>
   )
 }
@@ -494,30 +494,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 2,
   },
-  sparkRekindlingBackground: {
-    position: 'absolute',
-    left: 7,
-    right: 0,
-    top: 3,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: '#EEF0F3',
-  },
-  sparkRekindlingFlame: {
-    marginLeft: -8,
-    zIndex: 2,
-  },
+  sparkFlame: { fontSize: 16, lineHeight: 17, zIndex: 2 },
+  sparkRekindlingText: { marginLeft: -7, paddingLeft: 8, paddingRight: 5, borderRadius: 7, backgroundColor: 'rgba(17,24,39,0.08)' },
   sparkDays: {
     flexShrink: 1,
     fontSize: 12,
     lineHeight: 17,
     fontWeight: '700',
     fontVariant: ['tabular-nums'],
-  },
-  sparklesIcon: {
-    position: 'absolute',
-    top: -2,
-    left: 10,
   },
   contactPreview: {
     color: palette.textMuted,
