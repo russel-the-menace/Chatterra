@@ -53,8 +53,8 @@ export type ChatMessage = {
 
 const isImageAvatar = (avatar?: string) => Boolean(avatar && /^(data:image\/|blob:|https?:\/\/|\/)/.test(avatar))
 const voiceBubbleWidth = (duration: number | undefined, viewportWidth: number) => {
-  const minWidth = 80
-  const maxWidth = Math.min(200, Math.max(minWidth, viewportWidth / 2 - 60))
+  const minWidth = 50
+  const maxWidth = Math.min(150, Math.max(minWidth, viewportWidth / 2 - 60))
   const clampedDuration = Math.min(11, Math.max(1, duration || 1))
   return minWidth + (maxWidth - minWidth) * ((clampedDuration - 1) / 10)
 }
