@@ -40,9 +40,13 @@
       [
         "expo-splash-screen",
         {
+          "image": "./assets/images/chatterra-splash-light.png",
+          "imageWidth": 280,
+          "resizeMode": "contain",
           "backgroundColor": "#ffffff",
           "dark": {
-            "backgroundColor": "#ffffff"
+            "image": "./assets/images/chatterra-splash-dark.png",
+            "backgroundColor": "#1D1E20"
           }
         }
       ],

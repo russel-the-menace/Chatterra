@@ -16,11 +16,23 @@ const jobs = [
     destination: 'assets/images/chatterra-favicon.png',
     size: 256,
   },
+  {
+    source: 'assets/brand/chatterra-splash-light.svg',
+    destination: 'assets/images/chatterra-splash-light.png',
+    width: 560,
+    height: 120,
+  },
+  {
+    source: 'assets/brand/chatterra-splash-dark.svg',
+    destination: 'assets/images/chatterra-splash-dark.png',
+    width: 560,
+    height: 120,
+  },
 ]
 
-await Promise.all(jobs.map(({ source, destination, size }) => (
+await Promise.all(jobs.map(({ source, destination, size, width, height }) => (
   sharp(source, { density: 192 })
-    .resize(size, size)
+    .resize(width || size, height || size)
     .png()
     .toFile(destination)
 )))
