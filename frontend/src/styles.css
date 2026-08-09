@@ -267,7 +267,7 @@ body.modal-open{overflow:hidden}
   width:var(--contacts-header-add-size);
   height:var(--contacts-header-add-size);
   border-radius:50%;
-  border:2px solid #555;
+  border:1.3px solid #555;
   background:#fff;
   color:#111827;
   display:flex;
