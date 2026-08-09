@@ -1046,6 +1046,7 @@ export const claimDueProactiveAction = async ({
          conversation.id AS conversation_id
        FROM character_instances ci
        JOIN characters c ON c.id = ci.character_id
+       JOIN users u ON u.id = ci.user_id
        JOIN LATERAL (
          SELECT id
          FROM conversations
@@ -1056,6 +1057,7 @@ export const claimDueProactiveAction = async ({
          LIMIT 1
        ) conversation ON TRUE
        WHERE ci.mode = 'companion'
+         AND LOWER(u.username) <> 'test'
          AND ci.next_action_at IS NOT NULL
          AND ci.next_action_at <= $1
          AND ($2::text IS NULL OR ci.user_id = $2)

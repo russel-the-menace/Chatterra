@@ -171,17 +171,26 @@ export const authenticateUser = async (username: string, password: string): Prom
   }
 
   const accessToken = createAccessToken()
+  const isPublicTestAccount = normalizedUsername === 'test'
   await withTransaction(async client => {
     await client.query(
+      `DELETE FROM auth_sessions
+       WHERE user_id = $1
+         AND (expires_at <= NOW() OR ($2::boolean AND created_at < NOW() - INTERVAL '1 day'))`,
+      [row.id, isPublicTestAccount]
+    )
+    await client.query(
       `INSERT INTO auth_sessions (id, user_id, token_hash, expires_at)
-       VALUES ($1, $2, $3, 'infinity')`,
-      [newId(), row.id, hashAccessToken(accessToken)]
+       VALUES ($1, $2, $3, CASE WHEN $4::boolean THEN NOW() + INTERVAL '1 day' ELSE 'infinity'::timestamptz END)`,
+      [newId(), row.id, hashAccessToken(accessToken), isPublicTestAccount]
     )
   })
 
   return {
     accessToken,
-    expiresAt: PERMANENT_SESSION_EXPIRES_AT,
+    expiresAt: isPublicTestAccount
+      ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+      : PERMANENT_SESSION_EXPIRES_AT,
     user: {
       id: String(row.id),
       username: String(row.username),
@@ -198,6 +207,7 @@ export const getAuthenticatedUser = async (accessToken: string): Promise<Authent
      FROM auth_sessions
      JOIN users ON users.id = auth_sessions.user_id
      WHERE auth_sessions.token_hash = $1
+       AND auth_sessions.expires_at > NOW()
      LIMIT 1`,
     [hashAccessToken(accessToken)]
   )

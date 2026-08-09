@@ -56,6 +56,15 @@ const hasSameTimestamps = (
 )
 const isImageAvatar = (avatar?: string) => Boolean(avatar && /^(data:image\/|blob:|https?:\/\/|\/)/.test(avatar))
 const mediaUrl = (value: string) => /^https?:\/\//i.test(value) ? value : apiUrl(value)
+const showTestAccountLimit = (payload: Record<string, any>) => {
+  if (payload.code !== 'TEST_ACCOUNT_REPLY_LIMIT_REACHED') return false
+  const resetAt = typeof payload.resetAt === 'string' ? new Date(payload.resetAt) : undefined
+  const resetMessage = resetAt && !Number.isNaN(resetAt.getTime())
+    ? ` You can try again after ${resetAt.toLocaleString()}.`
+    : ''
+  window.alert(`The public test account has reached its reply limit.${resetMessage}`)
+  return true
+}
 const parseAssistantVoiceMessage = (value: unknown): AssistantVoiceMessage | undefined => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const voice = value as Record<string, unknown>
@@ -1619,7 +1628,10 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
         }),
       })
       const data = await response.json().catch(() => ({}))
-      if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Could not forward this message.')
+      if (!response.ok) {
+        showTestAccountLimit(data)
+        throw new Error(typeof data.error === 'string' ? data.error : 'Could not forward this message.')
+      }
       const latest = data.assistantMessage || (Array.isArray(data.messages) ? data.messages.at(-1) : undefined)
       const latestText = typeof latest?.content === 'string' && latest.content.trim() ? latest.content.trim() : text
       markCharacterActive(forwardTarget.id, typeof latest?.createdAt === 'string' ? latest.createdAt : new Date().toISOString())
@@ -1891,7 +1903,10 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
           })
         })
         const data = await res.json().catch(() => ({}))
-        if (!res.ok) throw new Error(data.error || 'Chat request failed')
+        if (!res.ok) {
+          showTestAccountLimit(data)
+          throw new Error(data.error || 'Chat request failed')
+        }
         markCharacterActive(targetCharacterId)
         if (typeof data.conversationId === 'string') {
           updateConversationForCharacter(targetCharacterId, data.conversationId)

@@ -1,5 +1,20 @@
 # Chatterra
 
+## Try the web app
+
+The public web client is available at
+[russel-the-menace.github.io/Chatterra](https://russel-the-menace.github.io/Chatterra/).
+
+- Username: `test`
+- Password: `test`
+- Reply allowance: 20 model replies per rolling hour and 100 per rolling 24 hours
+- History retention: the newest 50 messages per character
+
+The shared test account is reset by bounded retention and has memory personalization and
+proactive messages disabled. Costly or shared-state mutation features such as voice
+transcription, translation, profile uploads, push registration, and custom-character
+editing are also disabled. Do not enter private or sensitive information into it.
+
 > **I wanted to practice languages without feeling like I had opened a homework app.**
 > So I made a chat app. Then I kept adding people. This is how it got out of hand.
 

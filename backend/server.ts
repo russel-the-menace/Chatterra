@@ -1,6 +1,8 @@
 import express, { NextFunction, Request, Response } from 'express'
 import cors from 'cors'
 import dotenv from 'dotenv'
+import helmet from 'helmet'
+import { rateLimit } from 'express-rate-limit'
 import { closeDatabase, query } from './database'
 import {
   getBehaviorSnapshot,
@@ -97,6 +99,12 @@ import {
   MessageQuote,
   VoiceTranscriptMetadata
 } from './types'
+import {
+  reserveTestAccountReply,
+  TEST_ACCOUNT_DAILY_REPLY_LIMIT,
+  TEST_ACCOUNT_HOURLY_REPLY_LIMIT,
+  TEST_ACCOUNT_USERNAME,
+} from './test-account-policy'
 
 dotenv.config()
 
@@ -108,8 +116,40 @@ const TRANSCRIPTION_RATE_LIMIT_MAX_REQUESTS = 6
 const API_REVISION = (process.env.SOURCE_COMMIT || 'development').slice(0, 12)
 const transcriptionRequests = new Map<string, number[]>()
 const voiceMessageTranscriptionInFlight = new Map<string, Promise<Message>>()
-app.use(cors())
+const productionWebOrigin = 'https://russel-the-menace.github.io'
+const configuredOrigins = (process.env.CORS_ALLOWED_ORIGINS || productionWebOrigin)
+  .split(',')
+  .map(origin => origin.trim())
+  .filter(Boolean)
+const allowedOrigins = new Set([
+  ...configuredOrigins,
+  ...(process.env.NODE_ENV === 'production'
+    ? []
+    : ['http://localhost:5173', 'http://127.0.0.1:5173']),
+])
+
+app.disable('x-powered-by')
+app.set('trust proxy', 1)
+app.use(helmet({ crossOriginResourcePolicy: false }))
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.has(origin)) return callback(null, true)
+    return callback(new Error('Origin is not allowed by CORS'))
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Authorization', 'Content-Type', 'X-Chatterra-Request-Id',
+    'X-Chatterra-User-Id', 'X-Chatterra-Character-Id', 'X-Chatterra-Conversation-Id',
+    'X-Chatterra-Voice-Duration-Ms', 'X-Chatterra-Voice-Request-Id'],
+  maxAge: 86_400,
+}))
 app.use(express.json({ limit: '2mb' }))
+app.use('/api', rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 600,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please try again later.', code: 'API_RATE_LIMIT_REACHED' },
+}))
 // User recordings and generated assistant speech use separate persistent directories.
 // Keep one public media route so existing message metadata remains playable.
 app.use('/media/voice', express.static(userVoiceMessageDirectory, {
@@ -154,6 +194,39 @@ const authenticatedUserId = (req: Request) => {
   if (!user) throw new Error('authenticated user is required')
   return user.id
 }
+
+const isPublicTestRequest = (req: Request) => (
+  (req as AuthenticatedRequest).authenticatedUser?.username.toLowerCase() === TEST_ACCOUNT_USERNAME
+)
+
+const isRestrictedTestAccountFeature = (req: Request) => {
+  const methodAndPath = `${req.method} ${req.originalUrl.split('?')[0]}`
+  return [
+    /^POST \/api\/characters$/,
+    /^PUT \/api\/characters\/[^/]+$/,
+    /^PUT \/api\/users\/[^/]+\/(?:avatar|profile)$/,
+    /^PUT \/api\/users\/[^/]+\/characters\/[^/]+\/avatar$/,
+    /^PUT \/api\/push-devices\/expo$/,
+    /^POST \/api\/(?:translations|voice\/)/,
+    /^DELETE \/api\/voice\//,
+  ].some(pattern => pattern.test(methodAndPath))
+}
+
+const testAccountLimitResponse = (res: Response, quota: Awaited<ReturnType<typeof reserveTestAccountReply>>) => (
+  res.status(429).json({
+    error: 'This public test account has reached its reply limit. Please try again after the limit resets.',
+    code: 'TEST_ACCOUNT_REPLY_LIMIT_REACHED',
+    limits: {
+      hourly: TEST_ACCOUNT_HOURLY_REPLY_LIMIT,
+      daily: TEST_ACCOUNT_DAILY_REPLY_LIMIT,
+    },
+    usage: {
+      hourly: quota.hourlyUsed,
+      daily: quota.dailyUsed,
+    },
+    resetAt: quota.resetAt,
+  })
+)
 
 const canTranscribe = (key: string) => {
   const now = Date.now()
@@ -557,7 +630,14 @@ const generateForwardReply = async ({
   }
 }
 
-app.post('/api/auth/login', asyncRoute(async (req, res) => {
+app.post('/api/auth/login', rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  message: { error: 'Too many sign-in attempts. Please try again later.', code: 'LOGIN_RATE_LIMIT_REACHED' },
+}), asyncRoute(async (req, res) => {
   const username = typeof req.body?.username === 'string'
     ? req.body.username.trim().slice(0, 64)
     : ''
@@ -592,6 +672,16 @@ app.use('/api', asyncRoute(async (req, res, next) => {
   ;(req as AuthenticatedRequest).authenticatedUser = user
   next()
 }))
+
+app.use('/api', (req, res, next) => {
+  if (isPublicTestRequest(req) && isRestrictedTestAccountFeature(req)) {
+    return res.status(403).json({
+      error: 'This feature is disabled for the shared public test account.',
+      code: 'TEST_ACCOUNT_RESTRICTED_FEATURE',
+    })
+  }
+  next()
+})
 
 app.use('/api/users/:id', (req, res, next) => {
   if (req.params.id !== authenticatedUserId(req)) {
@@ -636,6 +726,9 @@ app.get('/api/users/:id/preferences', asyncRoute(async (req, res) => {
 app.put('/api/users/:id/preferences', asyncRoute(async (req, res) => {
   if (typeof req.body?.memoryEnabled !== 'boolean') {
     return res.status(400).json({ error: 'memoryEnabled must be a boolean' })
+  }
+  if (isPublicTestRequest(req) && req.body.memoryEnabled) {
+    return res.status(403).json({ error: 'Memory personalization is disabled for the public test account.' })
   }
   const memoryEnabled = await setUserMemoryConsent(req.params.id, req.body.memoryEnabled)
   return res.json({ memoryEnabled })
@@ -1274,6 +1367,7 @@ app.get('/api/characters/:id/state', asyncRoute(async (req, res) => {
 }))
 
 app.post('/api/proactive/poll', asyncRoute(async (req, res) => {
+  if (isPublicTestRequest(req)) return res.json({ deliveries: [] })
   const userId = authenticatedUserId(req)
   const deliveries = await processDueProactiveActions({ userId, limit: 2 })
   return res.json({ deliveries })
@@ -1381,6 +1475,9 @@ app.post('/api/messages/forward', asyncRoute(async (req, res) => {
     })
   }
 
+  const quota = await reserveTestAccountReply(userId)
+  if (!quota.allowed) return testAccountLimitResponse(res, quota)
+
   const persistedMessages = await appendMessages(messages)
   const triggerMessage = persistedMessages.at(-1)
   const generated = triggerMessage
@@ -1407,11 +1504,20 @@ app.post('/api/messages/forward', asyncRoute(async (req, res) => {
 app.post('/api/chat', asyncRoute(async (req, res) => {
   const { message, conversationId, character } = req.body || {}
   const userId = authenticatedUserId(req)
-  if (!message) return res.status(400).json({ error: 'message is required' })
-  if (!character?.id) return res.status(400).json({ error: 'character is required' })
+  if (typeof message !== 'string' || !message.trim()) {
+    return res.status(400).json({ error: 'message must be a non-empty string' })
+  }
+  if (message.length > 20_000) return res.status(400).json({ error: 'message is too long' })
+  if (!character || typeof character !== 'object' || typeof character.id !== 'string') {
+    return res.status(400).json({ error: 'character is required' })
+  }
+  const requestedCharacterId = character.id.trim()
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(requestedCharacterId)) {
+    return res.status(400).json({ error: 'character id is invalid' })
+  }
 
   const normalizedUserId = String(userId)
-  const normalizedMessage = String(message)
+  const normalizedMessage = message.trim()
   const clientMessageId = typeof req.body?.clientMessageId === 'string'
     ? req.body.clientMessageId.trim()
     : ''
@@ -1448,14 +1554,14 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
   const trace = createInferenceTrace(requestId)
   trace.mark('request_received', 'started', {
     userId: normalizedUserId,
-    characterId: String(character.id),
+    characterId: requestedCharacterId,
     conversationId: conversationId ? String(conversationId) : null,
     messageLength: normalizedMessage.length,
     hasVoiceMetadata: Boolean(voiceMetadata),
     hasQuote: Boolean(quoteInput)
   })
 
-  const storedCharacter = await getCharacterForUser(normalizedUserId, String(character.id))
+  const storedCharacter = await getCharacterForUser(normalizedUserId, requestedCharacterId)
   if (!storedCharacter) return res.status(400).json({ error: 'character not found' })
   const existingVoiceMessage = voiceMessageId
     ? await getOwnedMessage(normalizedUserId, voiceMessageId)
@@ -1737,6 +1843,8 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
   const inferenceStartedAt = Date.now()
   try {
     if (inference.route === 'model') {
+      const quota = await reserveTestAccountReply(normalizedUserId)
+      if (!quota.allowed) return testAccountLimitResponse(res, quota)
       const result = await generateModelResponse(inference, storedCharacter, trace)
       rawReply = result.content
       generation = {
@@ -1961,6 +2069,9 @@ app.use((error: any, _req: Request, res: Response, _next: NextFunction) => {
   }
   if (error?.type === 'entity.too.large' || Number(error?.status) === 413) {
     return res.status(413).json({ error: 'request body is too large' })
+  }
+  if (error instanceof Error && error.message === 'Origin is not allowed by CORS') {
+    return res.status(403).json({ error: 'Origin is not allowed.' })
   }
   if (error instanceof TranslationServiceError) {
     return res.status(error.statusCode).json({ error: error.message, ...persistenceDetails })
