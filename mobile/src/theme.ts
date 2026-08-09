@@ -1,4 +1,4 @@
-import { Appearance } from 'react-native'
+import { Appearance, useColorScheme } from 'react-native'
 
 const isDark = Appearance.getColorScheme() === 'dark'
 
@@ -42,7 +42,13 @@ const darkPalette = {
   shadow: '#000000',
 }
 
+export type Palette = typeof lightPalette
+
 export const palette = isDark ? darkPalette : lightPalette
+
+export const useThemePalette = (): Palette => (
+  useColorScheme() === 'dark' ? darkPalette : lightPalette
+)
 
 export const layout = {
   horizontalPadding: 16,

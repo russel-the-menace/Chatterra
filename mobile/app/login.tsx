@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -14,10 +14,12 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 
 import { ApiError } from '@/src/api'
 import { useChat } from '@/src/chat-context'
-import { layout, palette } from '@/src/theme'
+import { layout, Palette, useThemePalette } from '@/src/theme'
 
 export default function LoginScreen() {
   const { login } = useChat()
+  const palette = useThemePalette()
+  const styles = useMemo(() => createStyles(palette), [palette])
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -119,7 +121,7 @@ export default function LoginScreen() {
   )
 }
 
-const styles = StyleSheet.create({
+const createStyles = (palette: Palette) => StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: palette.surface,
