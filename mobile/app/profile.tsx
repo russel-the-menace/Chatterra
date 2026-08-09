@@ -150,7 +150,7 @@ export default function ProfileEditorScreen() {
               autoCorrect={false}
               maxLength={120}
               placeholder="Your name"
-              placeholderTextColor="#98A2B3"
+              placeholderTextColor={palette.textMuted}
               returnKeyType="done"
               onSubmitEditing={() => void submit()}
               style={styles.input}
@@ -165,7 +165,7 @@ export default function ProfileEditorScreen() {
                 onChangeText={setTranslationTargetLanguage}
                 style={styles.input}
                 placeholder="English"
-                placeholderTextColor="#98A2B3"
+                placeholderTextColor={palette.textMuted}
                 autoCapitalize="none"
                 autoCorrect={false}
               />
@@ -264,7 +264,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   label: {
-    color: '#344054',
+    color: palette.text,
     fontSize: 13,
     lineHeight: 18,
     fontWeight: '600',
@@ -274,7 +274,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderWidth: 1,
-    borderColor: '#C9D1DC',
+    borderColor: palette.border,
     borderRadius: 8,
     backgroundColor: palette.surface,
     color: palette.text,
@@ -283,7 +283,7 @@ const styles = StyleSheet.create({
   },
   selectBox: {
     borderWidth: 1,
-    borderColor: '#C9D1DC',
+    borderColor: palette.border,
     borderRadius: 8,
     backgroundColor: palette.surface,
   },
@@ -295,13 +295,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#FEF3F2',
+    backgroundColor: palette.surfaceMuted,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#FDA29B',
+    borderColor: palette.danger,
   },
   errorText: {
     flex: 1,
-    color: '#B42318',
+    color: palette.danger,
     fontSize: 13,
     lineHeight: 18,
   },
@@ -311,12 +311,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#FDA29B',
+    borderColor: palette.danger,
     borderRadius: 8,
-    backgroundColor: '#FEF3F2',
+    backgroundColor: palette.surfaceMuted,
   },
   signOutButtonPressed: {
-    backgroundColor: '#FEE4E2',
+    backgroundColor: palette.background,
   },
   signOutLabel: {
     color: palette.danger,

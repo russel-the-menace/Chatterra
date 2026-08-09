@@ -41,7 +41,7 @@ const styles = StyleSheet.create({
     backgroundColor: palette.accent,
   },
   fallbackMuted: {
-    backgroundColor: '#DCE4ED',
+    backgroundColor: palette.surfaceMuted,
   },
   initial: {
     color: '#FFFFFF',

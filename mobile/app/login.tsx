@@ -69,7 +69,7 @@ export default function LoginScreen() {
                 autoComplete="username"
                 returnKeyType="next"
                 placeholder="Username"
-                placeholderTextColor="#98A2B3"
+                placeholderTextColor={palette.textMuted}
                 style={styles.input}
               />
             </View>
@@ -86,7 +86,7 @@ export default function LoginScreen() {
                 returnKeyType="done"
                 onSubmitEditing={() => void submit()}
                 placeholder="Password"
-                placeholderTextColor="#98A2B3"
+                placeholderTextColor={palette.textMuted}
                 style={styles.input}
               />
             </View>
@@ -162,7 +162,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   label: {
-    color: '#344054',
+    color: palette.text,
     fontSize: 13,
     lineHeight: 18,
     fontWeight: '600',
@@ -171,7 +171,7 @@ const styles = StyleSheet.create({
     height: 48,
     paddingHorizontal: 12,
     borderWidth: 1,
-    borderColor: '#C9D1DC',
+    borderColor: palette.border,
     borderRadius: 8,
     backgroundColor: palette.surface,
     color: palette.text,
@@ -185,13 +185,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#FEF3F2',
+    backgroundColor: palette.surfaceMuted,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#FDA29B',
+    borderColor: palette.danger,
   },
   errorText: {
     flex: 1,
-    color: '#B42318',
+    color: palette.danger,
     fontSize: 13,
     lineHeight: 18,
   },

@@ -4292,7 +4292,7 @@ const styles = StyleSheet.create({
     // The hairline border reduces the visible white fill slightly; compensate against the 40px avatar.
     minHeight: 41,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#E3E8EF',
+    borderColor: palette.border,
     paddingVertical: 9 - StyleSheet.hairlineWidth,
   },
   userBubble: {
@@ -4341,18 +4341,18 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     borderRadius: 6,
     alignSelf: 'flex-start',
-    backgroundColor: '#E4E7EC',
+    backgroundColor: palette.surfaceMuted,
   },
   sentQuoteUser: {
     alignSelf: 'flex-end',
   },
   sentQuoteText: {
-    color: '#667085',
+    color: palette.textMuted,
     fontSize: 13,
     lineHeight: 18,
   },
   sentQuoteAuthor: {
-    color: '#475467',
+    color: palette.text,
     fontWeight: '600',
   },
   translationBox: {
@@ -4361,8 +4361,8 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 6,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#D5DAE1',
-    backgroundColor: '#E9ECEF',
+    borderColor: palette.border,
+    backgroundColor: palette.surfaceMuted,
   },
   voiceTranscriptBox: {
     maxWidth: '100%',
@@ -4371,9 +4371,9 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     borderRadius: 8,
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: palette.assistantBubble,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#E3E8EF',
+    borderColor: palette.border,
   },
   voiceTranscriptText: {
     color: palette.text,
@@ -4393,7 +4393,7 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
   translationText: {
-    color: '#3F4752',
+    color: palette.text,
     fontSize: 14,
     lineHeight: 20,
   },
@@ -4429,13 +4429,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#FEF3F2',
+    backgroundColor: palette.surfaceMuted,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#FDA29B',
+    borderColor: palette.danger,
   },
   errorBannerText: {
     flex: 1,
-    color: '#B42318',
+    color: palette.danger,
     fontSize: 12,
     lineHeight: 17,
   },
@@ -4457,8 +4457,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 5,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#D5DBE4',
-    backgroundColor: '#FFFFFF',
+    borderColor: palette.border,
+    backgroundColor: palette.surface,
     shadowColor: '#101828',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.14,
@@ -4466,7 +4466,7 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   scrollToLatestButtonPressed: {
-    backgroundColor: '#F2F4F7',
+    backgroundColor: palette.surfaceMuted,
     transform: [{ scale: 0.96 }],
   },
   scrollToLatestLabel: {
@@ -4498,8 +4498,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: '#C9D1DC',
-    backgroundColor: '#FFFFFF',
+    borderColor: palette.border,
+    backgroundColor: palette.surfaceMuted,
   },
   composerInput: {
     flex: 1,
@@ -4509,9 +4509,9 @@ const styles = StyleSheet.create({
     paddingTop: Platform.OS === 'ios' ? 11 : 8,
     paddingBottom: Platform.OS === 'ios' ? 10 : 8,
     borderWidth: 1,
-    borderColor: '#C9D1DC',
+    borderColor: palette.border,
     borderRadius: 8,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: palette.surfaceMuted,
     color: palette.text,
     fontSize: 16,
     lineHeight: 21,
@@ -4531,22 +4531,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: '#C9D1DC',
-    backgroundColor: '#FFFFFF',
+    borderColor: palette.border,
+    backgroundColor: palette.surfaceMuted,
   },
   voiceButtonLocalRecording: {
     borderColor: palette.accentBorder,
     backgroundColor: palette.accentSoft,
   },
   voiceButtonError: {
-    borderColor: '#FDA29B',
-    backgroundColor: '#FFF3F1',
+    borderColor: palette.danger,
+    backgroundColor: palette.surfaceMuted,
   },
   voiceButtonDisabled: {
     opacity: 0.72,
   },
   voiceButtonPressed: {
-    backgroundColor: '#F2F4F7',
+    backgroundColor: palette.surfaceMuted,
   },
   cloudDictationBar: {
     flex: 1,
@@ -4556,8 +4556,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#C9D1DC',
-    backgroundColor: '#FFFFFF',
+    borderColor: palette.border,
+    backgroundColor: palette.surfaceMuted,
   },
   cloudDictationWave: {
     width: '100%',
@@ -4570,7 +4570,7 @@ const styles = StyleSheet.create({
   cloudDictationWaveBar: {
     width: 3,
     borderRadius: 2,
-    backgroundColor: '#667085',
+    backgroundColor: palette.textMuted,
   },
   cloudDictationAction: {
     width: 44,
@@ -4580,7 +4580,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#C9D1DC',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: palette.surfaceMuted,
   },
   cloudDictationConfirmAction: {
     borderColor: palette.accent,
@@ -4597,10 +4597,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#C9D1DC',
+    borderColor: palette.border,
   },
   holdToTalkButtonPressed: {
-    backgroundColor: '#EDF9EF',
+    backgroundColor: palette.accentSoft,
     borderColor: palette.accentBorder,
   },
   holdToTalkButtonRecording: {
@@ -4608,8 +4608,8 @@ const styles = StyleSheet.create({
     borderColor: palette.accentBorder,
   },
   holdToTalkButtonError: {
-    borderColor: '#FDA29B',
-    backgroundColor: '#FFF3F1',
+    borderColor: palette.danger,
+    backgroundColor: palette.surfaceMuted,
   },
   holdToTalkText: {
     color: palette.text,
@@ -4632,16 +4632,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#EAECF0',
+    backgroundColor: palette.surfaceMuted,
   },
   composerQuoteText: {
     flex: 1,
-    color: '#667085',
+    color: palette.textMuted,
     fontSize: 13,
     lineHeight: 18,
   },
   composerQuoteAuthor: {
-    color: '#475467',
+    color: palette.text,
     fontWeight: '600',
   },
   composerQuoteClose: {

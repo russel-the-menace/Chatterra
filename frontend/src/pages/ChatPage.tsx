@@ -217,6 +217,12 @@ const responseMessages = (data: any, createdAt = new Date().toISOString()): Chat
   }))
 }
 
+const simulatedTypingDuration = (text: string) => {
+  const characters = Array.from(text.trim()).length
+  const words = text.trim().split(/\s+/u).filter(Boolean).length
+  return Math.round(Math.min(20_000, Math.max(2_000, 620 + words * 70 + characters * 12)))
+}
+
 const contactPreviewForMessage = (message: any): string | undefined => {
   const voice = parseUserVoiceMessage(message?.contentJson?.voice)
   if (voice) return `[Audio] ${Math.max(1, Math.round(voice.durationSeconds))}\"`
@@ -457,6 +463,8 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
   const readRequestTargetsRef = useRef<Record<string, string>>({})
   const isAtLatestRef = useRef(true)
   const conversationCacheTimersRef = useRef(new Map<string, number>())
+  const stagedDeliveryTimersRef = useRef(new Set<number>())
+  const stagedDeliveryCharacterIdsRef = useRef(new Set<string>())
   const pendingConversationCachesRef = useRef(new Map<string, {
     userId: string
     characterId: string
@@ -481,6 +489,12 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
   useEffect(() => () => {
     delete document.documentElement.dataset.theme
     document.documentElement.style.removeProperty('color-scheme')
+  }, [])
+
+  useEffect(() => () => {
+    stagedDeliveryTimersRef.current.forEach(timer => window.clearTimeout(timer))
+    stagedDeliveryTimersRef.current.clear()
+    stagedDeliveryCharacterIdsRef.current.clear()
   }, [])
 
   const handleLatestStateChange = useCallback((atLatest: boolean) => {
@@ -1393,7 +1407,10 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
           setUnseenLatestCount(count => count + newAssistantMessageCount)
         }
         setMessages(current => {
-          if (current.some(message => message.loading)) return current
+          if (
+            current.some(message => message.loading)
+            || stagedDeliveryCharacterIdsRef.current.has(selectedCharacter.id)
+          ) return current
           const mergedMessages = mergeMessageUiState(current, serverMessages)
           const unchanged = current.length === mergedMessages.length
             && current.every((message, index) => (
@@ -1500,6 +1517,77 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
     if (selectedCharacterIdRef.current === characterId) {
       setBehaviorStatus(nextBehaviorStatus)
     }
+  }
+
+  const scheduleDeliveryTask = (task: () => void, delay: number) => {
+    const timer = window.setTimeout(() => {
+      stagedDeliveryTimersRef.current.delete(timer)
+      task()
+    }, delay)
+    stagedDeliveryTimersRef.current.add(timer)
+  }
+
+  const stageAssistantMessages = (
+    characterId: string,
+    loadingId: string,
+    incomingMessages: ChatMessage[],
+    initialTypingElapsedMs: number
+  ) => {
+    const firstMessage = incomingMessages[0]
+    if (!firstMessage) return
+    stagedDeliveryCharacterIdsRef.current.add(characterId)
+
+    const queueMessage = (index: number) => {
+      const nextMessage = incomingMessages[index]
+      const previousMessage = incomingMessages[index - 1]
+      if (!nextMessage || !previousMessage) {
+        stagedDeliveryCharacterIdsRef.current.delete(characterId)
+        return
+      }
+
+      scheduleDeliveryTask(() => {
+        const typingId = `${nextMessage.id}:typing`
+        const typingMessage: ChatMessage = {
+          id: typingId,
+          sender: 'ai',
+          text: '',
+          loading: true,
+          createdAt: nextMessage.createdAt,
+        }
+        scrollToLatest()
+        updateMessagesForCharacter(characterId, current => {
+          if (current.some(message => message.id === typingId || message.id === nextMessage.id)) return current
+          const previousIndex = current.findIndex(message => message.id === previousMessage.id)
+          if (previousIndex < 0) return current
+          return [
+            ...current.slice(0, previousIndex + 1),
+            typingMessage,
+            ...current.slice(previousIndex + 1),
+          ]
+        })
+
+        scheduleDeliveryTask(() => {
+          scrollToLatest()
+          updateMessagesForCharacter(characterId, current => current.map(message => (
+            message.id === typingId ? nextMessage : message
+          )))
+          queueMessage(index + 1)
+        }, simulatedTypingDuration(nextMessage.text))
+      }, 220)
+    }
+
+    const revealFirstMessage = () => {
+      scrollToLatest()
+      updateMessagesForCharacter(characterId, current => current.flatMap(message => (
+        message.id === loadingId ? [firstMessage] : [message]
+      )))
+      queueMessage(1)
+    }
+
+    scheduleDeliveryTask(
+      revealFirstMessage,
+      Math.max(0, simulatedTypingDuration(firstMessage.text) - initialTypingElapsedMs)
+    )
   }
 
   const togglePinnedCharacter = async () => {
@@ -1866,6 +1954,7 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
     const localMessageId = makeMessageId()
     const loadingId = makeMessageId()
     const messageCreatedAt = new Date().toISOString()
+    const assistantTypingStartedAt = Date.now()
     const localMessage: ChatMessage = {
       id: localMessageId,
       sender: 'user',
@@ -1922,9 +2011,12 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
         return
       }
       const replies = responseMessages(data, messageCreatedAt)
-      updateMessagesForCharacter(targetCharacterId, current => current.flatMap(message => (
-        message.id === loadingId ? replies : [message]
-      )))
+      stageAssistantMessages(
+        targetCharacterId,
+        loadingId,
+        replies,
+        Date.now() - assistantTypingStartedAt
+      )
     } catch (uploadError) {
       console.error('Voice message upload failed', uploadError)
       URL.revokeObjectURL(localUrl)
@@ -1952,6 +2044,7 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
     }
     const loadingId = makeMessageId()
     const loadingMsg: ChatMessage = { id: loadingId, sender: 'ai', text: '', loading: true, createdAt: messageCreatedAt }
+    const assistantTypingStartedAt = Date.now()
 
     setMessages(prev => [...prev, userMsg, loadingMsg])
     if (messageQuote) setQuoteDraft(null)
@@ -2010,12 +2103,12 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
         } else {
           const aiMessages = responseMessages(data, messageCreatedAt)
           if (aiMessages.length === 0) throw new Error('The server returned no usable response.')
-          updateMessagesForCharacter(targetCharacterId, prev2 => {
-            const hasLoadingMessage = prev2.some(message => message.id === loadingId)
-            return hasLoadingMessage
-              ? prev2.flatMap(message => message.id === loadingId ? aiMessages : [message])
-              : [...prev2, ...aiMessages]
-          })
+          stageAssistantMessages(
+            targetCharacterId,
+            loadingId,
+            aiMessages,
+            Date.now() - assistantTypingStartedAt
+          )
         }
       } catch (error) {
         console.error('Chat request failed', error)

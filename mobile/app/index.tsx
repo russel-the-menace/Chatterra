@@ -342,7 +342,7 @@ const styles = StyleSheet.create({
     backgroundColor: palette.surfaceMuted,
   },
   iconButtonPressed: {
-    backgroundColor: '#D8E0E8',
+    backgroundColor: palette.surfaceMuted,
   },
   settingsModal: {
     flex: 1,
@@ -442,14 +442,14 @@ const styles = StyleSheet.create({
     borderBottomColor: palette.border,
   },
   contactPressed: {
-    backgroundColor: '#F6F7F8',
+    backgroundColor: palette.surfaceMuted,
     marginHorizontal: -8,
     paddingHorizontal: 16,
     borderRadius: 8,
     borderBottomColor: 'transparent',
   },
   contactPinned: {
-    backgroundColor: '#F5F7F9',
+    backgroundColor: palette.surfaceMuted,
     marginHorizontal: -8,
     paddingHorizontal: 16,
     borderBottomColor: 'transparent',
@@ -509,7 +509,7 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     alignSelf: 'flex-start',
     marginTop: 3,
-    color: '#98A2B3',
+    color: palette.textMuted,
     fontSize: 11,
     lineHeight: 15,
     fontVariant: ['tabular-nums'],
@@ -581,11 +581,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#FFF7ED',
+    backgroundColor: palette.surfaceMuted,
   },
   warningText: {
     flex: 1,
-    color: '#9A3412',
+    color: palette.warning,
     fontSize: 13,
   },
   emptyState: {

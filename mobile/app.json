@@ -6,7 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/images/chatterra-icon.png",
     "scheme": "chatterra",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": false,
