@@ -85,7 +85,7 @@ const SparkBadge = ({ streak }: { streak?: ChatStreak }) => {
       : `Relight ${streak.rekindleProgress || 1}/3`
   return (
     <span className={`spark-badge spark-${streak.status}`} title={label} aria-label={label}>
-      <span className="spark-icon" aria-hidden="true">🔥</span>
+      <svg className="spark-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c.5 3-1.5 4.5-3 6-1.5 1.5-2 3-2 4.5A5 5 0 0 0 12 18a5 5 0 0 0 5-4.5c0-2-1-3.5-3-5.5-1-1-1.5-2-2-5Z"/><path d="M12 18a3 3 0 0 0 3-3c0-1.5-1-2.5-2-3.5-.5 1.5-1.5 2-2 3.5a2 2 0 0 0 1 3Z"/></svg>
       <span className="spark-text">{text}</span>
     </span>
   )

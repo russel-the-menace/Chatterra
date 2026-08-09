@@ -53,10 +53,8 @@ function SparkBadge({ characterId }: { characterId: string }) {
       style={styles.sparkBadge}
       accessibilityLabel={text}
     >
-      {pending ? <Ionicons name="flame" size={16} color={color} /> : <Text style={styles.sparkFlame}>🔥</Text>}
-      {rekindling
-        ? <View style={styles.sparkRekindlingText}><Text style={[styles.sparkDays, { color }]} numberOfLines={1}>{text}</Text></View>
-        : <Text style={[styles.sparkDays, { color }]} numberOfLines={1}>{text}</Text>}
+      <Ionicons name={rekindling ? 'flame-outline' : 'flame'} size={16} color={color} />
+      <Text style={[styles.sparkDays, { color }]} numberOfLines={1}>{text}</Text>
     </View>
   )
 }
@@ -494,8 +492,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 2,
   },
-  sparkFlame: { fontSize: 16, lineHeight: 17, zIndex: 2 },
-  sparkRekindlingText: { marginLeft: -7, paddingLeft: 8, paddingRight: 5, borderRadius: 7, backgroundColor: 'rgba(17,24,39,0.08)' },
   sparkDays: {
     flexShrink: 1,
     fontSize: 12,
