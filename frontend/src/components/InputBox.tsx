@@ -251,7 +251,7 @@ export default function InputBox({
       {dictating ? (
         <div className="input-compose-row dictation-compose-row">
           <button type="button" className="composer-mode-button" disabled aria-label="Voice message mode is unavailable while transcribing">
-            <WeChatVoiceWave color="#172033" size={22} />
+            <WeChatVoiceWave color="currentColor" size={22} />
           </button>
           <div className="cloud-dictation-bar" aria-label={recorderState === 'processing' ? 'Converting speech to text' : 'Recording for cloud transcription'}>
             <RecordingWaveform level={level} active={recorderState === 'dictation-recording'} />
@@ -279,7 +279,7 @@ export default function InputBox({
             aria-label="Switch to voice message"
             title="Switch to voice message"
           >
-            <WeChatVoiceWave color="#172033" size={22} />
+            <WeChatVoiceWave color="currentColor" size={22} />
           </button>
           <textarea
             value={draft}

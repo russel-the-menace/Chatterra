@@ -1196,6 +1196,7 @@ body.modal-open{overflow:hidden}
 .dictation-command:hover:not(:disabled){background:#f3f7f4;color:var(--accent-pressed);border-color:rgba(var(--accent-rgb),0.4)}
 .composer-mode-button:disabled,.dictation-command:disabled{cursor:wait;opacity:.55}
 .composer-icon{width:22px;height:22px;display:block}
+.composer-mode-button .wechat-voice-wave{transform:translateX(3px)}
 .voice-message-compose-row{align-items:center}
 .hold-to-talk{
   flex:1;
@@ -1701,7 +1702,8 @@ body.modal-open{overflow:hidden}
 :root[data-theme='dark'] .contact-item.pinned.active .contact-preview{color:#9da2aa}
 :root[data-theme='dark'] .chat-pane{background:#1d1e20;backdrop-filter:none}
 :root[data-theme='dark'] .top-bar{border-bottom-color:#383a3e;background:#252628}
-:root[data-theme='dark'] .title{color:#f1f2f4}
+:root[data-theme='dark'] .title,
+:root[data-theme='dark'] .title .name{color:#f1f2f4}
 :root[data-theme='dark'] .title .status{color:#9ca1a9}
 :root[data-theme='dark'] .conversation-menu-button{color:#c7cbd1}
 :root[data-theme='dark'] .conversation-menu-button:hover,
