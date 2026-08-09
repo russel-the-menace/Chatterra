@@ -6,6 +6,7 @@ import seedCharacter, {characters as seedCharacters, Character} from '../data/ch
 import { VoiceTranscriptMetadata } from '../voice/types'
 import {
   API_BASE_URL,
+  ChatStreak,
   apiFetch,
   apiUrl,
   ensureConversation,
@@ -14,6 +15,7 @@ import {
   logout,
   markConversationRead,
   saveStoredSession,
+  restoreChatStreak,
   transcribeVoiceRecording,
   updateUserProfile,
   uploadVoiceMessage,
@@ -68,6 +70,23 @@ const showTestAccountLimit = (payload: Record<string, any>) => {
     : ''
   window.alert(`The public test account has reached its reply limit.${resetMessage}`)
   return true
+}
+
+const SparkBadge = ({ streak }: { streak?: ChatStreak }) => {
+  if (!streak || streak.status === 'locked' || streak.status === 'expired') return null
+  const label = streak.status === 'active'
+    ? `Active ${streak.days}-day spark`
+    : streak.status === 'pending'
+      ? `${streak.days}-day spark is waiting for today's chat`
+      : streak.status === 'rekindling'
+        ? `${streak.days}-day spark can be rekindled`
+        : `${streak.days}-day spark ended`
+  return (
+    <span className={`spark-badge spark-${streak.status}`} title={label} aria-label={label}>
+      <span className="spark-icon" aria-hidden="true">🔥</span>
+      <span>{streak.days}</span>
+    </span>
+  )
 }
 const parseAssistantVoiceMessage = (value: unknown): AssistantVoiceMessage | undefined => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
@@ -383,6 +402,8 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
   const [unreadCountsByCharacter, setUnreadCountsByCharacter] = useState<Record<string, number>>({})
   const [pinnedCharacterIds, setPinnedCharacterIds] = useState<Set<string>>(() => new Set())
   const [pinnedCharacterOrder, setPinnedCharacterOrder] = useState<string[]>([])
+  const [streaksByCharacter, setStreaksByCharacter] = useState<Record<string, ChatStreak>>({})
+  const [rekindlingCharacterId, setRekindlingCharacterId] = useState<string | null>(null)
   const [lastMessageAtByCharacter, setLastMessageAtByCharacter] = useState<Record<string, string>>({})
   const [showAddDrawer, setShowAddDrawer] = useState(false)
   const [showConversationMenu, setShowConversationMenu] = useState(false)
@@ -1044,6 +1065,7 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
         setUserName(snapshot.userName || getStoredSession()?.user.displayName)
         setUserAvatar(snapshot.userAvatar)
         setUserTranslationTargetLanguage(snapshot.userTranslationTargetLanguage || getStoredSession()?.user.translationTargetLanguage)
+        setStreaksByCharacter(Object.fromEntries((snapshot.streaks || []).map(streak => [streak.characterId, streak])))
 
         setCharacters(current => {
           const unchanged = current.length === snapshot.characters.length
@@ -1956,6 +1978,19 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
   }
 
   const currentUserAvatar = userAvatar || getStoredSession()?.user.avatar || ''
+  const selectedStreak = streaksByCharacter[selectedCharacter.id]
+  const handleRekindleSpark = async () => {
+    if (rekindlingCharacterId || selectedStreak?.status !== 'rekindling') return
+    try {
+      setRekindlingCharacterId(selectedCharacter.id)
+      const streak = await restoreChatStreak(selectedCharacter.id)
+      setStreaksByCharacter(current => ({ ...current, [streak.characterId]: streak }))
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Could not rekindle this spark.')
+    } finally {
+      setRekindlingCharacterId(null)
+    }
+  }
   const railAvatarContent = isImageAvatar(currentUserAvatar)
     ? <img src={currentUserAvatar} alt="" />
     : <span>{(userName || 'Me').trim().slice(0, 1).toUpperCase() || 'M'}</span>
@@ -2035,6 +2070,7 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
               <div className="contact-meta">
                 <div className="contact-name-row">
                   <div className="contact-name">{ch.name}</div>
+                  <SparkBadge streak={streaksByCharacter[ch.id]} />
                 </div>
                 <div className="contact-preview">{proactivePreviews[ch.id] || ch.personality}</div>
               </div>
@@ -2056,14 +2092,27 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
               {avatarContent(selectedCharacter)}
             </button>
             <div className="title">
-              <button
-                type="button"
-                className="name chat-character-edit-trigger"
-                onClick={() => openCharacterEditor(selectedCharacter)}
-                title="Edit character"
-              >
-                {selectedCharacter.name}
-              </button>
+              <div className="title-name-row">
+                <button
+                  type="button"
+                  className="name chat-character-edit-trigger"
+                  onClick={() => openCharacterEditor(selectedCharacter)}
+                  title="Edit character"
+                >
+                  {selectedCharacter.name}
+                </button>
+                <SparkBadge streak={selectedStreak} />
+                {selectedStreak?.status === 'rekindling' && (
+                  <button
+                    type="button"
+                    className="spark-rekindle-button"
+                    disabled={rekindlingCharacterId === selectedCharacter.id}
+                    onClick={() => void handleRekindleSpark()}
+                  >
+                    {rekindlingCharacterId === selectedCharacter.id ? 'Rekindling...' : 'Rekindle'}
+                  </button>
+                )}
+              </div>
               <div className="status">{selectedCharacter.role || 'Conversation partner'} · {behaviorStatus}</div>
             </div>
           </div>

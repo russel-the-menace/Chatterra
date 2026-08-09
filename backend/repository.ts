@@ -15,8 +15,10 @@ import {
   Memory,
   Message,
   MessageTranslation,
-  SyncSnapshot
+  SyncSnapshot,
+  ChatStreak
 } from './types'
+import { chatStreakStatusFor } from './chat-streak'
 
 const iso = (value: Date | string | null | undefined): string | undefined => {
   if (!value) return undefined
@@ -648,6 +650,28 @@ export const getSyncSnapshot = async (userId: string): Promise<SyncSnapshot> => 
       }
     })
 
+    const streakRows = await client.query(
+      `SELECT character_id, current_days, longest_days, last_qualified_day
+       FROM character_streaks
+       WHERE user_id = $1`,
+      [userId]
+    )
+    const beijingDayResult = await client.query("SELECT ((NOW() AT TIME ZONE 'Asia/Shanghai')::date)::text AS today")
+    const beijingToday = String(beijingDayResult.rows[0].today)
+    const streaks: ChatStreak[] = streakRows.rows.map(row => {
+      const lastDay = row.last_qualified_day ? String(row.last_qualified_day).slice(0, 10) : undefined
+      const days = Number(row.current_days || 0)
+      const status = chatStreakStatusFor({ current_days: days, last_qualified_day: lastDay }, beijingToday)
+      return {
+        characterId: String(row.character_id),
+        days,
+        longestDays: Number(row.longest_days || 0),
+        status,
+        lastQualifiedDay: lastDay,
+        rekindleExpiresAt: status === 'rekindling' ? `${beijingToday}T23:59:59+08:00` : undefined,
+      }
+    })
+
     const userRow = userResult.rows[0]
     return {
       serverTime: new Date().toISOString(),
@@ -661,7 +685,8 @@ export const getSyncSnapshot = async (userId: string): Promise<SyncSnapshot> => 
       userTranslationTargetLanguage: normalizeTranslationTargetLanguage(userRow?.preferences?.translationTargetLanguage, userRow?.username),
       characters: characterResult.rows.map(mapCharacter),
       conversations,
-      pinnedCharacterIds: pinResult.rows.map(row => String(row.character_id))
+      pinnedCharacterIds: pinResult.rows.map(row => String(row.character_id)),
+      streaks,
     }
   })
 }

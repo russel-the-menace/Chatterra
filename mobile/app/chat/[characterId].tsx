@@ -1113,11 +1113,24 @@ export default function ChatScreen() {
     setConversationCache,
     setConversationListViewState,
     clearConversationCache,
+    streaksByCharacter,
+    rekindleSpark,
   } = useChat()
   const character = useMemo(
     () => characters.find(item => item.id === characterId),
     [characterId, characters]
   )
+  const streak = characterId ? streaksByCharacter[characterId] : undefined
+  const [rekindlingSpark, setRekindlingSpark] = useState(false)
+  const handleRekindleSpark = async () => {
+    if (!characterId || rekindlingSpark || streak?.status !== 'rekindling') return
+    try {
+      setRekindlingSpark(true)
+      await rekindleSpark(characterId)
+    } finally {
+      setRekindlingSpark(false)
+    }
+  }
   const draft = characterId ? getDraft(characterId) : ''
   const quotedMessage = characterId ? getQuoteDraft(characterId) : null
   const initialCacheRef = useRef(characterId ? getConversationCache(characterId) : undefined)
@@ -3010,12 +3023,35 @@ export default function ChatScreen() {
         <Pressable onPress={openEditor} style={styles.headerIdentity}>
           <Avatar avatar={character.avatar} name={character.name} size={42} />
           <View style={styles.headerText}>
-            <Text style={styles.headerName} numberOfLines={1}>{character.name}</Text>
+            <View style={styles.headerNameRow}>
+              <Text style={styles.headerName} numberOfLines={1}>{character.name}</Text>
+              {streak && streak.status !== 'locked' && streak.status !== 'expired' && (
+                <View style={styles.headerSpark}>
+                  <Ionicons
+                    name={streak.status === 'rekindling' ? 'flame-outline' : 'flame'}
+                    size={16}
+                    color={streak.status === 'pending' ? '#8B929C' : '#F05A28'}
+                  />
+                  <Text style={[styles.headerSparkDays, streak.status === 'pending' && styles.headerSparkPending]}>
+                    {streak.days}
+                  </Text>
+                </View>
+              )}
+            </View>
             <Text style={styles.headerStatus} numberOfLines={1}>
               {character.role || 'Conversation partner'} · {activity}
             </Text>
           </View>
         </Pressable>
+        {streak?.status === 'rekindling' && (
+          <Pressable
+            onPress={() => void handleRekindleSpark()}
+            disabled={rekindlingSpark}
+            style={({ pressed }) => [styles.rekindleButton, (pressed || rekindlingSpark) && styles.rekindleButtonPressed]}
+          >
+            <Text style={styles.rekindleButtonText}>{rekindlingSpark ? '...' : 'Rekindle'}</Text>
+          </Pressable>
+        )}
         <Pressable onPress={showConversationActions} hitSlop={10} style={styles.headerIcon} accessibilityLabel="Conversation options">
           <Ionicons name="ellipsis-horizontal" size={23} color={palette.text} />
         </Pressable>
@@ -3836,10 +3872,50 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
+  headerNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    minWidth: 0,
+  },
   headerName: {
+    flexShrink: 1,
     color: palette.text,
     fontSize: 17,
     lineHeight: 21,
+    fontWeight: '700',
+  },
+  headerSpark: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  headerSparkDays: {
+    color: '#F05A28',
+    fontSize: 13,
+    lineHeight: 17,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+  },
+  headerSparkPending: {
+    color: '#8B929C',
+  },
+  rekindleButton: {
+    minHeight: 30,
+    paddingHorizontal: 9,
+    borderWidth: 1,
+    borderColor: '#F0A176',
+    borderRadius: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFF7F2',
+  },
+  rekindleButtonPressed: {
+    opacity: 0.58,
+  },
+  rekindleButtonText: {
+    color: '#B9471F',
+    fontSize: 12,
     fontWeight: '700',
   },
   headerStatus: {

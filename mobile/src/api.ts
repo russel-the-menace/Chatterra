@@ -3,6 +3,7 @@ import * as FileSystem from 'expo-file-system/legacy'
 
 import {
   Character,
+  ChatStreak,
   ChatResponse,
   Conversation,
   MessageQuote,
@@ -215,7 +216,7 @@ export const api = {
   },
 
   async health() {
-    return request<{ status: string; database: string }>('/api/health')
+    return request<{ status: string }>('/api/health')
   },
 
   async getVoiceCapability() {
@@ -238,6 +239,14 @@ export const api = {
       conversations: requiredArray<SyncConversation>(snapshot.conversations, '/api/sync', 'conversations'),
       pinnedCharacterIds: requiredArray<string>(snapshot.pinnedCharacterIds, '/api/sync', 'pinnedCharacterIds'),
     }
+  },
+
+  async restoreChatStreak(characterId: string) {
+    const result = await request<{ streak: ChatStreak }>(
+      `/api/characters/${encodeURIComponent(characterId)}/streak/restore`,
+      { method: 'POST' }
+    )
+    return result.streak
   },
 
   async createCharacter(userId: string, character: Omit<Character, 'id'>) {

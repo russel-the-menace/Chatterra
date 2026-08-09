@@ -19,6 +19,7 @@
     "test:authentication": "ts-node --transpile-only authentication.test.ts",
     "test:test-account-policy": "ts-node --transpile-only test-account-policy.test.ts",
     "test:security-audit": "ts-node --transpile-only security-audit.test.ts",
+    "test:chat-streak": "ts-node --transpile-only chat-streak.test.ts",
     "test:user-voice-message": "ts-node --transpile-only user-voice-message.test.ts",
     "test:translation": "ts-node --transpile-only translation-service.test.ts",
     "test:assistant-voice": "ts-node --transpile-only assistant-voice.test.ts",

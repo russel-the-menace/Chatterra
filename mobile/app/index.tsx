@@ -20,6 +20,25 @@ import { starterMessageForCharacter } from '@/src/starter-message'
 import { layout, palette } from '@/src/theme'
 import { Character } from '@/src/types'
 
+function SparkBadge({ characterId }: { characterId: string }) {
+  const { streaksByCharacter } = useChat()
+  const streak = streaksByCharacter[characterId]
+  if (!streak || streak.status === 'locked' || streak.status === 'expired') return null
+  const pending = streak.status === 'pending'
+  const rekindling = streak.status === 'rekindling'
+  const color = pending ? '#8B929C' : '#F05A28'
+  return (
+    <View
+      style={styles.sparkBadge}
+      accessibilityLabel={`${streak.days}-day spark${rekindling ? ', ready to rekindle' : ''}`}
+    >
+      <Ionicons name={rekindling ? 'flame-outline' : 'flame'} size={16} color={color} />
+      {rekindling && <Ionicons name="sparkles" size={8} color="#F6A23C" style={styles.sparklesIcon} />}
+      <Text style={[styles.sparkDays, { color }]}>{streak.days}</Text>
+    </View>
+  )
+}
+
 function ContactRow({ character, pinned }: { character: Character; pinned: boolean }) {
   const {
     proactivePreviews,
@@ -59,6 +78,7 @@ function ContactRow({ character, pinned }: { character: Character; pinned: boole
       <View style={styles.contactContent}>
         <View style={styles.contactTitleRow}>
           <Text style={styles.contactName} numberOfLines={1}>{character.name}</Text>
+          <SparkBadge characterId={character.id} />
         </View>
         <Text style={styles.contactPreview} numberOfLines={1}>
           {proactivePreviews[character.id] || starterMessageForCharacter(character)}
@@ -72,7 +92,6 @@ function ContactRow({ character, pinned }: { character: Character; pinned: boole
 
 export default function ContactsScreen() {
   const {
-    apiBaseUrl,
     ready,
     userId,
     characters,
@@ -176,7 +195,6 @@ export default function ContactsScreen() {
             <Ionicons name="cloud-offline-outline" size={30} color={palette.textMuted} />
             <Text style={styles.stateTitle}>Could not load conversations</Text>
             <Text style={styles.stateText}>{connectionError}</Text>
-            <Text style={styles.endpointText}>{apiBaseUrl}</Text>
             <Pressable
               disabled={refreshing}
               onPress={() => void refresh()}
@@ -440,6 +458,25 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     fontWeight: '700',
   },
+  sparkBadge: {
+    position: 'relative',
+    minWidth: 34,
+    height: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  sparkDays: {
+    fontSize: 13,
+    lineHeight: 17,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+  },
+  sparklesIcon: {
+    position: 'absolute',
+    top: -2,
+    left: 10,
+  },
   contactPreview: {
     color: palette.textMuted,
     fontSize: 13,
@@ -488,11 +525,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     textAlign: 'center',
-  },
-  endpointText: {
-    color: palette.textMuted,
-    fontSize: 12,
-    fontFamily: 'Menlo',
   },
   retryButton: {
     minHeight: 40,

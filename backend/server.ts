@@ -28,6 +28,7 @@ import {
 } from './message-quote'
 import { resolveResponseLanguagePolicy, starterMessageForPolicy } from './language-policy'
 import { createInferenceTrace } from './inference-logger'
+import { recordChatStreakInteraction, restoreChatStreak } from './chat-streak'
 import {
   looksLikeInjectionInput,
   looksLikeSuspiciousPath,
@@ -781,6 +782,15 @@ app.get('/api/sync', asyncRoute(async (req, res) => {
     return res.json(await getSyncSnapshot(userId))
   }
   return res.json(snapshot)
+}))
+
+app.post('/api/characters/:id/streak/restore', asyncRoute(async (req, res) => {
+  const userId = authenticatedUserId(req)
+  const character = await getCharacterForUser(userId, req.params.id)
+  if (!character) return res.status(404).json({ error: 'character not found' })
+  const streak = await restoreChatStreak(userId, character.id)
+  if (!streak) return res.status(409).json({ error: 'This spark is not currently available to rekindle.' })
+  return res.json({ streak })
 }))
 
 app.get('/api/users/:id/preferences', asyncRoute(async (req, res) => {
@@ -1553,6 +1563,15 @@ app.post('/api/messages/forward', asyncRoute(async (req, res) => {
         triggerMessage,
       })
     : undefined
+  if (generated?.assistantMessage) {
+    await recordChatStreakInteraction({
+      userId,
+      characterId: character.id,
+      sourceMessageId: generated.assistantMessage.id,
+    }).catch(error => {
+      console.warn('Could not record chat streak interaction', error)
+    })
+  }
   return res.status(201).json({
     conversationId: conversation.id,
     characterId: character.id,
@@ -2060,6 +2079,13 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
       generation,
       diagnostics: trace.snapshot(),
       now: new Date(assistantMessage.createdAt)
+    })
+    await recordChatStreakInteraction({
+      userId: normalizedUserId,
+      characterId: storedCharacter.id,
+      sourceMessageId: assistantMessage.id,
+    }).catch(error => {
+      console.warn('Could not record chat streak interaction', error)
     })
     trace.mark('request_completed', 'completed', { messageId: assistantMessage.id })
     void compactConversationIfNeeded(conversation.id)

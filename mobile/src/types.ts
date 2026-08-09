@@ -92,6 +92,16 @@ export type SyncSnapshot = {
   characters: Character[]
   conversations: SyncConversation[]
   pinnedCharacterIds: string[]
+  streaks: ChatStreak[]
+}
+
+export type ChatStreak = {
+  characterId: string
+  days: number
+  longestDays: number
+  status: 'locked' | 'active' | 'pending' | 'rekindling' | 'expired'
+  lastQualifiedDay?: string
+  rekindleExpiresAt?: string
 }
 
 export type ServerMessage = {

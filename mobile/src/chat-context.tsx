@@ -29,6 +29,7 @@ import {
 } from './storage'
 import {
   Character,
+  ChatStreak,
   ComposerQuoteDraft,
   ContactPreviewCache,
   ConversationHistoryCache,
@@ -77,6 +78,8 @@ type ChatContextValue = {
   pinnedCharacterIds: Set<string>
   pinnedCharacterOrder: string[]
   lastMessageAtByCharacter: Record<string, string>
+  streaksByCharacter: Record<string, ChatStreak>
+  rekindleSpark: (characterId: string) => Promise<void>
   getDraft: (characterId: string) => string
   setDraft: (
     characterId: string,
@@ -213,6 +216,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const [pinnedCharacterIds, setPinnedCharacterIds] = useState<Set<string>>(() => new Set())
   const [pinnedCharacterOrder, setPinnedCharacterOrder] = useState<string[]>([])
   const [lastMessageAtByCharacter, setLastMessageAtByCharacter] = useState<Record<string, string>>({})
+  const [streaksByCharacter, setStreaksByCharacter] = useState<Record<string, ChatStreak>>({})
   const activeCharacterRef = useRef<string | null>(null)
   const conversationCacheRef = useRef<Map<string, ConversationCacheEntry>>(new Map())
   const conversationListViewStateRef = useRef<Map<string, ConversationListViewState>>(new Map())
@@ -259,6 +263,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     setPinnedCharacterIds(new Set())
     setPinnedCharacterOrder([])
     setLastMessageAtByCharacter({})
+    setStreaksByCharacter({})
   }, [])
 
   useEffect(() => {
@@ -475,6 +480,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
           getStoredContactPreviewCache(API_BASE_URL, storedSession.user.id).catch(() => undefined),
         ])
         const nextCharacters = snapshot.characters
+        setStreaksByCharacter(Object.fromEntries((snapshot.streaks || []).map(streak => [streak.characterId, streak])))
         const pinnedIds = snapshot.pinnedCharacterIds
         const warmedConversationCaches = await prewarmConversationCaches(
           storedSession.user.id,
@@ -557,6 +563,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
         getStoredContactPreviewCache(API_BASE_URL, storedSession.user.id).catch(() => undefined),
       ])
       const nextCharacters = snapshot.characters
+      setStreaksByCharacter(Object.fromEntries((snapshot.streaks || []).map(streak => [streak.characterId, streak])))
       const pinnedIds = snapshot.pinnedCharacterIds
       const warmedConversationCaches = await prewarmConversationCaches(
         storedSession.user.id,
@@ -628,6 +635,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     try {
       const snapshot = await api.getSyncSnapshot(userId)
       setCharacters(snapshot.characters)
+      setStreaksByCharacter(Object.fromEntries((snapshot.streaks || []).map(streak => [streak.characterId, streak])))
       // A partial or temporarily stale profile response must not blank an
       // already-restored local profile while the rest of the workspace syncs.
       setUserName(snapshot.userName || sessionRef.current?.user.displayName)
@@ -1098,6 +1106,11 @@ export function ChatProvider({ children }: PropsWithChildren) {
     conversationCacheWriteRef.current.set(characterId, remove)
   }, [userId])
 
+  const rekindleSpark = useCallback(async (characterId: string) => {
+    const streak = await api.restoreChatStreak(characterId)
+    setStreaksByCharacter(current => ({ ...current, [characterId]: streak }))
+  }, [])
+
   const value = useMemo<ChatContextValue>(() => ({
     apiBaseUrl: API_BASE_URL,
     ready,
@@ -1116,6 +1129,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
     pinnedCharacterIds,
     pinnedCharacterOrder,
     lastMessageAtByCharacter,
+    streaksByCharacter,
+    rekindleSpark,
     getDraft,
     setDraft,
     getQuoteDraft,
@@ -1158,6 +1173,8 @@ export function ChatProvider({ children }: PropsWithChildren) {
     pinnedCharacterIds,
     pinnedCharacterOrder,
     lastMessageAtByCharacter,
+    streaksByCharacter,
+    rekindleSpark,
     ready,
     refreshCharacters,
     saveCharacter,

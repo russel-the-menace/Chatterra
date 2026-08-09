@@ -37,6 +37,16 @@ export type SyncSnapshot = {
   characters: Character[]
   conversations: SyncConversation[]
   pinnedCharacterIds: string[]
+  streaks: ChatStreak[]
+}
+
+export type ChatStreak = {
+  characterId: string
+  days: number
+  longestDays: number
+  status: 'locked' | 'active' | 'pending' | 'rekindling' | 'expired'
+  lastQualifiedDay?: string
+  rekindleExpiresAt?: string
 }
 
 export const markConversationRead = async (conversationId: string, messageId: string) => {
@@ -59,6 +69,17 @@ export const ensureConversation = async (characterId: string): Promise<SyncConve
     throw new Error(typeof data.error === 'string' ? data.error : 'Could not start the conversation.')
   }
   return data.conversation as SyncConversation
+}
+
+export const restoreChatStreak = async (characterId: string): Promise<ChatStreak> => {
+  const response = await apiFetch(apiUrl(`/api/characters/${encodeURIComponent(characterId)}/streak/restore`), {
+    method: 'POST',
+  })
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok || !data.streak) {
+    throw new Error(typeof data.error === 'string' ? data.error : 'Could not rekindle this spark.')
+  }
+  return data.streak as ChatStreak
 }
 
 const normalizeBaseUrl = (value: string) => value.trim().replace(/\/+$/, '')

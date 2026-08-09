@@ -74,6 +74,18 @@ export interface SyncSnapshot {
   characters: Character[]
   conversations: ConversationSyncRecord[]
   pinnedCharacterIds: UUID[]
+  streaks: ChatStreak[]
+}
+
+export type ChatStreakStatus = 'locked' | 'active' | 'pending' | 'rekindling' | 'expired'
+
+export type ChatStreak = {
+  characterId: UUID
+  days: number
+  longestDays: number
+  status: ChatStreakStatus
+  lastQualifiedDay?: string
+  rekindleExpiresAt?: string
 }
 
 export interface Message {
