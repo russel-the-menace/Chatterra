@@ -1483,7 +1483,8 @@ body.modal-open{overflow:hidden}
   width:104px;
   height:104px;
   flex:0 0 auto;
-  border:1px solid #d1d5db;
+  padding:0;
+  border:0;
   border-radius:8px;
   background:#d7e7ff;
   color:#0f172a;
@@ -1739,6 +1740,41 @@ body.modal-open{overflow:hidden}
 :root[data-theme='dark'] .settings-sign-out{border-top-color:#44464b;color:#ff7373}
 :root[data-theme='dark'] .appearance-menu button{color:#eef0f2}
 :root[data-theme='dark'] .appearance-menu button.selected{background:var(--accent);color:#fff}
+:root[data-theme='dark'] .profile-modal,
+:root[data-theme='dark'] .character-modal{border-color:#45474c;background:#252628;box-shadow:0 24px 70px rgba(0,0,0,.55)}
+:root[data-theme='dark'] .profile-modal-header,
+:root[data-theme='dark'] .character-modal-header{border-bottom-color:#414348;background:#2b2d30}
+:root[data-theme='dark'] .profile-modal-title,
+:root[data-theme='dark'] .character-modal-title{color:#f2f3f5}
+:root[data-theme='dark'] .profile-modal-command{color:#aeb3bb}
+:root[data-theme='dark'] .profile-modal-command:hover:not(:disabled){color:#fff}
+:root[data-theme='dark'] .profile-modal-save{color:#4bd16b}
+:root[data-theme='dark'] .profile-form{background:#252628}
+:root[data-theme='dark'] .profile-field,
+:root[data-theme='dark'] .character-field > span,
+:root[data-theme='dark'] .character-avatar-editor > span{color:#d9dce1}
+:root[data-theme='dark'] .profile-field input,
+:root[data-theme='dark'] .profile-field select,
+:root[data-theme='dark'] .character-field input,
+:root[data-theme='dark'] .character-field textarea{border-color:#4a4d52;background:#303236;color:#f0f1f3}
+:root[data-theme='dark'] .profile-field select{
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4 6l4 4 4-4' stroke='%23E7E9ED' stroke-width='1.35' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+:root[data-theme='dark'] .profile-avatar-picker{background:#3a3c40;color:#f0f1f3}
+:root[data-theme='dark'] .character-form-grid{background:#252628}
+:root[data-theme='dark'] .character-avatar-picker{background:transparent;color:#f0f1f3}
+:root[data-theme='dark'] .avatar-tool-button.secondary,
+:root[data-theme='dark'] .character-cancel{border-color:#505359;background:#303236;color:#e7e9ed}
+:root[data-theme='dark'] .avatar-tool-button.secondary:hover,
+:root[data-theme='dark'] .character-cancel:hover{background:#3a3c40}
+:root[data-theme='dark'] .character-metadata{color:#9ca1a9}
+:root[data-theme='dark'] .character-modal-actions{border-top-color:#414348;background:#2b2d30}
+:root[data-theme='dark'] .conversation-menu{border-color:#4a4d52;background:#2b2d30}
+:root[data-theme='dark'] .conversation-menu button{background:#2b2d30;color:#e7e9ed}
+:root[data-theme='dark'] .conversation-menu button + button{border-top-color:#45474c}
+:root[data-theme='dark'] .conversation-menu button:hover:not(:disabled){background:#3a3c40}
+:root[data-theme='dark'] .conversation-menu button:disabled{color:#737880}
+:root[data-theme='dark'] .conversation-menu button.danger{color:#ff7b73}
 
 @media(max-width:900px){
   .chat-shell{grid-template-columns:1fr}
