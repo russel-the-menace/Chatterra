@@ -390,11 +390,13 @@ body.modal-open{overflow:hidden}
   color:#f05a28;
   font-size:12px;
   line-height:1;
-  font-weight:750;
+  font-weight:400;
   font-variant-numeric:tabular-nums;
 }
 .spark-text{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.spark-icon{display:inline-block;font-size:16px;line-height:1;transform-origin:50% 85%}
+.spark-icon{display:inline-block;width:18px;height:18px;line-height:1;transform-origin:50% 85%}
+.spark-active .spark-icon{fill:currentColor}
+.spark-rekindling .spark-icon{fill:none}
 .spark-pending{color:#8b929c}
 .spark-pending .spark-icon{filter:grayscale(1);opacity:.72}
 .spark-rekindling{color:#f58a5b}
