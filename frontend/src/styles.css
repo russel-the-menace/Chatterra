@@ -722,6 +722,13 @@ body.modal-open{overflow:hidden}
   display:flex;
   align-items:center;
 }
+.bubble.voice-bubble{
+  min-height:40.5px;
+  padding-top:8.65px;
+  padding-bottom:8.65px;
+  display:flex;
+  align-items:center;
+}
 .chat-date-divider{
   padding:3px 0 11px;
   color:#6b7280;
@@ -763,7 +770,9 @@ body.modal-open{overflow:hidden}
 .new-messages-button:focus-visible{outline:3px solid rgba(var(--accent-rgb),.24);outline-offset:2px}
 .new-messages-button span:first-child{font-size:18px;line-height:1}
 .voice-note{
-  min-height:42px;
+  width:100%;
+  min-height:22px;
+  height:22px;
   display:flex;
   align-items:center;
   gap:9px;
