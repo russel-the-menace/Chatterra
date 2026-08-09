@@ -376,14 +376,14 @@ body.modal-open{overflow:hidden}
 .spark-icon{display:inline-block;font-size:16px;line-height:1;transform-origin:50% 85%}
 .spark-pending{color:#8b929c}
 .spark-pending .spark-icon{filter:grayscale(1);opacity:.72}
-.spark-rekindling{color:#4c8fdc}
-.spark-rekindling .spark-icon{filter:hue-rotate(155deg) saturate(1.2);animation:spark-rekindle 1.4s ease-in-out infinite}
+.spark-rekindling{color:#f58a5b}
+.spark-rekindling .spark-icon{opacity:.72;animation:spark-rekindle 1.4s ease-in-out infinite}
 .spark-rekindling .spark-icon::after{
   content:'✦';
   position:absolute;
   top:-5px;
   left:10px;
-  color:#63a9ef;
+  color:#f7a472;
   font-size:8px;
 }
 @keyframes spark-rekindle{

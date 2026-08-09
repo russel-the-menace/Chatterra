@@ -3019,7 +3019,7 @@ export default function ChatScreen() {
                   <Ionicons
                     name={streak.status === 'rekindling' ? 'flame-outline' : 'flame'}
                     size={16}
-                    color={streak.status === 'pending' ? '#8B929C' : streak.status === 'rekindling' ? '#4C8FDC' : '#F05A28'}
+                    color={streak.status === 'pending' ? '#8B929C' : streak.status === 'rekindling' ? '#F58A5B' : '#F05A28'}
                   />
                   <Text style={[
                     styles.headerSparkDays,
@@ -3029,8 +3029,8 @@ export default function ChatScreen() {
                     {streak.status === 'active'
                       ? streak.days
                       : streak.status === 'pending'
-                        ? `${streak.daysLeft || 1} ${streak.daysLeft === 1 ? 'day' : 'days'} left`
-                        : `Rekindling ${streak.rekindleProgress || 1}/3`}
+                        ? `${streak.daysLeft || 1}d left`
+                        : `Rekindle ${streak.rekindleProgress || 1}/3`}
                   </Text>
                 </View>
               )}
@@ -3891,7 +3891,7 @@ const styles = StyleSheet.create({
     color: '#8B929C',
   },
   headerSparkRekindling: {
-    color: '#4C8FDC',
+    color: '#F58A5B',
   },
   headerStatus: {
     color: palette.textMuted,

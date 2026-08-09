@@ -26,12 +26,12 @@ function SparkBadge({ characterId }: { characterId: string }) {
   if (!streak || streak.status === 'locked' || streak.status === 'expired') return null
   const pending = streak.status === 'pending'
   const rekindling = streak.status === 'rekindling'
-  const color = pending ? '#8B929C' : rekindling ? '#4C8FDC' : '#F05A28'
+  const color = pending ? '#8B929C' : rekindling ? '#F58A5B' : '#F05A28'
   const text = streak.status === 'active'
     ? String(streak.days)
     : pending
-      ? `${streak.daysLeft || 1} ${streak.daysLeft === 1 ? 'day' : 'days'} left`
-      : `Rekindling ${streak.rekindleProgress || 1}/3`
+      ? `${streak.daysLeft || 1}d left`
+      : `Rekindle ${streak.rekindleProgress || 1}/3`
   return (
     <View
       style={styles.sparkBadge}
