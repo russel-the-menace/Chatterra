@@ -540,7 +540,7 @@ body.modal-open{overflow:hidden}
   cursor:pointer;
 }
 .conversation-menu-dots{display:flex;align-items:center;justify-content:center;gap:3px}
-.conversation-menu-dots i{width:5px;height:5px;display:block;border-radius:50%;background:currentColor}
+.conversation-menu-dots i{width:4.25px;height:4.25px;display:block;border-radius:50%;background:currentColor}
 .conversation-menu-button:hover,
 .conversation-menu-button[aria-expanded='true']{background:#eceff2}
 .conversation-menu-backdrop{
