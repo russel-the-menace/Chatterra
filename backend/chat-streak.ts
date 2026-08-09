@@ -14,6 +14,15 @@ export type ChatStreak = {
 
 const beijingDaySql = "((NOW() AT TIME ZONE 'Asia/Shanghai')::date)"
 
+export const streakDateKey = (value: unknown): string | undefined => {
+  if (!value) return undefined
+  if (value instanceof Date) return value.toISOString().slice(0, 10)
+  const text = String(value)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text.slice(0, 10))) return text.slice(0, 10)
+  const parsed = new Date(text)
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString().slice(0, 10)
+}
+
 const dateDifference = (from: string | undefined, to: string) => {
   if (!from) return undefined
   const fromMs = Date.parse(`${from}T00:00:00Z`)
@@ -35,9 +44,7 @@ export const chatStreakStatusFor = (row: {
 }
 
 const mapStreak = (row: any, today: string): ChatStreak => {
-  const lastQualifiedDay = row.last_qualified_day
-    ? String(row.last_qualified_day).slice(0, 10)
-    : undefined
+  const lastQualifiedDay = streakDateKey(row.last_qualified_day)
   const status = chatStreakStatusFor({ current_days: Number(row.current_days), last_qualified_day: lastQualifiedDay }, today)
   const rekindleExpiresAt = status === 'rekindling'
     ? `${today}T23:59:59+08:00`
@@ -112,7 +119,7 @@ export const recordChatStreakInteraction = async ({
       return mapStreak(created.rows[0], today)
     }
 
-    const lastDay = existing.last_qualified_day ? String(existing.last_qualified_day).slice(0, 10) : undefined
+    const lastDay = streakDateKey(existing.last_qualified_day)
     const difference = dateDifference(lastDay, today)
     const alreadyCounted = insertedDay.rowCount === 0
     if (alreadyCounted) return mapStreak(existing, today)
@@ -139,7 +146,7 @@ export const restoreChatStreak = async (userId: string, characterId: string): Pr
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))', [userId, characterId])
     const existing = await getStreakForUpdate(client, userId, characterId)
     if (!existing) return undefined
-    const lastDay = existing.last_qualified_day ? String(existing.last_qualified_day).slice(0, 10) : undefined
+    const lastDay = streakDateKey(existing.last_qualified_day)
     if (chatStreakStatusFor({ current_days: Number(existing.current_days), last_qualified_day: lastDay }, today) !== 'rekindling') {
       return undefined
     }

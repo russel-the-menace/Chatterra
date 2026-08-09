@@ -18,7 +18,7 @@ import {
   SyncSnapshot,
   ChatStreak
 } from './types'
-import { chatStreakStatusFor } from './chat-streak'
+import { chatStreakStatusFor, streakDateKey } from './chat-streak'
 
 const iso = (value: Date | string | null | undefined): string | undefined => {
   if (!value) return undefined
@@ -659,7 +659,7 @@ export const getSyncSnapshot = async (userId: string): Promise<SyncSnapshot> => 
     const beijingDayResult = await client.query("SELECT ((NOW() AT TIME ZONE 'Asia/Shanghai')::date)::text AS today")
     const beijingToday = String(beijingDayResult.rows[0].today)
     const streaks: ChatStreak[] = streakRows.rows.map(row => {
-      const lastDay = row.last_qualified_day ? String(row.last_qualified_day).slice(0, 10) : undefined
+      const lastDay = streakDateKey(row.last_qualified_day)
       const days = Number(row.current_days || 0)
       const status = chatStreakStatusFor({ current_days: days, last_qualified_day: lastDay }, beijingToday)
       return {
