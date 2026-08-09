@@ -86,6 +86,8 @@ export type ChatStreak = {
   status: ChatStreakStatus
   lastQualifiedDay?: string
   rekindleExpiresAt?: string
+  rekindleProgress?: number
+  daysLeft?: number
 }
 
 export interface Message {

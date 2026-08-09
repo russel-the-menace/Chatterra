@@ -79,7 +79,6 @@ type ChatContextValue = {
   pinnedCharacterOrder: string[]
   lastMessageAtByCharacter: Record<string, string>
   streaksByCharacter: Record<string, ChatStreak>
-  rekindleSpark: (characterId: string) => Promise<void>
   getDraft: (characterId: string) => string
   setDraft: (
     characterId: string,
@@ -1106,11 +1105,6 @@ export function ChatProvider({ children }: PropsWithChildren) {
     conversationCacheWriteRef.current.set(characterId, remove)
   }, [userId])
 
-  const rekindleSpark = useCallback(async (characterId: string) => {
-    const streak = await api.restoreChatStreak(characterId)
-    setStreaksByCharacter(current => ({ ...current, [characterId]: streak }))
-  }, [])
-
   const value = useMemo<ChatContextValue>(() => ({
     apiBaseUrl: API_BASE_URL,
     ready,
@@ -1130,7 +1124,6 @@ export function ChatProvider({ children }: PropsWithChildren) {
     pinnedCharacterOrder,
     lastMessageAtByCharacter,
     streaksByCharacter,
-    rekindleSpark,
     getDraft,
     setDraft,
     getQuoteDraft,
@@ -1174,7 +1167,6 @@ export function ChatProvider({ children }: PropsWithChildren) {
     pinnedCharacterOrder,
     lastMessageAtByCharacter,
     streaksByCharacter,
-    rekindleSpark,
     ready,
     refreshCharacters,
     saveCharacter,

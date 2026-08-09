@@ -26,15 +26,20 @@ function SparkBadge({ characterId }: { characterId: string }) {
   if (!streak || streak.status === 'locked' || streak.status === 'expired') return null
   const pending = streak.status === 'pending'
   const rekindling = streak.status === 'rekindling'
-  const color = pending ? '#8B929C' : '#F05A28'
+  const color = pending ? '#8B929C' : rekindling ? '#4C8FDC' : '#F05A28'
+  const text = streak.status === 'active'
+    ? String(streak.days)
+    : pending
+      ? `${streak.daysLeft || 1} ${streak.daysLeft === 1 ? 'day' : 'days'} left`
+      : `Rekindling ${streak.rekindleProgress || 1}/3`
   return (
     <View
       style={styles.sparkBadge}
-      accessibilityLabel={`${streak.days}-day spark${rekindling ? ', ready to rekindle' : ''}`}
+      accessibilityLabel={text}
     >
       <Ionicons name={rekindling ? 'flame-outline' : 'flame'} size={16} color={color} />
       {rekindling && <Ionicons name="sparkles" size={8} color="#F6A23C" style={styles.sparklesIcon} />}
-      <Text style={[styles.sparkDays, { color }]}>{streak.days}</Text>
+      <Text style={[styles.sparkDays, { color }]} numberOfLines={1}>{text}</Text>
     </View>
   )
 }
@@ -460,14 +465,15 @@ const styles = StyleSheet.create({
   },
   sparkBadge: {
     position: 'relative',
-    minWidth: 34,
+    maxWidth: 130,
     height: 20,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 2,
   },
   sparkDays: {
-    fontSize: 13,
+    flexShrink: 1,
+    fontSize: 12,
     lineHeight: 17,
     fontWeight: '700',
     fontVariant: ['tabular-nums'],

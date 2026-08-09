@@ -1114,23 +1114,12 @@ export default function ChatScreen() {
     setConversationListViewState,
     clearConversationCache,
     streaksByCharacter,
-    rekindleSpark,
   } = useChat()
   const character = useMemo(
     () => characters.find(item => item.id === characterId),
     [characterId, characters]
   )
   const streak = characterId ? streaksByCharacter[characterId] : undefined
-  const [rekindlingSpark, setRekindlingSpark] = useState(false)
-  const handleRekindleSpark = async () => {
-    if (!characterId || rekindlingSpark || streak?.status !== 'rekindling') return
-    try {
-      setRekindlingSpark(true)
-      await rekindleSpark(characterId)
-    } finally {
-      setRekindlingSpark(false)
-    }
-  }
   const draft = characterId ? getDraft(characterId) : ''
   const quotedMessage = characterId ? getQuoteDraft(characterId) : null
   const initialCacheRef = useRef(characterId ? getConversationCache(characterId) : undefined)
@@ -3030,10 +3019,18 @@ export default function ChatScreen() {
                   <Ionicons
                     name={streak.status === 'rekindling' ? 'flame-outline' : 'flame'}
                     size={16}
-                    color={streak.status === 'pending' ? '#8B929C' : '#F05A28'}
+                    color={streak.status === 'pending' ? '#8B929C' : streak.status === 'rekindling' ? '#4C8FDC' : '#F05A28'}
                   />
-                  <Text style={[styles.headerSparkDays, streak.status === 'pending' && styles.headerSparkPending]}>
-                    {streak.days}
+                  <Text style={[
+                    styles.headerSparkDays,
+                    streak.status === 'pending' && styles.headerSparkPending,
+                    streak.status === 'rekindling' && styles.headerSparkRekindling,
+                  ]} numberOfLines={1}>
+                    {streak.status === 'active'
+                      ? streak.days
+                      : streak.status === 'pending'
+                        ? `${streak.daysLeft || 1} ${streak.daysLeft === 1 ? 'day' : 'days'} left`
+                        : `Rekindling ${streak.rekindleProgress || 1}/3`}
                   </Text>
                 </View>
               )}
@@ -3043,15 +3040,6 @@ export default function ChatScreen() {
             </Text>
           </View>
         </Pressable>
-        {streak?.status === 'rekindling' && (
-          <Pressable
-            onPress={() => void handleRekindleSpark()}
-            disabled={rekindlingSpark}
-            style={({ pressed }) => [styles.rekindleButton, (pressed || rekindlingSpark) && styles.rekindleButtonPressed]}
-          >
-            <Text style={styles.rekindleButtonText}>{rekindlingSpark ? '...' : 'Rekindle'}</Text>
-          </Pressable>
-        )}
         <Pressable onPress={showConversationActions} hitSlop={10} style={styles.headerIcon} accessibilityLabel="Conversation options">
           <Ionicons name="ellipsis-horizontal" size={23} color={palette.text} />
         </Pressable>
@@ -3886,11 +3874,13 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   headerSpark: {
+    maxWidth: 134,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 2,
   },
   headerSparkDays: {
+    flexShrink: 1,
     color: '#F05A28',
     fontSize: 13,
     lineHeight: 17,
@@ -3900,23 +3890,8 @@ const styles = StyleSheet.create({
   headerSparkPending: {
     color: '#8B929C',
   },
-  rekindleButton: {
-    minHeight: 30,
-    paddingHorizontal: 9,
-    borderWidth: 1,
-    borderColor: '#F0A176',
-    borderRadius: 7,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FFF7F2',
-  },
-  rekindleButtonPressed: {
-    opacity: 0.58,
-  },
-  rekindleButtonText: {
-    color: '#B9471F',
-    fontSize: 12,
-    fontWeight: '700',
+  headerSparkRekindling: {
+    color: '#4C8FDC',
   },
   headerStatus: {
     color: palette.textMuted,

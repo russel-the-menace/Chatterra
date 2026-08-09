@@ -102,6 +102,8 @@ export type ChatStreak = {
   status: 'locked' | 'active' | 'pending' | 'rekindling' | 'expired'
   lastQualifiedDay?: string
   rekindleExpiresAt?: string
+  rekindleProgress?: number
+  daysLeft?: number
 }
 
 export type ServerMessage = {

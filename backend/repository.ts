@@ -651,7 +651,7 @@ export const getSyncSnapshot = async (userId: string): Promise<SyncSnapshot> => 
     })
 
     const streakRows = await client.query(
-      `SELECT character_id, current_days, longest_days, last_qualified_day
+      `SELECT character_id, current_days, longest_days, last_qualified_day, rekindle_progress
        FROM character_streaks
        WHERE user_id = $1`,
       [userId]
@@ -661,14 +661,32 @@ export const getSyncSnapshot = async (userId: string): Promise<SyncSnapshot> => 
     const streaks: ChatStreak[] = streakRows.rows.map(row => {
       const lastDay = streakDateKey(row.last_qualified_day)
       const days = Number(row.current_days || 0)
-      const status = chatStreakStatusFor({ current_days: days, last_qualified_day: lastDay }, beijingToday)
+      const rekindleProgress = Number(row.rekindle_progress || 0)
+      const status = chatStreakStatusFor({
+        current_days: days,
+        last_qualified_day: lastDay,
+        rekindle_progress: rekindleProgress,
+      }, beijingToday)
+      const difference = lastDay
+        ? Math.round((Date.parse(`${beijingToday}T00:00:00Z`) - Date.parse(`${lastDay}T00:00:00Z`)) / 86_400_000)
+        : undefined
+      const daysLeft = (status === 'pending' || status === 'rekindling') && difference !== undefined
+        ? Math.max(1, 4 - difference)
+        : undefined
+      const expiryDay = lastDay
+        ? new Date(Date.parse(`${lastDay}T00:00:00Z`) + 3 * 86_400_000).toISOString().slice(0, 10)
+        : undefined
       return {
         characterId: String(row.character_id),
         days,
         longestDays: Number(row.longest_days || 0),
         status,
         lastQualifiedDay: lastDay,
-        rekindleExpiresAt: status === 'rekindling' ? `${beijingToday}T23:59:59+08:00` : undefined,
+        rekindleExpiresAt: (status === 'pending' || status === 'rekindling') && expiryDay
+          ? `${expiryDay}T23:59:59+08:00`
+          : undefined,
+        rekindleProgress: status === 'rekindling' ? rekindleProgress : undefined,
+        daysLeft,
       }
     })
 
