@@ -1,7 +1,5 @@
 # Chatterra
 
-## Try the web app
-
 The public web client is available at
 [russel-the-menace.github.io/Chatterra](https://russel-the-menace.github.io/Chatterra/).
 
@@ -10,6 +8,8 @@ The public web client is available at
 
 It is a shared little demo with a few friendly limits so everyone gets a turn. Have a
 play, and leave anything private at home.
+
+## Why Chatterra
 
 > **I wanted to practice languages without feeling like I had opened a homework app.**
 > So I made a chat app. Then I kept adding people. This is how it got out of hand.

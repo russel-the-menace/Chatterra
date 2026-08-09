@@ -16,6 +16,7 @@ import {
   SyncSnapshot,
   VoiceTranscriptMetadata,
 } from './types'
+import { clearStoredAuthSession } from './storage'
 
 const normalizeBaseUrl = (value: string) => value.trim().replace(/\/+$/, '')
 
@@ -86,9 +87,20 @@ export type LoginSession = {
 }
 
 let accessToken: string | undefined
+let unauthorizedHandler: (() => void) | undefined
 
 export const setApiAccessToken = (nextAccessToken?: string) => {
   accessToken = nextAccessToken?.trim() || undefined
+}
+
+export const setApiUnauthorizedHandler = (handler?: () => void) => {
+  unauthorizedHandler = handler
+}
+
+const handleUnauthorized = async () => {
+  setApiAccessToken()
+  await clearStoredAuthSession().catch(() => undefined)
+  unauthorizedHandler?.()
 }
 
 const clientRequestId = () => (
@@ -122,6 +134,7 @@ const request = async <T>(path: string, init?: RequestInit, timeoutMs = 20_000):
         },
         signal: controller.signal,
       })
+      if (response.status === 401) await handleUnauthorized()
       let payload: unknown
       try {
         payload = await response.json()
@@ -177,6 +190,7 @@ const uploadVoiceFile = async <T>(input: {
       ...input.headers,
     },
   })
+  if (response.status === 401) await handleUnauthorized()
   const payload = JSON.parse(response.body || '{}') as Record<string, unknown>
   if (response.status < 200 || response.status >= 300) {
     throw new ApiError(

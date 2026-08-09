@@ -102,11 +102,18 @@ export const clearStoredSession = () => {
   localStorage.removeItem(SESSION_STORAGE_KEY)
 }
 
-export const apiFetch = (url: string, init?: RequestInit) => {
+export const apiFetch = async (url: string, init?: RequestInit) => {
   const session = getStoredSession()
   const headers = new Headers(init?.headers)
   if (session?.accessToken) headers.set('Authorization', `Bearer ${session.accessToken}`)
-  return fetch(url, { ...init, headers })
+  const response = await fetch(url, { ...init, headers })
+  if (response.status === 401) {
+    clearStoredSession()
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('chatterra-auth-expired'))
+    }
+  }
+  return response
 }
 
 export const login = async (username: string, password: string): Promise<WebLoginSession> => {

@@ -13,7 +13,7 @@ import {
   useState,
 } from 'react'
 
-import { API_BASE_URL, api, setApiAccessToken } from './api'
+import { API_BASE_URL, api, setApiAccessToken, setApiUnauthorizedHandler } from './api'
 import {
   clearStoredAuthSession,
   getStoredAuthSession,
@@ -260,6 +260,19 @@ export function ChatProvider({ children }: PropsWithChildren) {
     setPinnedCharacterOrder([])
     setLastMessageAtByCharacter({})
   }, [])
+
+  useEffect(() => {
+    setApiUnauthorizedHandler(() => {
+      sessionRef.current = null
+      resetWorkspaceState()
+      setUserId(null)
+      setUsername(undefined)
+      setUserName(undefined)
+      setUserAvatar(undefined)
+      setConnectionError('Your session has expired. Please sign in again.')
+    })
+    return () => setApiUnauthorizedHandler(undefined)
+  }, [resetWorkspaceState])
 
   const persistSessionProfile = useCallback(async (profile: {
     displayName?: string
