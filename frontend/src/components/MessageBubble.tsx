@@ -77,7 +77,6 @@ export default function MessageBubble({
   const isSingleLineMessage = !msg.loading
     && !readyVoice
     && !/[\r\n]/.test(msg.text)
-    && msg.text.length <= 42
   const duration = Math.max(1, Math.round(msg.voice?.durationSeconds || 1))
   const isUserVoice = msg.voice?.provider === 'user-recording'
   const characterAvatar = isImageAvatar(character.avatar)
