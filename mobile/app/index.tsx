@@ -37,7 +37,8 @@ function SparkBadge({ characterId }: { characterId: string }) {
       style={styles.sparkBadge}
       accessibilityLabel={text}
     >
-      <Ionicons name={rekindling ? 'flame-outline' : 'flame'} size={16} color={color} />
+      {rekindling && <View pointerEvents="none" style={styles.sparkRekindlingBackground} />}
+      <Ionicons name={rekindling ? 'flame-outline' : 'flame'} size={16} color={color} style={rekindling && styles.sparkRekindlingFlame} />
       {rekindling && <Ionicons name="sparkles" size={8} color="#F6A23C" style={styles.sparklesIcon} />}
       <Text style={[styles.sparkDays, { color }]} numberOfLines={1}>{text}</Text>
     </View>
@@ -470,6 +471,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 2,
+  },
+  sparkRekindlingBackground: {
+    position: 'absolute',
+    left: 7,
+    right: 0,
+    top: 3,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#EEF0F3',
+  },
+  sparkRekindlingFlame: {
+    marginLeft: -8,
+    zIndex: 2,
   },
   sparkDays: {
     flexShrink: 1,

@@ -3016,6 +3016,7 @@ export default function ChatScreen() {
               <Text style={styles.headerName} numberOfLines={1}>{character.name}</Text>
               {streak && streak.status !== 'locked' && streak.status !== 'expired' && (
                 <View style={styles.headerSpark}>
+                  {streak.status === 'rekindling' && <View pointerEvents="none" style={styles.headerSparkRekindlingBackground} />}
                   <Ionicons
                     name={streak.status === 'rekindling' ? 'flame-outline' : 'flame'}
                     size={16}
@@ -3874,6 +3875,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   headerSpark: {
+    position: 'relative',
     maxWidth: 134,
     flexDirection: 'row',
     alignItems: 'center',
@@ -3892,6 +3894,15 @@ const styles = StyleSheet.create({
   },
   headerSparkRekindling: {
     color: '#F58A5B',
+  },
+  headerSparkRekindlingBackground: {
+    position: 'absolute',
+    left: 7,
+    right: 0,
+    top: 2,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#EEF0F3',
   },
   headerStatus: {
     color: palette.textMuted,
