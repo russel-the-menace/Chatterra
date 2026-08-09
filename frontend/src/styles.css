@@ -1218,6 +1218,44 @@ body.modal-open{overflow:hidden}
 .hold-to-talk:hover:not(:disabled){background:#f3f7f4;border-color:rgba(var(--accent-rgb),0.4)}
 .hold-to-talk.recording{background:#f2fbf4;border-color:var(--accent);color:var(--accent-pressed)}
 .hold-to-talk:disabled{cursor:wait;opacity:.65}
+.voice-recording-overlay{
+  position:fixed;
+  inset:0;
+  z-index:120;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:flex-end;
+  padding:0 42px 46px;
+  background:rgba(16,24,40,.66);
+  color:#fff;
+  pointer-events:none;
+}
+.voice-recording-preview{
+  width:230px;
+  height:124px;
+  max-width:calc(100vw - 48px);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  margin-bottom:46px;
+  border-radius:8px;
+  background:var(--accent);
+}
+.voice-recording-preview .recording-waveform{max-width:190px}
+.voice-recording-preview .recording-waveform i{background:#147a32}
+.voice-recording-actions{
+  width:min(100%,720px);
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:28px;
+  font-size:16px;
+  font-weight:600;
+}
+.voice-recording-actions span{opacity:.72}
+.voice-recording-actions span.active{opacity:1;color:#75e190}
+.voice-recording-instruction{margin-top:26px;font-size:18px;font-weight:700;text-align:center}
 .dictation-compose-row{align-items:center}
 .cloud-dictation-bar{
   height:48px;
@@ -1795,6 +1833,7 @@ body.modal-open{overflow:hidden}
   .voice-button{width:44px;height:44px;border-radius:13px}
   .composer-mode-button,.dictation-command{width:44px;height:44px;border-radius:13px}
   .hold-to-talk,.cloud-dictation-bar{height:44px;border-radius:13px}
+  .voice-recording-overlay{padding-right:24px;padding-left:24px}
   .input-box .send{height:44px;min-width:68px;padding:0 11px;border-radius:13px}
   .profile-modal-backdrop{align-items:flex-end;padding:0}
   .profile-modal{width:100%;max-height:94vh;border-radius:8px 8px 0 0}

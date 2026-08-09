@@ -17,6 +17,9 @@ type InputBoxProps = {
 }
 
 type RecorderState = 'idle' | 'starting' | 'message-recording' | 'dictation-recording' | 'processing' | 'sending'
+type VoiceMessageAction = 'cancel' | 'convert' | 'send'
+
+const VOICE_MESSAGE_ACTION_DRAG_DISTANCE = 72
 
 const KeyboardIcon = () => (
   <svg viewBox="0 0 24 24" aria-hidden="true" className="composer-icon">
@@ -62,11 +65,14 @@ export default function InputBox({
   const [recorderState, setRecorderState] = useState<RecorderState>('idle')
   const [level, setLevel] = useState(0)
   const [error, setError] = useState('')
+  const [voiceMessageAction, setVoiceMessageAction] = useState<VoiceMessageAction>('send')
   const [voiceMetadata, setVoiceMetadata] = useState<VoiceTranscriptMetadata | undefined>()
   const captureRef = useRef<AudioCapture | null>(null)
   const startedAtRef = useRef(0)
   const currentModeRef = useRef<'message' | 'dictation' | null>(null)
   const cancelledBeforeReadyRef = useRef(false)
+  const voiceMessageActionRef = useRef<VoiceMessageAction>('send')
+  const voiceMessagePressOriginXRef = useRef<number | null>(null)
   const isComposing = useRef(false)
 
   const resetRecorder = () => {
@@ -76,6 +82,9 @@ export default function InputBox({
     cancelledBeforeReadyRef.current = false
     setRecorderState('idle')
     setLevel(0)
+    setVoiceMessageAction('send')
+    voiceMessageActionRef.current = 'send'
+    voiceMessagePressOriginXRef.current = null
   }
 
   useEffect(() => () => captureRef.current?.abort(), [])
@@ -132,16 +141,30 @@ export default function InputBox({
     resetRecorder()
   }
 
-  const finishVoiceMessage = async () => {
+  const finishVoiceMessage = async (action = voiceMessageActionRef.current) => {
     if (recorderState === 'starting') {
-      cancelledBeforeReadyRef.current = true
+      if (action === 'cancel') cancelRecording()
+      else cancelledBeforeReadyRef.current = true
       return
     }
     if (recorderState !== 'message-recording') return
-    setRecorderState('sending')
+    if (action === 'cancel') {
+      cancelRecording()
+      return
+    }
+    setRecorderState(action === 'convert' ? 'processing' : 'sending')
     try {
       const recording = await recordingResult()
-      if (recording) await onSendVoice(recording)
+      if (!recording) return
+      if (action === 'convert') {
+        const text = await onTranscribeVoice(recording)
+        const nextDraft = [draft.trim(), text].filter(Boolean).join(draft.trim() ? ' ' : '')
+        onDraftChange(nextDraft)
+        setVoiceMetadata({ originalText: text, detectedLanguage: 'Unknown', audioAvailable: false })
+        setVoiceMessageMode(false)
+      } else {
+        await onSendVoice(recording)
+      }
     } catch (sendError) {
       setError(sendError instanceof Error ? sendError.message : 'Could not send this voice message.')
     } finally {
@@ -196,14 +219,32 @@ export default function InputBox({
 
   const beginVoiceMessage = (event: PointerEvent<HTMLButtonElement>) => {
     event.currentTarget.setPointerCapture(event.pointerId)
+    voiceMessagePressOriginXRef.current = event.clientX
+    voiceMessageActionRef.current = 'send'
+    setVoiceMessageAction('send')
     void startRecording('message')
   }
 
+  const moveVoiceMessage = (event: PointerEvent<HTMLButtonElement>) => {
+    const originX = voiceMessagePressOriginXRef.current
+    if (originX === null) return
+    const delta = event.clientX - originX
+    const nextAction: VoiceMessageAction = delta <= -VOICE_MESSAGE_ACTION_DRAG_DISTANCE
+      ? 'cancel'
+      : delta >= VOICE_MESSAGE_ACTION_DRAG_DISTANCE
+        ? 'convert'
+        : 'send'
+    if (voiceMessageActionRef.current === nextAction) return
+    voiceMessageActionRef.current = nextAction
+    setVoiceMessageAction(nextAction)
+  }
+
   const releaseVoiceMessage = (event: PointerEvent<HTMLButtonElement>) => {
+    moveVoiceMessage(event)
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)
     }
-    void finishVoiceMessage()
+    void finishVoiceMessage(voiceMessageActionRef.current)
   }
 
   const dictating = recorderState === 'starting' && currentModeRef.current === 'dictation'
@@ -232,15 +273,40 @@ export default function InputBox({
             type="button"
             className={`hold-to-talk${holding ? ' recording' : ''}`}
             onPointerDown={beginVoiceMessage}
+            onPointerMove={moveVoiceMessage}
             onPointerUp={releaseVoiceMessage}
             onPointerCancel={cancelRecording}
             onContextMenu={event => event.preventDefault()}
             disabled={recorderState === 'sending' || recorderState === 'processing'}
-            aria-label={holding ? 'Release to send voice message' : 'Hold to talk'}
+            aria-label={holding
+              ? voiceMessageAction === 'cancel'
+                ? 'Release to cancel voice message'
+                : voiceMessageAction === 'convert'
+                  ? 'Release to convert voice message to text'
+                  : 'Release to send voice message'
+              : 'Hold to talk'}
           >
             {holding ? <RecordingWaveform level={level} active /> : 'Hold to Talk'}
           </button>
         </div>
+        {holding && (
+          <div className="voice-recording-overlay" aria-hidden="true">
+            <div className="voice-recording-preview">
+              <RecordingWaveform level={level} active />
+            </div>
+            <div className="voice-recording-actions">
+              <span className={voiceMessageAction === 'cancel' ? 'active' : ''}>Cancel</span>
+              <span className={voiceMessageAction === 'convert' ? 'active' : ''}>Convert to Text</span>
+            </div>
+            <div className="voice-recording-instruction">
+              {voiceMessageAction === 'cancel'
+                ? 'Release to cancel'
+                : voiceMessageAction === 'convert'
+                  ? 'Release to convert to text'
+                  : 'Release to send'}
+            </div>
+          </div>
+        )}
         {error && <div className="voice-status voice-status-error" role="alert">{error}</div>}
       </div>
     )
