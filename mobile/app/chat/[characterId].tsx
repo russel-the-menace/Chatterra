@@ -1989,10 +1989,9 @@ export default function ChatScreen() {
 
   useEffect(() => {
     if (!conversationId) return
-    const hasPendingVoice = messages.some(message => message.voice?.status === 'pending')
-    const interval = setInterval(() => void syncMessages(), hasPendingVoice ? 3_000 : 15_000)
+    const interval = setInterval(() => void syncMessages(), 3_000)
     return () => clearInterval(interval)
-  }, [conversationId, messages, syncMessages])
+  }, [conversationId, syncMessages])
 
   const loadOlderHistory = useCallback(async () => {
     if (!conversationId
