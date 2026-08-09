@@ -335,7 +335,7 @@ body.modal-open{overflow:hidden}
 }
 .contact-item.pinned:hover{background:#eef0f2}
 .contact-item.pinned.active{
-  background:#ebeef0;
+  background:#d6d9dd;
   color:#111827;
 }
 .contact-item.active::after{
@@ -373,7 +373,7 @@ body.modal-open{overflow:hidden}
   display:block;
 }
 .contact-item.active .contact-avatar{background:#d2d7de;color:#0f172a}
-.contact-item.pinned.active .contact-avatar{background:#e2e8ef;color:#0f172a}
+.contact-item.pinned.active .contact-avatar{background:#cbd1d8;color:#0f172a}
 .contact-meta{min-width:0;flex:1}
 .contact-name-row{display:flex;align-items:center;gap:8px;min-width:0}
 .spark-badge{

@@ -20,6 +20,22 @@ import { starterMessageForCharacter } from '@/src/starter-message'
 import { layout, palette } from '@/src/theme'
 import { Character } from '@/src/types'
 
+const formatContactTime = (timestamp?: string) => {
+  if (!timestamp) return ''
+  const date = new Date(timestamp)
+  if (!Number.isFinite(date.getTime())) return ''
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const messageDay = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+  const dayDifference = Math.round((today.getTime() - messageDay.getTime()) / 86_400_000)
+  if (dayDifference === 0) {
+    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+  }
+  if (dayDifference === 1) return 'Yesterday'
+  if (date.getFullYear() === now.getFullYear()) return `${date.getMonth() + 1}/${date.getDate()}`
+  return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`
+}
+
 function SparkBadge({ characterId }: { characterId: string }) {
   const { streaksByCharacter } = useChat()
   const streak = streaksByCharacter[characterId]
@@ -49,8 +65,10 @@ function ContactRow({ character, pinned }: { character: Character; pinned: boole
   const {
     proactivePreviews,
     unreadCountsByCharacter,
+    lastMessageAtByCharacter,
     markCharacterRead,
   } = useChat()
+  const contactTime = formatContactTime(lastMessageAtByCharacter[character.id])
 
   const openConversation = () => {
     markCharacterRead(character.id)
@@ -90,7 +108,7 @@ function ContactRow({ character, pinned }: { character: Character; pinned: boole
           {proactivePreviews[character.id] || starterMessageForCharacter(character)}
         </Text>
       </View>
-      <Ionicons name="chevron-forward" size={18} color="#98A2B3" />
+      {!!contactTime && <Text style={styles.contactTime}>{contactTime}</Text>}
       {pinned && <View pointerEvents="none" style={styles.contactPinnedSeparator} />}
     </Pressable>
   )
@@ -506,6 +524,15 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     marginTop: 3,
+  },
+  contactTime: {
+    flexShrink: 0,
+    alignSelf: 'flex-start',
+    marginTop: 3,
+    color: '#98A2B3',
+    fontSize: 11,
+    lineHeight: 15,
+    fontVariant: ['tabular-nums'],
   },
   unreadBadge: {
     position: 'absolute',
