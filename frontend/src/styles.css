@@ -393,7 +393,7 @@ body.modal-open{overflow:hidden}
   font-weight:550;
   font-variant-numeric:tabular-nums;
 }
-.spark-text{display:block;height:20px;line-height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.spark-text{display:block;line-height:20px;white-space:nowrap;overflow:visible}
 .spark-icon{display:block;width:20px;height:20px;flex:0 0 20px;transform-origin:50% 85%}
 .spark-active .spark-icon{fill:currentColor}
 .spark-rekindling .spark-icon{fill:none}
