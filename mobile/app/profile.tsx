@@ -20,9 +20,10 @@ import { useChat } from '@/src/chat-context'
 import { layout, palette } from '@/src/theme'
 
 export default function ProfileEditorScreen() {
-  const { ready, userAvatar, userName, saveUserProfile, logout } = useChat()
+  const { ready, userAvatar, userName, userTranslationTargetLanguage, saveUserProfile, logout } = useChat()
   const [displayName, setDisplayName] = useState(userName || '')
   const [avatar, setAvatar] = useState(userAvatar || '')
+  const [translationTargetLanguage, setTranslationTargetLanguage] = useState(userTranslationTargetLanguage || 'English')
   const [nameEdited, setNameEdited] = useState(false)
   const [avatarEdited, setAvatarEdited] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -63,7 +64,7 @@ export default function ProfileEditorScreen() {
     try {
       setSaving(true)
       setError(null)
-      await saveUserProfile({ displayName: trimmedName, avatar: avatar || undefined })
+      await saveUserProfile({ displayName: trimmedName, avatar: avatar || undefined, translationTargetLanguage })
       router.back()
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Could not save your profile.')
@@ -154,6 +155,21 @@ export default function ProfileEditorScreen() {
               onSubmitEditing={() => void submit()}
               style={styles.input}
             />
+          </View>
+
+          <View style={styles.field}>
+            <Text style={styles.label}>Destination translation language</Text>
+            <View style={styles.selectBox}>
+              <TextInput
+                value={translationTargetLanguage}
+                onChangeText={setTranslationTargetLanguage}
+                style={styles.input}
+                placeholder="English"
+                placeholderTextColor="#98A2B3"
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
           </View>
 
           <Pressable
@@ -264,6 +280,12 @@ const styles = StyleSheet.create({
     color: palette.text,
     fontSize: 15,
     lineHeight: 21,
+  },
+  selectBox: {
+    borderWidth: 1,
+    borderColor: '#C9D1DC',
+    borderRadius: 8,
+    backgroundColor: palette.surface,
   },
   errorBanner: {
     minHeight: 42,

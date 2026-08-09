@@ -70,6 +70,7 @@ export interface SyncSnapshot {
   serverTime: string
   userName?: string
   userAvatar?: string
+  userTranslationTargetLanguage?: string
   characters: Character[]
   conversations: ConversationSyncRecord[]
   pinnedCharacterIds: UUID[]

@@ -88,6 +88,7 @@ export type SyncSnapshot = {
   serverTime: string
   userName?: string
   userAvatar?: string
+  userTranslationTargetLanguage?: string
   characters: Character[]
   conversations: SyncConversation[]
   pinnedCharacterIds: string[]
@@ -196,7 +197,7 @@ export type ChatResponse = {
 export type MessageTranslationResponse = {
   messageId?: string
   segmentIndex?: number
-  targetLanguage: 'en'
+  targetLanguage: string
   text: string
   cached: boolean
 }

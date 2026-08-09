@@ -28,7 +28,7 @@ import { createInferenceTrace } from './inference-logger'
 import { compactConversationIfNeeded } from './conversation-compaction'
 import { processDueProactiveActions } from './proactive-service'
 import { isExpoPushToken } from './push-notifications'
-import { translateToEnglish, TranslationServiceError } from './translation-service'
+import { translateText, TranslationServiceError } from './translation-service'
 import {
   GroqTranscriptionError,
   isSupportedTranscriptionAudioType,
@@ -655,8 +655,11 @@ app.put('/api/users/:id/profile', asyncRoute(async (req, res) => {
   const avatar = typeof req.body?.avatar === 'string'
     ? req.body.avatar.trim().slice(0, 1_500_000)
     : undefined
+  const translationTargetLanguage = typeof req.body?.translationTargetLanguage === 'string'
+    ? req.body.translationTargetLanguage.trim().slice(0, 120)
+    : undefined
   if (!displayName) return res.status(400).json({ error: 'displayName is required' })
-  const profile = await updateUserProfile(req.params.id, { displayName, avatar })
+  const profile = await updateUserProfile(req.params.id, { displayName, avatar, translationTargetLanguage })
   return res.json(profile)
 }))
 
@@ -816,15 +819,20 @@ app.get('/api/messages/:id/delivery-status', asyncRoute(async (req, res) => {
 
 app.post('/api/translations', asyncRoute(async (req, res) => {
   const text = typeof req.body?.text === 'string' ? req.body.text.trim() : ''
-  const targetLanguage = typeof req.body?.targetLanguage === 'string'
-    ? req.body.targetLanguage.trim().toLowerCase()
+  const requestedTargetLanguage = typeof req.body?.targetLanguage === 'string'
+    ? req.body.targetLanguage.trim()
     : ''
   if (!text) return res.status(400).json({ error: 'text is required' })
-  if (targetLanguage !== 'en') {
-    return res.status(400).json({ error: 'only English translation is currently supported' })
-  }
 
-  const generated = await translateToEnglish(text)
+  const targetLanguage = requestedTargetLanguage
+    ? requestedTargetLanguage.toLowerCase() === 'en' || requestedTargetLanguage.toLowerCase() === 'english'
+      ? 'English'
+      : requestedTargetLanguage.toLowerCase() === 'zh' || requestedTargetLanguage.toLowerCase() === 'cn' || requestedTargetLanguage.toLowerCase() === 'chinese'
+        ? 'Chinese'
+        : requestedTargetLanguage
+    : 'English'
+
+  const generated = await translateText(text, targetLanguage)
   return res.status(201).json({
     translation: {
       targetLanguage,
@@ -1174,13 +1182,17 @@ app.post(
 
 app.post('/api/messages/:id/translations', asyncRoute(async (req, res) => {
   const userId = authenticatedUserId(req)
-  const targetLanguage = typeof req.body?.targetLanguage === 'string'
-    ? req.body.targetLanguage.trim().toLowerCase()
+  const requestedTargetLanguage = typeof req.body?.targetLanguage === 'string'
+    ? req.body.targetLanguage.trim()
     : ''
   const segmentIndex = Number(req.body?.segmentIndex ?? 0)
-  if (targetLanguage !== 'en') {
-    return res.status(400).json({ error: 'only English translation is currently supported' })
-  }
+  const targetLanguage = requestedTargetLanguage
+    ? requestedTargetLanguage.toLowerCase() === 'en' || requestedTargetLanguage.toLowerCase() === 'english'
+      ? 'English'
+      : requestedTargetLanguage.toLowerCase() === 'zh' || requestedTargetLanguage.toLowerCase() === 'cn' || requestedTargetLanguage.toLowerCase() === 'chinese'
+        ? 'Chinese'
+        : requestedTargetLanguage
+    : 'English'
   if (!Number.isInteger(segmentIndex) || segmentIndex < 0) {
     return res.status(400).json({ error: 'segmentIndex must be a non-negative integer' })
   }
@@ -1208,7 +1220,7 @@ app.post('/api/messages/:id/translations', asyncRoute(async (req, res) => {
     })
   }
 
-  const generated = await translateToEnglish(sourceText)
+  const generated = await translateText(sourceText, targetLanguage)
   const now = new Date().toISOString()
   const translation = await upsertMessageTranslation({
     id: newId(),

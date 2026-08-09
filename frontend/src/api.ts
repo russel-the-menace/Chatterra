@@ -8,6 +8,7 @@ export type WebLoginSession = {
     username: string
     displayName: string
     avatar?: string
+    translationTargetLanguage?: string
   }
 }
 
@@ -32,6 +33,7 @@ export type SyncSnapshot = {
   serverTime: string
   userName?: string
   userAvatar?: string
+  userTranslationTargetLanguage?: string
   characters: Character[]
   conversations: SyncConversation[]
   pinnedCharacterIds: string[]
@@ -130,8 +132,8 @@ export const logout = async () => {
 
 export const updateUserProfile = async (
   userId: string,
-  input: { displayName: string; avatar?: string }
-): Promise<{ userName?: string; userAvatar?: string }> => {
+  input: { displayName: string; avatar?: string; translationTargetLanguage?: string }
+): Promise<{ userName?: string; userAvatar?: string; userTranslationTargetLanguage?: string }> => {
   const response = await apiFetch(apiUrl(`/api/users/${encodeURIComponent(userId)}/profile`), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },

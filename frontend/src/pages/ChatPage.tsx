@@ -350,6 +350,7 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
   const [userId, setUserIdentifier] = useState<string | null>(null)
   const [userName, setUserName] = useState<string | undefined>(() => getStoredSession()?.user.displayName)
   const [userAvatar, setUserAvatar] = useState<string | undefined>()
+  const [userTranslationTargetLanguage, setUserTranslationTargetLanguage] = useState<string | undefined>(() => getStoredSession()?.user.translationTargetLanguage)
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [characters, setCharacters] = useState<Character[]>(seedCharacters)
   const [selectedCharacter, setSelectedCharacter] = useState<Character>(seedCharacter)
@@ -379,6 +380,7 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
   const [characterEditorError, setCharacterEditorError] = useState('')
   const [profileName, setProfileName] = useState('')
   const [profileAvatar, setProfileAvatar] = useState('')
+  const [profileTranslationTargetLanguage, setProfileTranslationTargetLanguage] = useState('English')
   const [profileEditorError, setProfileEditorError] = useState('')
   const [isSavingProfile, setIsSavingProfile] = useState(false)
   const [isSigningOut, setIsSigningOut] = useState(false)
@@ -736,6 +738,7 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
   const openProfileEditor = () => {
     setProfileName(userName || getStoredSession()?.user.displayName || '')
     setProfileAvatar(userAvatar || getStoredSession()?.user.avatar || '')
+    setProfileTranslationTargetLanguage(userTranslationTargetLanguage || 'English')
     setProfileEditorError('')
     setShowProfileEditor(true)
   }
@@ -763,16 +766,24 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
       const savedProfile = await updateUserProfile(userId, {
         displayName,
         avatar: profileAvatar || undefined,
+        translationTargetLanguage: profileTranslationTargetLanguage || undefined,
       })
       const nextName = savedProfile.userName || displayName
       const nextAvatar = savedProfile.userAvatar || profileAvatar || undefined
+      const nextTranslationTargetLanguage = savedProfile.userTranslationTargetLanguage || profileTranslationTargetLanguage || undefined
       setUserName(nextName)
       setUserAvatar(nextAvatar)
+      setUserTranslationTargetLanguage(nextTranslationTargetLanguage)
       const session = getStoredSession()
       if (session) {
         saveStoredSession({
           ...session,
-          user: { ...session.user, displayName: nextName, avatar: nextAvatar },
+          user: {
+            ...session.user,
+            displayName: nextName,
+            avatar: nextAvatar,
+            translationTargetLanguage: nextTranslationTargetLanguage,
+          },
         })
       }
       setShowProfileEditor(false)
@@ -1019,6 +1030,7 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
 
         setUserName(snapshot.userName || getStoredSession()?.user.displayName)
         setUserAvatar(snapshot.userAvatar)
+        setUserTranslationTargetLanguage(snapshot.userTranslationTargetLanguage || getStoredSession()?.user.translationTargetLanguage)
 
         setCharacters(current => {
           const unchanged = current.length === snapshot.characters.length
@@ -1469,6 +1481,7 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
 
     void (async () => {
       try {
+        const targetLanguage = userTranslationTargetLanguage || 'English'
         const response = message.sourceMessageId
           ? await apiFetch(
               apiUrl(`/api/messages/${encodeURIComponent(message.sourceMessageId)}/translations`),
@@ -1477,7 +1490,7 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   userId,
-                  targetLanguage: 'en',
+                  targetLanguage,
                   segmentIndex: message.segmentIndex || 0
                 })
               }
@@ -1489,7 +1502,7 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   text: message.text,
-                  targetLanguage: 'en'
+                  targetLanguage
                 })
               }
             )
@@ -2342,6 +2355,17 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
                   maxLength={120}
                   placeholder="Your name"
                 />
+              </label>
+
+              <label className="profile-field">
+                <span>Destination translation language</span>
+                <select
+                  value={profileTranslationTargetLanguage}
+                  onChange={event => setProfileTranslationTargetLanguage(event.target.value)}
+                >
+                  <option value="English">English</option>
+                  <option value="Chinese">Chinese</option>
+                </select>
               </label>
 
               <button type="button" className="profile-sign-out" onClick={() => void signOut()} disabled={isSavingProfile || isSigningOut}>

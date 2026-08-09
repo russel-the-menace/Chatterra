@@ -257,8 +257,8 @@ export const api = {
     )
   },
 
-  async updateUserProfile(userId: string, input: { displayName: string; avatar?: string }) {
-    return request<{ userName?: string; userAvatar?: string }>(
+  async updateUserProfile(userId: string, input: { displayName: string; avatar?: string; translationTargetLanguage?: string }) {
+    return request<{ userName?: string; userAvatar?: string; userTranslationTargetLanguage?: string }>(
       `/api/users/${encodeURIComponent(userId)}/profile`,
       { method: 'PUT', body: JSON.stringify(input) }
     )
@@ -330,21 +330,21 @@ export const api = {
     )
   },
 
-  async translateMessage(userId: string, messageId: string, segmentIndex = 0) {
+  async translateMessage(userId: string, messageId: string, segmentIndex = 0, targetLanguage = 'English') {
     const result = await request<{ translation: MessageTranslationResponse }>(
       `/api/messages/${encodeURIComponent(messageId)}/translations`,
       {
         method: 'POST',
-        body: JSON.stringify({ userId, targetLanguage: 'en', segmentIndex }),
+        body: JSON.stringify({ userId, targetLanguage, segmentIndex }),
       }
     )
     return result.translation
   },
 
-  async translateText(text: string) {
+  async translateText(text: string, targetLanguage = 'English') {
     const result = await request<{ translation: MessageTranslationResponse }>('/api/translations', {
       method: 'POST',
-      body: JSON.stringify({ text, targetLanguage: 'en' }),
+      body: JSON.stringify({ text, targetLanguage }),
     })
     return result.translation
   },

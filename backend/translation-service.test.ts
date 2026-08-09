@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { translateToEnglish } from './translation-service'
+import { translateText } from './translation-service'
 
 const originalFetch = globalThis.fetch
 const originalApiKey = process.env.DEEPSEEK_API_KEY
@@ -22,13 +22,14 @@ const run = async () => {
       }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     }) as typeof fetch
 
-    const result = await translateToEnglish('你而家喺屋企做緊咩？')
+    const result = await translateText('你而家喺屋企做緊咩？', 'English')
     assert.equal(result.text, 'What are you doing at home?')
     assert.equal(result.provider, 'deepseek')
     assert.equal(requestBody.temperature, 0)
     assert.equal(requestBody.top_p, 1)
     assert.equal(requestBody.stream, false)
     assert.match(requestBody.messages[1].content, /你而家喺屋企做緊咩/)
+    assert.match(requestBody.messages[1].content, /English/)
 
     const retryRequestBodies: any[] = []
     globalThis.fetch = (async (_input, init) => {
@@ -52,7 +53,7 @@ const run = async () => {
       })
     }) as typeof fetch
 
-    const retried = await translateToEnglish('Hola, ¿cómo estás?')
+    const retried = await translateText('Hola, ¿cómo estás?', 'Chinese')
     assert.equal(retried.text, 'Hello, how are you?')
     assert.equal(retryRequestBodies.length, 2)
     assert.equal(retryRequestBodies[0].max_tokens, 256)

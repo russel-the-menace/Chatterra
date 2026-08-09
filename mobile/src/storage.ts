@@ -25,6 +25,7 @@ export type StoredAuthSession = {
     username: string
     displayName: string
     avatar?: string
+    translationTargetLanguage?: string
   }
 }
 
@@ -48,6 +49,9 @@ const parseStoredAuthSession = (value: unknown): StoredAuthSession | undefined =
       username: user.username,
       displayName: user.displayName,
       avatar: typeof user.avatar === 'string' && user.avatar ? user.avatar : undefined,
+      translationTargetLanguage: typeof user.translationTargetLanguage === 'string' && user.translationTargetLanguage
+        ? user.translationTargetLanguage
+        : undefined,
     }
   }
 }

@@ -66,6 +66,7 @@ type ChatContextValue = {
   username?: string
   userName?: string
   userAvatar?: string
+  userTranslationTargetLanguage?: string
   characters: Character[]
   connectionError: string | null
   voiceInputMode: 'cloud' | 'local'
@@ -94,7 +95,7 @@ type ChatContextValue = {
   saveCharacter: (character: Character | Omit<Character, 'id'>) => Promise<Character>
   saveBuiltInCharacterAvatar: (characterId: string, avatar: string) => Promise<Character>
   saveUserAvatar: (avatar: string) => Promise<void>
-  saveUserProfile: (input: { displayName: string; avatar?: string }) => Promise<void>
+  saveUserProfile: (input: { displayName: string; avatar?: string; translationTargetLanguage?: string }) => Promise<void>
   markCharacterRead: (characterId: string, conversationId?: string, messageId?: string) => void
   setActiveCharacter: (characterId: string | null) => void
   setCharacterPinned: (characterId: string, pinned: boolean) => Promise<void>
@@ -199,6 +200,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const [username, setUsername] = useState<string | undefined>()
   const [userName, setUserName] = useState<string | undefined>()
   const [userAvatar, setUserAvatar] = useState<string | undefined>()
+  const [userTranslationTargetLanguage, setUserTranslationTargetLanguage] = useState<string | undefined>()
   const [characters, setCharacters] = useState<Character[]>([])
   const [connectionError, setConnectionError] = useState<string | null>(null)
   const [voiceInputMode, setVoiceInputMode] = useState<'cloud' | 'local'>('local')
@@ -262,18 +264,21 @@ export function ChatProvider({ children }: PropsWithChildren) {
   const persistSessionProfile = useCallback(async (profile: {
     displayName?: string
     avatar?: string
+    translationTargetLanguage?: string
   }) => {
     const current = sessionRef.current
     if (!current) return
     const displayName = profile.displayName || current.user.displayName
     const avatar = profile.avatar || current.user.avatar
-    if (displayName === current.user.displayName && avatar === current.user.avatar) return
+    const translationTargetLanguage = profile.translationTargetLanguage ?? current.user.translationTargetLanguage
+    if (displayName === current.user.displayName && avatar === current.user.avatar && translationTargetLanguage === current.user.translationTargetLanguage) return
     const next: StoredAuthSession = {
       ...current,
       user: {
         ...current.user,
         displayName,
         avatar,
+        translationTargetLanguage,
       },
     }
     sessionRef.current = next
@@ -484,9 +489,11 @@ export function ChatProvider({ children }: PropsWithChildren) {
         setUnreadCountsByCharacter(unreadState.counts)
         setUserName(snapshot.userName || storedSession.user.displayName)
         setUserAvatar(snapshot.userAvatar || storedSession.user.avatar)
+        setUserTranslationTargetLanguage(snapshot.userTranslationTargetLanguage || storedSession.user.translationTargetLanguage)
         void persistSessionProfile({
           displayName: snapshot.userName,
           avatar: snapshot.userAvatar,
+          translationTargetLanguage: snapshot.userTranslationTargetLanguage,
         })
         persistContactPreviewCache(storedSession.user.id, {
           ...contactPreviewState,
@@ -563,9 +570,11 @@ export function ChatProvider({ children }: PropsWithChildren) {
       setUnreadCountsByCharacter(unreadState.counts)
       setUserName(snapshot.userName || storedSession.user.displayName)
       setUserAvatar(snapshot.userAvatar)
+      setUserTranslationTargetLanguage(snapshot.userTranslationTargetLanguage || storedSession.user.translationTargetLanguage)
       void persistSessionProfile({
         displayName: snapshot.userName,
         avatar: snapshot.userAvatar,
+        translationTargetLanguage: snapshot.userTranslationTargetLanguage,
       })
       persistContactPreviewCache(storedSession.user.id, {
         ...contactPreviewState,
@@ -610,9 +619,11 @@ export function ChatProvider({ children }: PropsWithChildren) {
       // already-restored local profile while the rest of the workspace syncs.
       setUserName(snapshot.userName || sessionRef.current?.user.displayName)
       setUserAvatar(snapshot.userAvatar || sessionRef.current?.user.avatar)
+      setUserTranslationTargetLanguage(snapshot.userTranslationTargetLanguage || sessionRef.current?.user.translationTargetLanguage)
       void persistSessionProfile({
         displayName: snapshot.userName,
         avatar: snapshot.userAvatar,
+        translationTargetLanguage: snapshot.userTranslationTargetLanguage,
       })
       setPinnedCharacterIds(new Set(snapshot.pinnedCharacterIds))
       setPinnedCharacterOrder(snapshot.pinnedCharacterIds)
@@ -866,14 +877,16 @@ export function ChatProvider({ children }: PropsWithChildren) {
     await persistSessionProfile({ avatar: nextAvatar })
   }, [persistSessionProfile, userId])
 
-  const saveUserProfile = useCallback(async (input: { displayName: string; avatar?: string }) => {
+  const saveUserProfile = useCallback(async (input: { displayName: string; avatar?: string; translationTargetLanguage?: string }) => {
     if (!userId) throw new Error('User is not ready.')
     const result = await api.updateUserProfile(userId, input)
     const nextName = result.userName || input.displayName
     const nextAvatar = result.userAvatar || input.avatar
+    const nextTranslationTargetLanguage = result.userTranslationTargetLanguage || input.translationTargetLanguage
     setUserName(nextName)
     if (nextAvatar) setUserAvatar(nextAvatar)
-    await persistSessionProfile({ displayName: nextName, avatar: nextAvatar })
+    if (nextTranslationTargetLanguage) setUserTranslationTargetLanguage(nextTranslationTargetLanguage)
+    await persistSessionProfile({ displayName: nextName, avatar: nextAvatar, translationTargetLanguage: nextTranslationTargetLanguage })
   }, [persistSessionProfile, userId])
 
   const setActiveCharacter = useCallback((characterId: string | null) => {
@@ -1079,6 +1092,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     username,
     userName,
     userAvatar,
+    userTranslationTargetLanguage,
     characters,
     connectionError,
     voiceInputMode,
@@ -1147,6 +1161,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     unreadCountsByCharacter,
     userName,
     userAvatar,
+    userTranslationTargetLanguage,
     userId,
     username,
   ])

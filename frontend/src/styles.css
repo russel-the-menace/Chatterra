@@ -570,7 +570,7 @@ body.modal-open{overflow:hidden}
     radial-gradient(circle at bottom right, rgba(var(--accent-rgb),0.04), transparent 24%);
 }
 
-.message-row{display:flex;align-items:flex-end;gap:10px;margin-bottom:14px}
+.message-row{display:flex;align-items:flex-start;gap:10px;margin-bottom:14px}
 .message-row.left{justify-content:flex-start}
 .message-row.right{justify-content:flex-end}
 .message-row.right .avatar{order:2}
@@ -1254,7 +1254,8 @@ body.modal-open{overflow:hidden}
 .profile-avatar-picker:hover .profile-avatar-overlay,
 .profile-avatar-picker:focus-visible .profile-avatar-overlay{opacity:1}
 .profile-field{display:flex;flex-direction:column;gap:6px;color:#344054;font-size:13px;font-weight:600}
-.profile-field input{
+.profile-field input,
+.profile-field select{
   width:100%;
   min-height:46px;
   padding:10px 12px;
@@ -1266,7 +1267,8 @@ body.modal-open{overflow:hidden}
   font-size:15px;
   line-height:21px;
 }
-.profile-field input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(var(--accent-rgb),.16)}
+.profile-field input:focus,
+.profile-field select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(var(--accent-rgb),.16)}
 .profile-form-error{
   min-height:42px;
   padding:9px 10px;

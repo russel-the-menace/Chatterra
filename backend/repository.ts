@@ -23,6 +23,20 @@ const iso = (value: Date | string | null | undefined): string | undefined => {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString()
 }
 
+const defaultTranslationTargetLanguage = (username?: string) => {
+  const normalizedUsername = username?.trim().toLowerCase() || ''
+  if (normalizedUsername === 'junling') return 'Chinese'
+  return 'English'
+}
+
+const normalizeTranslationTargetLanguage = (value: unknown, username?: string) => {
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (trimmed) return trimmed
+  }
+  return defaultTranslationTargetLanguage(username)
+}
+
 const mapCharacter = (row: any): Character => ({
   id: row.id,
   name: row.name,
@@ -133,6 +147,7 @@ export type AuthenticatedUser = {
   id: string
   username: string
   displayName: string
+  translationTargetLanguage: string
 }
 
 export type LoginResult = {
@@ -144,7 +159,7 @@ export type LoginResult = {
 export const authenticateUser = async (username: string, password: string): Promise<LoginResult | undefined> => {
   const normalizedUsername = username.trim().toLowerCase()
   const result = await query(
-    `SELECT id, username, display_name, password_hash
+    `SELECT id, username, display_name, preferences, password_hash
      FROM users
      WHERE LOWER(username) = $1
      LIMIT 1`,
@@ -171,6 +186,7 @@ export const authenticateUser = async (username: string, password: string): Prom
       id: String(row.id),
       username: String(row.username),
       displayName: String(row.display_name),
+      translationTargetLanguage: normalizeTranslationTargetLanguage(row.preferences?.translationTargetLanguage, String(row.username)),
     }
   }
 }
@@ -178,7 +194,7 @@ export const authenticateUser = async (username: string, password: string): Prom
 export const getAuthenticatedUser = async (accessToken: string): Promise<AuthenticatedUser | undefined> => {
   if (!accessToken) return undefined
   const result = await query(
-    `SELECT users.id, users.username, users.display_name
+    `SELECT users.id, users.username, users.display_name, users.preferences
      FROM auth_sessions
      JOIN users ON users.id = auth_sessions.user_id
      WHERE auth_sessions.token_hash = $1
@@ -191,6 +207,7 @@ export const getAuthenticatedUser = async (accessToken: string): Promise<Authent
     id: String(row.id),
     username: String(row.username),
     displayName: String(row.display_name),
+    translationTargetLanguage: normalizeTranslationTargetLanguage(row.preferences?.translationTargetLanguage, String(row.username)),
   }
 }
 
@@ -282,31 +299,32 @@ export const setUserAvatar = async (userId: string, avatar: string) => {
 
 export const updateUserProfile = async (
   userId: string,
-  input: { displayName: string; avatar?: string }
+  input: { displayName: string; avatar?: string; translationTargetLanguage?: string }
 ) => {
   return withTransaction(async client => {
     await ensureUser(client, userId)
+    const avatarValue = input.avatar === undefined ? null : (input.avatar || null)
+    const translationTargetLanguageValue = input.translationTargetLanguage === undefined
+      ? null
+      : (input.translationTargetLanguage.trim() || null)
     const result = await client.query(
       `UPDATE users SET
          display_name = $2,
-         preferences = CASE
-           WHEN $3::text IS NULL THEN preferences
-           ELSE jsonb_set(
-             COALESCE(preferences, '{}'::jsonb),
-             '{avatar}',
-             to_jsonb($3::text),
-             TRUE
-           )
-         END,
+         preferences = COALESCE(preferences, '{}'::jsonb)
+           || jsonb_strip_nulls(jsonb_build_object(
+             'avatar', $3::text,
+             'translationTargetLanguage', $4::text
+           )),
          updated_at = NOW()
        WHERE id = $1
        RETURNING display_name, preferences`,
-      [userId, input.displayName, input.avatar || null]
+      [userId, input.displayName, avatarValue, translationTargetLanguageValue]
     )
     const row = result.rows[0] || {}
     return {
       userName: typeof row.display_name === 'string' ? row.display_name : undefined,
       userAvatar: typeof row.preferences?.avatar === 'string' ? row.preferences.avatar : undefined,
+      userTranslationTargetLanguage: normalizeTranslationTargetLanguage(row.preferences?.translationTargetLanguage, undefined),
     }
   })
 }
@@ -557,7 +575,7 @@ export const getSyncSnapshot = async (userId: string): Promise<SyncSnapshot> => 
       [userId]
     )
     const userResult = await client.query(
-      'SELECT display_name, preferences FROM users WHERE id = $1',
+      'SELECT username, display_name, preferences FROM users WHERE id = $1',
       [userId]
     )
     const conversationResult = await client.query(
@@ -620,15 +638,17 @@ export const getSyncSnapshot = async (userId: string): Promise<SyncSnapshot> => 
       }
     })
 
+    const userRow = userResult.rows[0]
     return {
       serverTime: new Date().toISOString(),
-      userName: typeof userResult.rows[0]?.display_name === 'string'
-        && userResult.rows[0].display_name !== 'Local User'
-        ? userResult.rows[0].display_name
+      userName: typeof userRow?.display_name === 'string'
+        && userRow.display_name !== 'Local User'
+        ? userRow.display_name
         : undefined,
-      userAvatar: typeof userResult.rows[0]?.preferences?.avatar === 'string'
-        ? userResult.rows[0].preferences.avatar
+      userAvatar: typeof userRow?.preferences?.avatar === 'string'
+        ? userRow.preferences.avatar
         : undefined,
+      userTranslationTargetLanguage: normalizeTranslationTargetLanguage(userRow?.preferences?.translationTargetLanguage, userRow?.username),
       characters: characterResult.rows.map(mapCharacter),
       conversations,
       pinnedCharacterIds: pinResult.rows.map(row => String(row.character_id))
