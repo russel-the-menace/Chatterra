@@ -153,6 +153,23 @@ export const recordChatStreakInteraction = async ({
     if (difference === 0) return mapStreak(existing, today)
 
     if (currentDays >= 3 && difference !== undefined && difference >= 1 && difference <= 3) {
+      // A normal streak resumes on the first mutual interaction. Relight
+      // progress is only used after the streak has already entered recovery.
+      if (currentProgress === 0) {
+        const restoredDays = currentDays + 1
+        const restored = await client.query(
+          `UPDATE character_streaks
+           SET current_days = $3,
+               longest_days = GREATEST(longest_days, $3),
+               last_qualified_day = ${beijingDaySql},
+               rekindle_progress = 0,
+               updated_at = NOW()
+           WHERE user_id = $1 AND character_id = $2
+           RETURNING character_id, current_days, longest_days, last_qualified_day, rekindle_progress`,
+          [userId, characterId, restoredDays]
+        )
+        return mapStreak(restored.rows[0], today)
+      }
       const nextProgress = currentProgress + 1
       if (nextProgress < 3) {
         const progressing = await client.query(
