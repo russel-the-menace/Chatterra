@@ -608,7 +608,13 @@ export const getSyncSnapshot = async (userId: string): Promise<SyncSnapshot> => 
          LIMIT 1
        ) latest_message ON TRUE
        LEFT JOIN LATERAL (
-         SELECT COUNT(*)::integer AS unread_count
+         SELECT COALESCE(SUM(
+           CASE
+             WHEN jsonb_typeof(unread_message.content_json -> 'deliverySegments') = 'array'
+               THEN GREATEST(jsonb_array_length(unread_message.content_json -> 'deliverySegments'), 1)
+             ELSE 1
+           END
+         ), 0)::integer AS unread_count
          FROM messages unread_message
          WHERE unread_message.conversation_id = conversations.id
            AND unread_message.sender_role = 'assistant'
