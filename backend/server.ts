@@ -123,9 +123,10 @@ const app = express()
 const httpServer = createServer(app)
 
 type RealtimeEvent = {
-  type: 'conversation_updated' | 'history_cleared'
+  type: 'user_message_created' | 'conversation_updated' | 'history_cleared'
   characterId: string
   conversationId?: string
+  messageId?: string
 }
 
 const realtimeConnections = new Map<string, Set<WebSocket>>()
@@ -1914,6 +1915,12 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
     mode,
     now: new Date(userMessage.createdAt)
   })
+  broadcastRealtimeEvent(normalizedUserId, {
+    type: 'user_message_created',
+    characterId: storedCharacter.id,
+    conversationId: conversation.id,
+    messageId: userMessage.id,
+  })
   res.locals.persistedUserMessage = {
     userMessageId: userMessage.id,
     conversationId: conversation.id
@@ -2102,6 +2109,11 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
       })
       throw error
     }
+    broadcastRealtimeEvent(normalizedUserId, {
+      type: 'conversation_updated',
+      characterId: storedCharacter.id,
+      conversationId: conversation.id,
+    })
     return res.json({
       reply: null,
       userMessageId: userMessage.id,

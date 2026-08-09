@@ -1799,10 +1799,24 @@ export default function ChatScreen() {
       const mappedMessages = quiet && !conversationChanged
         ? mergeMessagePage(messagesRef.current, serverMessages, 'append')
         : serverMessages
+      const latestServerMessage = messagePage.messages.at(-1)
+      const remoteReplyPending = quiet
+        && !conversationChanged
+        && latestServerMessage?.senderRole === 'user'
+        && !messagesRef.current.some(message => message.loading)
+      const displayMessages = remoteReplyPending
+        ? [...mappedMessages, {
+            id: `realtime-loading-${latestServerMessage.id}`,
+            sender: 'assistant' as const,
+            text: '',
+            loading: true,
+            createdAt: latestServerMessage.createdAt,
+          }]
+        : mappedMessages
       const nextHasMoreHistory = conversationChanged
         ? messagePage.hasMore
         : Boolean(cachedHistory?.hasMoreHistory || messagePage.hasMore)
-      const nextOldestMessageCursor = cursorForMessage(mappedMessages[0])
+      const nextOldestMessageCursor = cursorForMessage(displayMessages[0])
         || (conversationChanged ? undefined : cachedHistory?.oldestMessageCursor)
         || messagePage.nextCursor
       if (quiet) {
@@ -1819,10 +1833,10 @@ export default function ChatScreen() {
       setConversationId(matching.id)
       setHasMoreHistory(nextHasMoreHistory)
       setOldestMessageCursor(nextOldestMessageCursor)
-      setMessages(mappedMessages)
+      setMessages(displayMessages)
       setConversationCache(character.id, {
         conversationId: matching.id,
-        messages: mappedMessages,
+        messages: displayMessages,
         hasMoreHistory: nextHasMoreHistory,
         oldestMessageCursor: nextOldestMessageCursor,
         cachedAt: Date.now(),
@@ -1974,10 +1988,17 @@ export default function ChatScreen() {
           || stagedDeliveryTimersRef.current.size > 0) {
           return current
         }
-        const existingIds = new Set(current.map(message => message.id))
+        const replyPending = latestMessage?.senderRole === 'user'
+        const baseMessages = replyPending
+          ? current
+          : current.filter(message => !message.loading)
+        const existingIds = new Set(baseMessages.map(message => message.id))
         let animationIndex = 0
-        const next = mergeMessagePage(current, mapped, 'append').map(message => {
-          if (message.sender !== 'assistant' || existingIds.has(message.id)) return message
+        const next = mergeMessagePage(baseMessages, mapped, 'append').map(message => {
+          if (existingIds.has(message.id)) return message
+          if (message.sender !== 'assistant') {
+            return { ...message, animateEntry: true }
+          }
           const animatedMessage = {
             ...message,
             animateEntry: true,
@@ -1986,6 +2007,15 @@ export default function ChatScreen() {
           animationIndex += 1
           return animatedMessage
         })
+        if (replyPending && !next.some(message => message.loading)) {
+          next.push({
+            id: `realtime-loading-${latestMessage.id}`,
+            sender: 'assistant',
+            text: '',
+            loading: true,
+            createdAt: latestMessage.createdAt,
+          })
+        }
         return next
       })
     } catch {

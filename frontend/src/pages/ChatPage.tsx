@@ -466,12 +466,13 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
   const conversationCacheTimersRef = useRef(new Map<string, number>())
   const stagedDeliveryTimersRef = useRef(new Set<number>())
   const stagedDeliveryCharacterIdsRef = useRef(new Set<string>())
+  const pendingSendCharacterIdsRef = useRef(new Set<string>())
   const pendingConversationCachesRef = useRef(new Map<string, {
     userId: string
     characterId: string
     entry: ConversationCacheEntry
   }>())
-  const realtimeRefreshRef = useRef<(event: { characterId?: unknown }) => void>(() => {})
+  const realtimeRefreshRef = useRef<(event: { type?: unknown; characterId?: unknown; conversationId?: unknown; messageId?: unknown }) => void>(() => {})
 
   useEffect(() => () => {
     stagedDeliveryTimersRef.current.forEach(timer => window.clearTimeout(timer))
@@ -695,7 +696,46 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
     const uid = userId
     if (!uid || event.characterId !== selectedCharacterIdRef.current) return
     const activeCharacter = characters.find(character => character.id === event.characterId)
-    if (activeCharacter) void loadHistoryForCharacter(uid, activeCharacter)
+    if (!activeCharacter || typeof event.conversationId !== 'string') return
+    // The sending device already has the optimistic user/loading rows and will
+    // reconcile the final response from its request. Remote events must not
+    // replace those rows mid-animation.
+    if (
+      pendingSendCharacterIdsRef.current.has(activeCharacter.id)
+      || stagedDeliveryCharacterIdsRef.current.has(activeCharacter.id)
+    ) return
+    if (event.type !== 'user_message_created') {
+      void loadHistoryForCharacter(uid, activeCharacter)
+      return
+    }
+    void (async () => {
+      try {
+        const response = await apiFetch(apiUrl(
+          `/api/conversations/${encodeURIComponent(event.conversationId as string)}/messages?limit=${HISTORY_PAGE_SIZE}`
+        ))
+        if (!response.ok) return
+        const data = await response.json()
+        const incoming = mapServerMessages(data.messages || [])
+        const latestIncoming = incoming.at(-1)
+        const serverHasReply = latestIncoming?.sender !== 'user'
+        setMessages(current => {
+          const currentIds = new Set(current.map(message => message.id))
+          const merged = mergeMessageUiState(current, incoming.map(message => (
+            currentIds.has(message.id) ? message : { ...message, animateEntry: true }
+          )))
+          if (serverHasReply || merged.some(message => message.loading)) return merged
+          return [...merged, {
+            id: `realtime-loading-${String(event.messageId || makeMessageId())}`,
+            sender: 'ai',
+            text: '',
+            loading: true,
+            createdAt: incoming.at(-1)?.createdAt || new Date().toISOString(),
+          }]
+        })
+      } catch {
+        // The regular recovery sync will fetch this conversation later.
+      }
+    })()
   }
 
   useEffect(() => {
@@ -714,7 +754,7 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
       socket.onmessage = message => {
         try {
           const event = JSON.parse(String(message.data)) as { type?: unknown; characterId?: unknown }
-          if (event.type === 'conversation_updated' || event.type === 'history_cleared') {
+          if (event.type === 'user_message_created' || event.type === 'conversation_updated' || event.type === 'history_cleared') {
             realtimeRefreshRef.current(event)
           }
         } catch {
@@ -2011,6 +2051,7 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
     markCharacterActive(targetCharacterId)
     scrollToLatest()
     setMessages(current => [...current, localMessage, loadingMessage])
+    pendingSendCharacterIdsRef.current.add(targetCharacterId)
     try {
       const data = await uploadVoiceMessage({
         userId,
@@ -2058,6 +2099,8 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
       URL.revokeObjectURL(localUrl)
       updateMessagesForCharacter(targetCharacterId, current => current.filter(message => message.id !== loadingId))
       throw uploadError
+    } finally {
+      pendingSendCharacterIdsRef.current.delete(targetCharacterId)
     }
   }
 
@@ -2084,6 +2127,7 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
 
     setMessages(prev => [...prev, userMsg, loadingMsg])
     if (messageQuote) setQuoteDraft(null)
+    pendingSendCharacterIdsRef.current.add(targetCharacterId)
 
     void (async () => {
       try {
@@ -2094,6 +2138,7 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
             message: text,
             character: targetCharacter,
             userId,
+            clientMessageId: userMsg.id,
             conversationId: targetConversationId,
             quote: messageQuote,
             voice: voice
@@ -2149,6 +2194,8 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
       } catch (error) {
         console.error('Chat request failed', error)
         updateMessagesForCharacter(targetCharacterId, prev2 => prev2.filter(m => m.id !== loadingId))
+      } finally {
+        pendingSendCharacterIdsRef.current.delete(targetCharacterId)
       }
     })()
   }
