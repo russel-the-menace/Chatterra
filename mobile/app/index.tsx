@@ -241,7 +241,14 @@ export default function ContactsScreen() {
             contentContainerStyle={styles.listContent}
             keyboardShouldPersistTaps="handled"
             refreshControl={(
-              <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={palette.accent} />
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={refresh}
+                tintColor={palette.accent}
+                colors={[palette.accent]}
+                progressBackgroundColor={palette.surface}
+                progressViewOffset={12}
+              />
             )}
             ListHeaderComponent={connectionError ? (
               <View style={styles.warningBanner}>
