@@ -88,4 +88,15 @@ expect(contactPreviewForServerMessage({
   },
 }) === 'my brain is finally quiet for once 🥺💕\nwhat are you up to?',
 'a sync snapshot should use the final delivery segment as its contact preview')
+
+expect(contactPreviewForServerMessage({
+  content: '.',
+  contentJson: {
+    voice: {
+      provider: 'user-recording',
+      durationSeconds: 2.1,
+    },
+  },
+}) === '[Audio] 2\"',
+'a synced user voice message should not display its transcript placeholder')
 console.log('contact preview checks passed')

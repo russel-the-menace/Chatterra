@@ -38,6 +38,13 @@ export const contactPreviewForServerMessage = (
   message?: Pick<ServerMessage, 'content' | 'contentJson'>
 ) => {
   if (!message) return undefined
+  const voice = message.contentJson?.voice
+  if (voice && typeof voice === 'object' && !Array.isArray(voice)) {
+    const metadata = voice as Record<string, unknown>
+    if (metadata.provider === 'user-recording' && typeof metadata.durationSeconds === 'number') {
+      return `[Audio] ${Math.max(1, Math.round(metadata.durationSeconds))}\"`
+    }
+  }
   const segments = message.contentJson?.deliverySegments
   if (Array.isArray(segments)) {
     const latestSegment = [...segments].reverse().find(segment => (

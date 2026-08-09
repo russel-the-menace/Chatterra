@@ -924,7 +924,7 @@ export function ChatProvider({ children }: PropsWithChildren) {
     updateContactPreviews([{
       characterId,
       conversationId: conversationId || cachedConversation?.conversationId || undefined,
-      preview: preview || latestDisplayableMessage(cachedConversation)?.text,
+      preview: preview || contactPreviewForMessage(latestDisplayableMessage(cachedConversation)),
       timestamp,
     }])
   }, [updateContactPreviews])
