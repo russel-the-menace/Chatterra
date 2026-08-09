@@ -44,7 +44,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Avatar } from '@/components/avatar'
 import { VoiceMessageBubble } from '@/components/voice-message-bubble'
 import { WeChatVoiceWave } from '@/components/wechat-voice-wave'
-import { api, ApiError } from '@/src/api'
+import { api, ApiError, mediaUrl } from '@/src/api'
 import { useChat } from '@/src/chat-context'
 import {
   ChatTimelineItem,
@@ -341,7 +341,7 @@ const parseAssistantVoiceMessage = (value: unknown): AssistantVoiceMessage | und
     segmentIndex: Number(voice.segmentIndex),
     voiceId: 'maya',
     style: voice.style,
-    audioUrl: typeof voice.audioUrl === 'string' ? voice.audioUrl : undefined,
+    audioUrl: typeof voice.audioUrl === 'string' ? mediaUrl(voice.audioUrl) : undefined,
     durationSeconds: typeof voice.durationSeconds === 'number' ? voice.durationSeconds : undefined,
     mimeType: voice.mimeType === 'audio/wav' ? 'audio/wav' : undefined,
     generatedAt: typeof voice.generatedAt === 'string' ? voice.generatedAt : undefined,
@@ -365,7 +365,7 @@ const parseUserVoiceMessage = (value: unknown): Extract<MessageVoice, { provider
   return {
     provider: 'user-recording',
     status: 'ready',
-    audioUrl: voice.audioUrl,
+    audioUrl: mediaUrl(voice.audioUrl),
     durationSeconds: voice.durationSeconds,
     mimeType: voice.mimeType,
     transcriptStatus: voice.transcriptStatus,
