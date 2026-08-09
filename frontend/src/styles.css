@@ -394,13 +394,10 @@ body.modal-open{overflow:hidden}
   font-variant-numeric:tabular-nums;
 }
 .spark-text{display:block;line-height:20px;white-space:nowrap;overflow:visible}
-.spark-icon{display:block;width:20px;height:20px;flex:0 0 20px;transform-origin:50% 85%}
-.spark-active .spark-icon{fill:currentColor}
-.spark-rekindling .spark-icon{fill:none}
+.spark-icon{display:block;width:16px;height:16px;flex:0 0 16px;fill:currentColor;transform-origin:50% 85%}
 .spark-pending{color:#8b929c}
 .spark-pending .spark-icon{filter:grayscale(1);opacity:.72}
 .spark-rekindling{color:#f58a5b}
-.spark-icon{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .contact-name{
   min-width:0;
   flex:1;

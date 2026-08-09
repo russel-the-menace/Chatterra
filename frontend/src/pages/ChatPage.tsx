@@ -83,9 +83,17 @@ const SparkBadge = ({ streak }: { streak?: ChatStreak }) => {
     : streak.status === 'pending'
       ? `${streak.daysLeft || 1}d left`
       : `Relight ${streak.rekindleProgress || 1}/3`
+  const rekindling = streak.status === 'rekindling'
   return (
     <span className={`spark-badge spark-${streak.status}`} title={label} aria-label={label}>
-      <svg className="spark-icon" viewBox="0 0 24 24" aria-hidden="true"><path fillRule="evenodd" d="M12 3c.5 3-1.5 4.5-3 6-1.5 1.5-2 3-2 4.5A5 5 0 0 0 12 18a5 5 0 0 0 5-4.5c0-2-1-3.5-3-5.5-1-1-1.5-2-2-5ZM12 18a3 3 0 0 0 3-3c0-1.5-1-2.5-2-3.5-.5 1.5-1.5 2-2 3.5a2 2 0 0 0 1 3Z"/></svg>
+      <svg className="spark-icon" viewBox="0 0 512 512" aria-hidden="true">
+        {rekindling ? (
+          <>
+            <path d="M112 320c0-93 124-165 96-272 66 0 192 96 192 272a144 144 0 01-288 0z" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="32" />
+            <path d="M320 368c0 57.71-32 80-64 80s-64-22.29-64-80 40-86 32-128c42 0 96 70.29 96 128z" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="32" />
+          </>
+        ) : <path d="M394.23 197.56a300.43 300.43 0 00-53.37-90C301.2 61.65 249.05 32 208 32a16 16 0 00-15.48 20c13.87 53-14.88 97.07-45.31 143.72C122 234.36 96 274.27 96 320c0 88.22 71.78 160 160 160s160-71.78 160-160c0-43.3-7.32-84.49-21.77-122.44zm-105.9 221.13C278 429.69 265.05 432 256 432s-22-2.31-32.33-13.31S208 390.24 208 368c0-25.14 8.82-44.28 17.34-62.78 4.95-10.74 10-21.67 13-33.37a8 8 0 0112.49-4.51A126.48 126.48 0 01275 292c18.17 24 29 52.42 29 76 0 22.24-5.42 39.77-15.67 50.69z" />}
+      </svg>
       <span className="spark-text">{text}</span>
     </span>
   )
