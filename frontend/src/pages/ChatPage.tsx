@@ -879,6 +879,7 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
       : nextAppearance
     document.documentElement.dataset.theme = resolved
     document.documentElement.style.colorScheme = resolved
+    window.dispatchEvent(new Event('chatterra-appearance-changed'))
     setShowAppearanceMenu(false)
     setShowSettings(false)
   }

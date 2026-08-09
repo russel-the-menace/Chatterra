@@ -11,8 +11,7 @@ const readStoredAppearance = (): Appearance => {
   return stored === 'light' || stored === 'dark' ? stored : 'automatic'
 }
 
-const applyStoredAppearance = () => {
-  const appearance = readStoredAppearance()
+const applyAppearance = (appearance: Appearance) => {
   const systemTheme = window.matchMedia('(prefers-color-scheme: dark)')
   const resolved = appearance === 'automatic'
     ? (systemTheme.matches ? 'dark' : 'light')
@@ -23,13 +22,20 @@ const applyStoredAppearance = () => {
 
 export default function App(): JSX.Element{
   const [session, setSession] = useState<WebLoginSession | undefined>(() => getStoredSession())
+  const [appearance, setAppearance] = useState<Appearance>(readStoredAppearance)
+  useEffect(() => {
+    const syncPreference = () => setAppearance(readStoredAppearance())
+    window.addEventListener('chatterra-appearance-changed', syncPreference)
+    return () => window.removeEventListener('chatterra-appearance-changed', syncPreference)
+  }, [])
   useEffect(() => {
     const systemTheme = window.matchMedia('(prefers-color-scheme: dark)')
-    const syncTheme = () => applyStoredAppearance()
+    const syncTheme = () => applyAppearance(appearance)
     syncTheme()
+    if (appearance !== 'automatic') return undefined
     systemTheme.addEventListener('change', syncTheme)
     return () => systemTheme.removeEventListener('change', syncTheme)
-  }, [session])
+  }, [appearance, session])
   useEffect(() => {
     const handleExpiredSession = () => setSession(undefined)
     window.addEventListener('chatterra-auth-expired', handleExpiredSession)
