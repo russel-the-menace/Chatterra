@@ -82,7 +82,7 @@ const SparkBadge = ({ streak }: { streak?: ChatStreak }) => {
     ? String(streak.days)
     : streak.status === 'pending'
       ? `${streak.daysLeft || 1}d left`
-      : `Rekindle ${streak.rekindleProgress || 1}/3`
+      : `Relight ${streak.rekindleProgress || 1}/3`
   return (
     <span className={`spark-badge spark-${streak.status}`} title={label} aria-label={label}>
       <span className="spark-icon" aria-hidden="true">🔥</span>

@@ -31,7 +31,7 @@ function SparkBadge({ characterId }: { characterId: string }) {
     ? String(streak.days)
     : pending
       ? `${streak.daysLeft || 1}d left`
-      : `Rekindle ${streak.rekindleProgress || 1}/3`
+      : `Relight ${streak.rekindleProgress || 1}/3`
   return (
     <View
       style={styles.sparkBadge}
@@ -90,7 +90,7 @@ function ContactRow({ character, pinned }: { character: Character; pinned: boole
         </Text>
       </View>
       <Ionicons name="chevron-forward" size={18} color="#98A2B3" />
-      {pinned && <View pointerEvents="none" style={styles.contactPinnedSeparator} />}
+      <View pointerEvents="none" style={styles.contactRowSeparator} />
     </Pressable>
   )
 }
@@ -421,19 +421,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: palette.border,
   },
   contactPressed: {
     backgroundColor: '#F5F7F9',
+    marginHorizontal: -8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
   },
   contactPinned: {
     backgroundColor: '#F6F7F8',
     marginHorizontal: -8,
     paddingHorizontal: 16,
-    borderBottomColor: 'transparent',
   },
-  contactPinnedSeparator: {
+  contactRowSeparator: {
     position: 'absolute',
     left: 8,
     right: 8,
