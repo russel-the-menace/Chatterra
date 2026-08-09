@@ -1267,6 +1267,15 @@ body.modal-open{overflow:hidden}
   font-size:15px;
   line-height:21px;
 }
+.profile-field select{
+  appearance:none;
+  -webkit-appearance:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4 6l4 4 4-4' stroke='%23111827' stroke-width='1.35' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;
+  background-position:right 10px center;
+  background-size:16px 16px;
+  padding-right:34px;
+}
 .profile-field input:focus,
 .profile-field select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(var(--accent-rgb),.16)}
 .profile-form-error{
