@@ -80,19 +80,21 @@ const showTestAccountLimit = (payload: Record<string, any>) => {
 
 const SparkBadge = ({ streak }: { streak?: ChatStreak }) => {
   if (!streak || streak.status === 'locked' || streak.status === 'expired') return null
+  const previewingToday = streak.status !== 'active' && !streak.interactedToday
+  const rekindling = streak.status === 'rekindling'
+  const nextRelight = Math.min(3, (streak.rekindleProgress || 0) + 1)
   const label = streak.status === 'active'
     ? `Active ${streak.days}-day spark`
-    : streak.status === 'pending'
-      ? `${streak.daysLeft || 1} days left before the spark ends`
-      : `Rekindling ${streak.rekindleProgress || 1} of 3`
+    : rekindling
+      ? `Relight ${previewingToday ? nextRelight : streak.rekindleProgress || 1} of 3`
+      : `${previewingToday ? streak.days + 1 : streak.days}-day spark`
   const text = streak.status === 'active'
     ? String(streak.days)
-    : streak.status === 'pending'
-      ? `${streak.daysLeft || 1}d left`
-      : `Relight ${streak.rekindleProgress || 1}/3`
-  const rekindling = streak.status === 'rekindling'
+    : rekindling
+      ? `Relight ${previewingToday ? nextRelight : streak.rekindleProgress || 1}/3`
+      : String(previewingToday ? streak.days + 1 : streak.days)
   return (
-    <span className={`spark-badge spark-${streak.status}`} title={label} aria-label={label}>
+    <span className={`spark-badge spark-${previewingToday ? 'pending' : streak.status}`} title={label} aria-label={label}>
       <svg className="spark-icon" viewBox="0 0 512 512" aria-hidden="true">
         {rekindling ? (
           <>

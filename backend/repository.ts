@@ -657,7 +657,13 @@ export const getSyncSnapshot = async (userId: string): Promise<SyncSnapshot> => 
     })
 
     const streakRows = await client.query(
-      `SELECT character_id, current_days, longest_days, last_qualified_day, rekindle_progress
+      `SELECT character_id, current_days, longest_days, last_qualified_day, rekindle_progress,
+              EXISTS (
+                SELECT 1 FROM character_streak_days
+                WHERE user_id = character_streaks.user_id
+                  AND character_id = character_streaks.character_id
+                  AND day_key = ((NOW() AT TIME ZONE 'Asia/Shanghai')::date)
+              ) AS interacted_today
        FROM character_streaks
        WHERE user_id = $1`,
       [userId]
@@ -693,6 +699,7 @@ export const getSyncSnapshot = async (userId: string): Promise<SyncSnapshot> => 
           : undefined,
         rekindleProgress: status === 'rekindling' ? rekindleProgress : undefined,
         daysLeft,
+        interactedToday: Boolean(row.interacted_today),
       }
     })
 

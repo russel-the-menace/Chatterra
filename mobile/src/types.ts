@@ -104,6 +104,7 @@ export type ChatStreak = {
   rekindleExpiresAt?: string
   rekindleProgress?: number
   daysLeft?: number
+  interactedToday?: boolean
 }
 
 export type ServerMessage = {

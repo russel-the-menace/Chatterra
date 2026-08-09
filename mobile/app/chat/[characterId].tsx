@@ -3051,12 +3051,12 @@ export default function ChatScreen() {
               <Text style={styles.headerName} numberOfLines={1}>{character.name}</Text>
               {streak && streak.status !== 'locked' && streak.status !== 'expired' && (
                 <View style={styles.headerSpark}>
-                  <Ionicons name={streak.status === 'rekindling' ? 'flame-outline' : 'flame'} size={16} color={streak.status === 'pending' ? '#8B929C' : streak.status === 'rekindling' ? '#F58A5B' : '#F05A28'} />
+                  <Ionicons name={streak.status === 'rekindling' ? 'flame-outline' : 'flame'} size={16} color={streak.status !== 'active' && !streak.interactedToday ? '#8B929C' : streak.status === 'rekindling' ? '#F58A5B' : '#F05A28'} />
                   <Text style={[
                         styles.headerSparkDays,
-                        streak.status === 'pending' && styles.headerSparkPending,
-                        streak.status === 'rekindling' && styles.headerSparkRekindling,
-                      ]} numberOfLines={1}>{streak.status === 'active' ? streak.days : streak.status === 'pending' ? `${streak.daysLeft || 1}d left` : `Relight ${streak.rekindleProgress || 1}/3`}</Text>
+                        streak.status !== 'active' && !streak.interactedToday && styles.headerSparkPending,
+                        streak.status === 'rekindling' && streak.interactedToday && styles.headerSparkRekindling,
+                      ]} numberOfLines={1}>{streak.status === 'active' ? streak.days : streak.status === 'rekindling' ? `Relight ${streak.interactedToday ? streak.rekindleProgress || 1 : Math.min(3, (streak.rekindleProgress || 0) + 1)}/3` : (streak.interactedToday ? streak.days : streak.days + 1)}</Text>
                 </View>
               )}
             </View>

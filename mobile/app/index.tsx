@@ -42,14 +42,14 @@ function SparkBadge({ characterId }: { characterId: string }) {
   const { streaksByCharacter } = useChat()
   const streak = streaksByCharacter[characterId]
   if (!streak || streak.status === 'locked' || streak.status === 'expired') return null
-  const pending = streak.status === 'pending'
   const rekindling = streak.status === 'rekindling'
-  const color = pending ? '#8B929C' : rekindling ? '#F58A5B' : '#F05A28'
+  const previewingToday = streak.status !== 'active' && !streak.interactedToday
+  const color = previewingToday ? '#8B929C' : rekindling ? '#F58A5B' : '#F05A28'
   const text = streak.status === 'active'
     ? String(streak.days)
-    : pending
-      ? `${streak.daysLeft || 1}d left`
-      : `Relight ${streak.rekindleProgress || 1}/3`
+    : rekindling
+      ? `Relight ${previewingToday ? Math.min(3, (streak.rekindleProgress || 0) + 1) : streak.rekindleProgress || 1}/3`
+      : String(previewingToday ? streak.days + 1 : streak.days)
   return (
     <View
       style={styles.sparkBadge}

@@ -12,6 +12,7 @@ export type ChatStreak = {
   rekindleExpiresAt?: string
   rekindleProgress?: number
   daysLeft?: number
+  interactedToday?: boolean
 }
 
 const beijingDaySql = "((NOW() AT TIME ZONE 'Asia/Shanghai')::date)"
@@ -72,6 +73,7 @@ const mapStreak = (row: any, today: string): ChatStreak => {
     rekindleExpiresAt: status === 'pending' || status === 'rekindling' ? rekindleExpiresAt : undefined,
     rekindleProgress: status === 'rekindling' ? rekindleProgress : undefined,
     daysLeft,
+    interactedToday: Boolean(row.interacted_today),
   }
 }
 
@@ -84,7 +86,13 @@ export const listChatStreaks = async (userId: string): Promise<ChatStreak[]> => 
   return withTransaction(async client => {
     const today = await todayForClient(client)
     const result = await client.query(
-      `SELECT character_id, current_days, longest_days, last_qualified_day, rekindle_progress
+      `SELECT character_id, current_days, longest_days, last_qualified_day, rekindle_progress,
+              EXISTS (
+                SELECT 1 FROM character_streak_days
+                WHERE user_id = character_streaks.user_id
+                  AND character_id = character_streaks.character_id
+                  AND day_key = ${beijingDaySql}
+              ) AS interacted_today
        FROM character_streaks
        WHERE user_id = $1`,
       [userId]
