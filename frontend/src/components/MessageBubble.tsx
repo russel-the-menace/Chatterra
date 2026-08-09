@@ -52,6 +52,12 @@ export type ChatMessage = {
 }
 
 const isImageAvatar = (avatar?: string) => Boolean(avatar && /^(data:image\/|blob:|https?:\/\/|\/)/.test(avatar))
+const voiceBubbleWidth = (duration: number | undefined, viewportWidth: number) => {
+  const minWidth = 92
+  const maxWidth = Math.max(minWidth, viewportWidth / 2 - 60)
+  const clampedDuration = Math.min(11, Math.max(1, duration || 1))
+  return minWidth + (maxWidth - minWidth) * ((clampedDuration - 1) / 10)
+}
 
 export default function MessageBubble({
   msg,
@@ -75,6 +81,7 @@ export default function MessageBubble({
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [playing, setPlaying] = useState(false)
   const [waveLevel, setWaveLevel] = useState(3)
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth)
   const readyVoice = msg.voice?.status === 'ready' && Boolean(msg.voice.audioUrl)
   const isSingleLineMessage = !msg.loading
     && !readyVoice
@@ -90,6 +97,12 @@ export default function MessageBubble({
 
   useEffect(() => () => {
     audioRef.current?.pause()
+  }, [])
+
+  useEffect(() => {
+    const updateViewportWidth = () => setViewportWidth(window.innerWidth)
+    window.addEventListener('resize', updateViewportWidth)
+    return () => window.removeEventListener('resize', updateViewportWidth)
   }, [])
 
   useEffect(() => {
@@ -143,6 +156,7 @@ export default function MessageBubble({
               <button
                 type="button"
                 className={`voice-note${isUserVoice ? ' user-voice' : ''}${playing ? ' playing' : ''}`}
+                style={{ width: voiceBubbleWidth(msg.voice?.durationSeconds, viewportWidth) }}
                 onClick={() => void toggleVoice()}
                 aria-label={`${playing ? 'Pause' : 'Play'} voice message`}
               >

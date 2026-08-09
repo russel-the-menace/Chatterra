@@ -46,9 +46,9 @@ export class AudioCapture {
     if (typeof MediaRecorder === 'undefined') return
 
     const mimeType = [
+      'audio/mp4',
       'audio/webm;codecs=opus',
-      'audio/webm',
-      'audio/mp4'
+      'audio/webm'
     ].find(type => MediaRecorder.isTypeSupported(type))
 
     try {

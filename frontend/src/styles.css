@@ -763,7 +763,6 @@ body.modal-open{overflow:hidden}
 .new-messages-button:focus-visible{outline:3px solid rgba(var(--accent-rgb),.24);outline-offset:2px}
 .new-messages-button span:first-child{font-size:18px;line-height:1}
 .voice-note{
-  min-width:132px;
   min-height:42px;
   display:flex;
   align-items:center;
