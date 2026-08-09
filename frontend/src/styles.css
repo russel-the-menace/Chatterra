@@ -280,7 +280,7 @@ body.modal-open{overflow:hidden}
 
 .app-title,.app-subtitle,.me-dot{display:none}
 
-.contacts-list{flex:1;min-height:0;padding:0 8px 12px;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain}
+.contacts-list{flex:1;min-height:0;padding:0 8px 12px;margin-top:-0.5px;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain}
 .contact-item{
   width:100%;
   display:flex;
