@@ -6,6 +6,19 @@ export const TEST_ACCOUNT_HOURLY_REPLY_LIMIT = 20
 export const TEST_ACCOUNT_DAILY_REPLY_LIMIT = 100
 export const TEST_ACCOUNT_MESSAGE_LIMIT_PER_CHARACTER = 50
 
+export const isRestrictedTestAccountOperation = (method: string, mountedPath: string) => {
+  const methodAndPath = `${method.toUpperCase()} ${mountedPath}`
+  return [
+    /^POST \/characters$/,
+    /^PUT \/characters\/[^/]+$/,
+    /^PUT \/users\/[^/]+\/(?:avatar|profile)$/,
+    /^PUT \/users\/[^/]+\/characters\/[^/]+\/avatar$/,
+    /^PUT \/push-devices\/expo$/,
+    /^POST \/(?:translations|voice\/)/,
+    /^DELETE \/voice\//,
+  ].some(pattern => pattern.test(methodAndPath))
+}
+
 export type TestAccountReplyQuota = {
   allowed: boolean
   applies: boolean

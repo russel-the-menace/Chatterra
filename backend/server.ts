@@ -100,6 +100,7 @@ import {
   VoiceTranscriptMetadata
 } from './types'
 import {
+  isRestrictedTestAccountOperation,
   reserveTestAccountReply,
   TEST_ACCOUNT_DAILY_REPLY_LIMIT,
   TEST_ACCOUNT_HOURLY_REPLY_LIMIT,
@@ -198,19 +199,6 @@ const authenticatedUserId = (req: Request) => {
 const isPublicTestRequest = (req: Request) => (
   (req as AuthenticatedRequest).authenticatedUser?.username.toLowerCase() === TEST_ACCOUNT_USERNAME
 )
-
-const isRestrictedTestAccountFeature = (req: Request) => {
-  const methodAndPath = `${req.method} ${req.originalUrl.split('?')[0]}`
-  return [
-    /^POST \/api\/characters$/,
-    /^PUT \/api\/characters\/[^/]+$/,
-    /^PUT \/api\/users\/[^/]+\/(?:avatar|profile)$/,
-    /^PUT \/api\/users\/[^/]+\/characters\/[^/]+\/avatar$/,
-    /^PUT \/api\/push-devices\/expo$/,
-    /^POST \/api\/(?:translations|voice\/)/,
-    /^DELETE \/api\/voice\//,
-  ].some(pattern => pattern.test(methodAndPath))
-}
 
 const testAccountLimitResponse = (res: Response, quota: Awaited<ReturnType<typeof reserveTestAccountReply>>) => (
   res.status(429).json({
@@ -674,7 +662,7 @@ app.use('/api', asyncRoute(async (req, res, next) => {
 }))
 
 app.use('/api', (req, res, next) => {
-  if (isPublicTestRequest(req) && isRestrictedTestAccountFeature(req)) {
+  if (isPublicTestRequest(req) && isRestrictedTestAccountOperation(req.method, req.path)) {
     return res.status(403).json({
       error: 'This feature is disabled for the shared public test account.',
       code: 'TEST_ACCOUNT_RESTRICTED_FEATURE',
