@@ -22,6 +22,7 @@ import {
 
 type CharacterTextKey = 'name' | 'role' | 'company' | 'scenario' | 'goal' | 'language' | 'personality' | 'background' | 'systemPromptTemplate'
 type Point = { x: number; y: number }
+type Appearance = 'automatic' | 'light' | 'dark'
 type MessageHistoryCursor = {
   createdAt: string
   id: string
@@ -45,6 +46,11 @@ type MessageHistoryState = {
 
 const makeMessageId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`
 const HISTORY_PAGE_SIZE = 20
+const APPEARANCE_STORAGE_KEY = 'chatterra.web.appearance'
+const readStoredAppearance = (): Appearance => {
+  const stored = localStorage.getItem(APPEARANCE_STORAGE_KEY)
+  return stored === 'light' || stored === 'dark' ? stored : 'automatic'
+}
 const hasSameOrder = (left: string[], right: string[]) => (
   left.length === right.length && left.every((value, index) => value === right[index])
 )
@@ -418,6 +424,9 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
   const [showConversationMenu, setShowConversationMenu] = useState(false)
   const [showCharacterEditor, setShowCharacterEditor] = useState(false)
   const [showProfileEditor, setShowProfileEditor] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
+  const [showAppearanceMenu, setShowAppearanceMenu] = useState(false)
+  const [appearance, setAppearance] = useState<Appearance>(readStoredAppearance)
   const [editingCharacter, setEditingCharacter] = useState<Character | null>(null)
   const [isSavingCharacter, setIsSavingCharacter] = useState(false)
   const [characterEditorError, setCharacterEditorError] = useState('')
@@ -453,6 +462,26 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
     characterId: string
     entry: ConversationCacheEntry
   }>())
+
+  useEffect(() => {
+    const systemTheme = window.matchMedia('(prefers-color-scheme: dark)')
+    const applyAppearance = () => {
+      const resolved = appearance === 'automatic'
+        ? (systemTheme.matches ? 'dark' : 'light')
+        : appearance
+      document.documentElement.dataset.theme = resolved
+      document.documentElement.style.colorScheme = resolved
+    }
+    applyAppearance()
+    systemTheme.addEventListener('change', applyAppearance)
+    localStorage.setItem(APPEARANCE_STORAGE_KEY, appearance)
+    return () => systemTheme.removeEventListener('change', applyAppearance)
+  }, [appearance])
+
+  useEffect(() => () => {
+    delete document.documentElement.dataset.theme
+    document.documentElement.style.removeProperty('color-scheme')
+  }, [])
 
   const handleLatestStateChange = useCallback((atLatest: boolean) => {
     isAtLatestRef.current = atLatest
@@ -847,6 +876,12 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
     }
   }
 
+  const selectAppearance = (nextAppearance: Appearance) => {
+    setAppearance(nextAppearance)
+    setShowAppearanceMenu(false)
+    setShowSettings(false)
+  }
+
   const closeCharacterEditor = () => {
     if (isSavingCharacter) return
     setShowCharacterEditor(false)
@@ -980,12 +1015,15 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
   }
 
   useEffect(() => {
-    if (!showCharacterEditor && !showProfileEditor) return
+    if (!showCharacterEditor && !showProfileEditor && !showSettings) return
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         if (avatarCropSource) {
           closeAvatarCropper()
+        } else if (showSettings) {
+          setShowSettings(false)
+          setShowAppearanceMenu(false)
         } else if (showProfileEditor) {
           closeProfileEditor()
         } else {
@@ -1000,7 +1038,7 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
       document.removeEventListener('keydown', handleKeyDown)
       document.body.classList.remove('modal-open')
     }
-  }, [showCharacterEditor, showProfileEditor, isSavingCharacter, isSavingProfile, isSigningOut, avatarCropSource])
+  }, [showCharacterEditor, showProfileEditor, showSettings, isSavingCharacter, isSavingProfile, isSigningOut, avatarCropSource])
 
   useEffect(() => {
     const uid = getStoredSession()?.user.id
@@ -2007,15 +2045,75 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
         <button
           type="button"
           className="workspace-rail-settings"
-          onClick={openProfileEditor}
+          onClick={() => {
+            setShowSettings(current => !current)
+            setShowAppearanceMenu(false)
+          }}
           aria-label="Settings"
           title="Settings"
+          aria-expanded={showSettings}
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0L6.2 6.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
             <circle cx="12" cy="12" r="3" />
           </svg>
         </button>
+        {showSettings && (
+          <>
+            <button
+              type="button"
+              className="settings-backdrop"
+              aria-label="Close settings"
+              onClick={() => {
+                setShowSettings(false)
+                setShowAppearanceMenu(false)
+              }}
+            />
+            <div className="settings-menu" role="menu" aria-label="Settings">
+              <div className="settings-appearance-wrap">
+                <button
+                  type="button"
+                  className="settings-menu-item"
+                  role="menuitem"
+                  aria-haspopup="menu"
+                  aria-expanded={showAppearanceMenu}
+                  onClick={() => setShowAppearanceMenu(current => !current)}
+                >
+                  <span className="settings-menu-icon" aria-hidden="true">◐</span>
+                  <span>Appearance</span>
+                  <span className="settings-menu-chevron" aria-hidden="true">›</span>
+                </button>
+                {showAppearanceMenu && (
+                  <div className="appearance-menu" role="menu" aria-label="Appearance">
+                    {(['automatic', 'light', 'dark'] as const).map(option => (
+                      <button
+                        type="button"
+                        key={option}
+                        className={appearance === option ? 'selected' : ''}
+                        role="menuitemradio"
+                        aria-checked={appearance === option}
+                        onClick={() => selectAppearance(option)}
+                      >
+                        <span>{option === 'automatic' ? 'Automatic' : option === 'light' ? 'Light Mode' : 'Dark Mode'}</span>
+                        {appearance === option && <span className="appearance-check" aria-hidden="true">✓</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                className="settings-menu-item settings-sign-out"
+                role="menuitem"
+                onClick={() => void signOut()}
+                disabled={isSigningOut}
+              >
+                <span className="settings-menu-icon" aria-hidden="true">↪</span>
+                <span>{isSigningOut ? 'Signing out...' : 'Sign out'}</span>
+              </button>
+            </div>
+          </>
+        )}
       </nav>
       <aside className="contacts-pane">
         <div className="contacts-header">
@@ -2426,9 +2524,6 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
                 </select>
               </label>
 
-              <button type="button" className="profile-sign-out" onClick={() => void signOut()} disabled={isSavingProfile || isSigningOut}>
-                {isSigningOut ? 'Signing out...' : 'Sign out'}
-              </button>
             </div>
           </div>
         </div>
