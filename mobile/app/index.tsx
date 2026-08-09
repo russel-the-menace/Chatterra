@@ -444,14 +444,14 @@ const styles = StyleSheet.create({
     borderBottomColor: palette.border,
   },
   contactPressed: {
-    backgroundColor: '#F5F7F9',
+    backgroundColor: '#F6F7F8',
     marginHorizontal: -8,
     paddingHorizontal: 16,
     borderRadius: 8,
     borderBottomColor: 'transparent',
   },
   contactPinned: {
-    backgroundColor: '#F6F7F8',
+    backgroundColor: '#F5F7F9',
     marginHorizontal: -8,
     paddingHorizontal: 16,
     borderBottomColor: 'transparent',

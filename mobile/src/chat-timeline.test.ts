@@ -36,6 +36,14 @@ const run = () => {
   expect(dateItems.every(item => item.kind === 'date' && /\d{2}:\d{2}$/.test(item.label)),
     'date dividers should end with a 24-hour local time')
 
+  const twoHourBoundary = chatTimeline([
+    message('block-last', 'assistant', '2026-07-30T10:00:00.000Z'),
+    message('exactly-two-hours', 'user', '2026-07-30T12:00:00.000Z'),
+    message('over-two-hours', 'assistant', '2026-07-30T14:00:01.000Z'),
+  ]).filter(item => item.kind === 'date')
+  expect(twoHourBoundary.length === 2,
+    'a new time divider should appear only when the gap exceeds two hours')
+
   const segmentedFirst: ChatMessage = { id: 'segment-a', sourceMessageId: 'reply', sender: 'assistant', text: 'a' }
   const segmentedSecond: ChatMessage = { id: 'segment-b', sourceMessageId: 'reply', sender: 'assistant', text: 'b' }
   expect(belongsToSameMessageCluster(segmentedFirst, segmentedSecond),

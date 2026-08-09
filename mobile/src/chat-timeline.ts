@@ -1,6 +1,7 @@
 import { ChatMessage } from './types'
 
 export const CHAT_CLUSTER_WINDOW_MS = 5 * 60 * 1_000
+export const CHAT_TIME_DIVIDER_GAP_MS = 2 * 60 * 60 * 1_000
 
 export const messageRenderKey = (message: ChatMessage) => message.renderKey || message.id
 
@@ -63,13 +64,19 @@ export const chatTimeline = (messages: ChatMessage[]): ChatTimelineItem[] => {
   const chronologicalItems: ChatTimelineItem[] = []
   let previousMessage: ChatMessage | undefined
   let previousDayKey: string | undefined
+  let previousMessageDate: Date | undefined
 
   messages.forEach(message => {
     const messageDate = parsedMessageDate(message)
     const dayKey = messageDate ? localDayKey(messageDate) : undefined
-    if (messageDate && dayKey !== previousDayKey) {
+    const gapExceeded = Boolean(
+      messageDate
+      && previousMessageDate
+      && messageDate.getTime() - previousMessageDate.getTime() > CHAT_TIME_DIVIDER_GAP_MS
+    )
+    if (messageDate && (dayKey !== previousDayKey || gapExceeded)) {
       chronologicalItems.push({
-        key: `date-${dayKey}`,
+        key: `date-${dayKey}-${messageRenderKey(message)}`,
         kind: 'date',
         label: dateDividerLabel(messageDate),
       })
@@ -85,6 +92,7 @@ export const chatTimeline = (messages: ChatMessage[]): ChatTimelineItem[] => {
       message,
     })
     previousMessage = message
+    if (messageDate) previousMessageDate = messageDate
   })
 
   return chronologicalItems.reverse()

@@ -26,6 +26,8 @@ const localDayKey = (date: Date) => [
   String(date.getDate()).padStart(2, '0'),
 ].join('-')
 
+const CHAT_TIME_DIVIDER_GAP_MS = 2 * 60 * 60 * 1_000
+
 const dateDividerLabel = (date: Date) => {
   const time = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
   const today = new Date()
@@ -45,13 +47,19 @@ const dateDividerLabel = (date: Date) => {
 export const chatTimeline = (messages: ChatMessage[]): ChatTimelineItem[] => {
   const items: ChatTimelineItem[] = []
   let previousDayKey: string | undefined
+  let previousMessageDate: Date | undefined
 
   messages.forEach(message => {
     const messageDate = parsedMessageDate(message)
     const dayKey = messageDate ? localDayKey(messageDate) : undefined
-    if (messageDate && dayKey !== previousDayKey) {
+    const gapExceeded = Boolean(
+      messageDate
+      && previousMessageDate
+      && messageDate.getTime() - previousMessageDate.getTime() > CHAT_TIME_DIVIDER_GAP_MS
+    )
+    if (messageDate && (dayKey !== previousDayKey || gapExceeded)) {
       items.push({
-        key: `date-${dayKey}`,
+        key: `date-${dayKey}-${message.id}`,
         kind: 'date',
         label: dateDividerLabel(messageDate),
       })
@@ -62,6 +70,7 @@ export const chatTimeline = (messages: ChatMessage[]): ChatTimelineItem[] => {
       kind: 'message',
       message,
     })
+    if (messageDate) previousMessageDate = messageDate
   })
 
   return items

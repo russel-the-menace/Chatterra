@@ -301,8 +301,8 @@ body.modal-open{overflow:hidden}
   position:relative;
   border-bottom-color:transparent;
 }
-.contact-item.pinned:not(.active){background:#f0f1f3}
-.contact-item.pinned:not(.active):hover{background:#e9ebee}
+.contact-item.pinned:not(.active){background:#e5e7eb}
+.contact-item.pinned:not(.active):hover{background:#dfe2e5}
 .contact-item.active{
   width:calc(100% + 16px);
   margin-left:-8px;
@@ -310,7 +310,7 @@ body.modal-open{overflow:hidden}
   padding-right:20px;
   position:relative;
   border-bottom-color:transparent;
-  background:#e5e7eb;
+  background:#f0f1f3;
   color:#111827;
 }
 .contact-item.pinned{
