@@ -2449,14 +2449,6 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
                   )}
                 </label>
               ))}
-
-              {editingCharacter.id && (
-                <div className="character-metadata field-wide">
-                  <span>ID: {editingCharacter.id}</span>
-                  {editingCharacter.createdAt && <span>Created: {new Date(editingCharacter.createdAt).toLocaleString()}</span>}
-                  {editingCharacter.updatedAt && <span>Updated: {new Date(editingCharacter.updatedAt).toLocaleString()}</span>}
-                </div>
-              )}
             </div>
 
             {characterEditorError && <div className="character-form-error" role="alert">{characterEditorError}</div>}
