@@ -32,7 +32,9 @@ export default function LoginPage({
   return (
     <main className="login-page">
       <form className="login-card" onSubmit={submit}>
-        <div className="login-mark" aria-hidden="true">C</div>
+        <div className="login-mark">
+          <img src="/chatterra-icon.svg" alt="" />
+        </div>
         <h1>Chatterra</h1>
         <p>Sign in to your conversations</p>
 
