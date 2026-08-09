@@ -57,6 +57,10 @@ const hasSameTimestamps = (
 const isImageAvatar = (avatar?: string) => Boolean(avatar && /^(data:image\/|blob:|https?:\/\/|\/)/.test(avatar))
 const mediaUrl = (value: string) => /^https?:\/\//i.test(value) ? value : apiUrl(value)
 const showTestAccountLimit = (payload: Record<string, any>) => {
+  if (payload.code === 'TEST_ACCOUNT_CUSTOM_CHARACTER_LIMIT_REACHED') {
+    window.alert('The shared test account can create up to 3 custom characters.')
+    return true
+  }
   if (payload.code !== 'TEST_ACCOUNT_REPLY_LIMIT_REACHED') return false
   const resetAt = typeof payload.resetAt === 'string' ? new Date(payload.resetAt) : undefined
   const resetMessage = resetAt && !Number.isNaN(resetAt.getTime())
@@ -1683,7 +1687,10 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
         body: JSON.stringify({ ...editingCharacter, userId: ownerUserId })
       })
       const data = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(data.error || 'Failed to save character')
+      if (!res.ok) {
+        showTestAccountLimit(data)
+        throw new Error(data.error || 'Failed to save character')
+      }
 
       const savedCharacter = data.character as Character
       setCharacters(prev => isNewCharacter

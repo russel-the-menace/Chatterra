@@ -5,12 +5,11 @@ export const TEST_ACCOUNT_USERNAME = 'test'
 export const TEST_ACCOUNT_HOURLY_REPLY_LIMIT = 20
 export const TEST_ACCOUNT_DAILY_REPLY_LIMIT = 100
 export const TEST_ACCOUNT_MESSAGE_LIMIT_PER_CHARACTER = 50
+export const TEST_ACCOUNT_CUSTOM_CHARACTER_LIMIT = 3
 
 export const isRestrictedTestAccountOperation = (method: string, mountedPath: string) => {
   const methodAndPath = `${method.toUpperCase()} ${mountedPath}`
   return [
-    /^POST \/characters$/,
-    /^PUT \/characters\/[^/]+$/,
     /^PUT \/users\/[^/]+\/(?:avatar|profile)$/,
     /^PUT \/users\/[^/]+\/characters\/[^/]+\/avatar$/,
     /^PUT \/push-devices\/expo$/,

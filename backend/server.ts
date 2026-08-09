@@ -3,6 +3,7 @@ import cors from 'cors'
 import dotenv from 'dotenv'
 import helmet from 'helmet'
 import { rateLimit } from 'express-rate-limit'
+import { createHash } from 'node:crypto'
 import { closeDatabase, query } from './database'
 import {
   getBehaviorSnapshot,
@@ -27,6 +28,12 @@ import {
 } from './message-quote'
 import { resolveResponseLanguagePolicy, starterMessageForPolicy } from './language-policy'
 import { createInferenceTrace } from './inference-logger'
+import {
+  looksLikeInjectionInput,
+  looksLikeSuspiciousPath,
+  recordSecurityEvent,
+  SecurityEventInput,
+} from './security-audit'
 import { compactConversationIfNeeded } from './conversation-compaction'
 import { processDueProactiveActions } from './proactive-service'
 import { isExpoPushToken } from './push-notifications'
@@ -114,7 +121,6 @@ const REJECTED_OUTPUT_LOG_LIMIT = 4000
 const SYNC_PROTOCOL_VERSION = 1
 const TRANSCRIPTION_RATE_LIMIT_WINDOW_MS = 60_000
 const TRANSCRIPTION_RATE_LIMIT_MAX_REQUESTS = 6
-const API_REVISION = (process.env.SOURCE_COMMIT || 'development').slice(0, 12)
 const transcriptionRequests = new Map<string, number[]>()
 const voiceMessageTranscriptionInFlight = new Map<string, Promise<Message>>()
 const productionWebOrigin = 'https://russel-the-menace.github.io'
@@ -128,10 +134,58 @@ const allowedOrigins = new Set([
     ? []
     : ['http://localhost:5173', 'http://127.0.0.1:5173']),
 ])
+const allowedHosts = new Set((process.env.ALLOWED_HOSTS || 'api.feiwan.online,localhost,127.0.0.1')
+  .split(',')
+  .map(host => host.trim().toLowerCase())
+  .filter(Boolean))
+
+const requestHost = (req: Request) => {
+  const forwardedHost = req.header('x-forwarded-host')?.split(',')[0]?.trim()
+  const rawHost = forwardedHost || req.header('host') || ''
+  if (rawHost.startsWith('[')) return rawHost.slice(1, rawHost.indexOf(']')).toLowerCase()
+  return rawHost.split(':')[0].toLowerCase()
+}
+
+const auditRequest = (
+  req: Request,
+  event: Omit<SecurityEventInput, 'ipAddress' | 'requestId' | 'method' | 'path' | 'userAgent'>
+) => recordSecurityEvent({
+  ...event,
+  ipAddress: req.ip,
+  requestId: req.header('x-chatterra-request-id') || undefined,
+  method: req.method,
+  path: req.originalUrl.split('?')[0],
+  userAgent: req.header('user-agent') || undefined,
+})
 
 app.disable('x-powered-by')
 app.set('trust proxy', 1)
+app.use((req, res, next) => {
+  const host = requestHost(req)
+  if (allowedHosts.has(host)) return next()
+  void auditRequest(req, {
+    eventType: 'invalid_host_header',
+    severity: 'critical',
+    metadata: { hostFingerprint: host ? createHash('sha256').update(host).digest('hex') : null },
+  })
+  return res.status(421).json({ error: 'Request host is not accepted.' })
+})
 app.use(helmet({ crossOriginResourcePolicy: false }))
+app.use((req, res, next) => {
+  if (looksLikeSuspiciousPath(req.originalUrl)) {
+    void auditRequest(req, { eventType: 'suspicious_request_path', severity: 'warning' })
+    return res.status(400).json({ error: 'Request is invalid.', code: 'INVALID_REQUEST' })
+  }
+  const origin = req.header('origin')
+  if (origin && !allowedOrigins.has(origin)) {
+    void auditRequest(req, {
+      eventType: 'invalid_origin',
+      severity: 'warning',
+      metadata: { originFingerprint: createHash('sha256').update(origin).digest('hex') },
+    })
+  }
+  next()
+})
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin || allowedOrigins.has(origin)) return callback(null, true)
@@ -150,6 +204,10 @@ app.use('/api', rateLimit({
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: { error: 'Too many requests. Please try again later.', code: 'API_RATE_LIMIT_REACHED' },
+  handler: (req, res, _next, options) => {
+    void auditRequest(req, { eventType: 'api_rate_limit_reached', severity: 'warning' })
+    res.status(options.statusCode).json(options.message)
+  },
 }))
 // User recordings and generated assistant speech use separate persistent directories.
 // Keep one public media route so existing message metadata remains playable.
@@ -166,7 +224,6 @@ app.use('/api', (req, res, next) => {
   res.setHeader('Cache-Control', 'private, no-store, max-age=0, must-revalidate')
   res.setHeader('Pragma', 'no-cache')
   res.append('Vary', 'Authorization')
-  res.setHeader('X-Chatterra-API-Revision', API_REVISION)
   next()
 })
 
@@ -625,44 +682,65 @@ app.post('/api/auth/login', rateLimit({
   legacyHeaders: false,
   skipSuccessfulRequests: true,
   message: { error: 'Too many sign-in attempts. Please try again later.', code: 'LOGIN_RATE_LIMIT_REACHED' },
+  handler: (req, res, _next, options) => {
+    void auditRequest(req, { eventType: 'login_rate_limit_reached', severity: 'critical' })
+    res.status(options.statusCode).json(options.message)
+  },
 }), asyncRoute(async (req, res) => {
-  const username = typeof req.body?.username === 'string'
-    ? req.body.username.trim().slice(0, 64)
-    : ''
-  const password = typeof req.body?.password === 'string'
-    ? req.body.password.slice(0, 200)
-    : ''
-  if (!username || !password) return res.status(401).json({ error: 'Invalid username or password.' })
+  const username = typeof req.body?.username === 'string' ? req.body.username.trim() : ''
+  const password = typeof req.body?.password === 'string' ? req.body.password : ''
+  const suspiciousCredentials = looksLikeInjectionInput(username)
+    || looksLikeInjectionInput(password)
+    || !/^[A-Za-z0-9_.-]{1,64}$/.test(username)
+    || password.length > 200
+  if (!username || !password || suspiciousCredentials) {
+    if (suspiciousCredentials) {
+      void auditRequest(req, {
+        eventType: 'suspicious_login_input',
+        severity: 'critical',
+        username,
+        metadata: { usernameLength: username.length, passwordLength: password.length },
+      })
+    }
+    return res.status(401).json({ error: 'Invalid username or password.' })
+  }
 
   const session = await authenticateUser(username, password)
-  if (!session) return res.status(401).json({ error: 'Invalid username or password.' })
+  if (!session) {
+    void auditRequest(req, {
+      eventType: 'login_failed',
+      severity: 'warning',
+      username,
+    })
+    return res.status(401).json({ error: 'Invalid username or password.' })
+  }
   return res.json(session)
 }))
 
 app.get('/api/health', asyncRoute(async (_req, res) => {
   await query('SELECT 1')
-  return res.json({
-    status: 'ok',
-    database: 'postgresql',
-    synchronization: {
-      protocolVersion: SYNC_PROTOCOL_VERSION,
-      transport: 'snapshot-polling'
-    },
-    revision: API_REVISION,
-  })
+  return res.json({ status: 'ok' })
 }))
 
 app.use('/api', asyncRoute(async (req, res, next) => {
   if (req.method === 'OPTIONS') return next()
   const token = accessTokenFromRequest(req)
   const user = await getAuthenticatedUser(token)
-  if (!user) return res.status(401).json({ error: 'Authentication is required.' })
+  if (!user) {
+    if (token) void auditRequest(req, { eventType: 'invalid_access_token', severity: 'warning' })
+    return res.status(401).json({ error: 'Authentication is required.' })
+  }
   ;(req as AuthenticatedRequest).authenticatedUser = user
   next()
 }))
 
 app.use('/api', (req, res, next) => {
   if (isPublicTestRequest(req) && isRestrictedTestAccountOperation(req.method, req.path)) {
+    void auditRequest(req, {
+      eventType: 'test_account_restricted_feature',
+      severity: 'info',
+      userId: authenticatedUserId(req),
+    })
     return res.status(403).json({
       error: 'This feature is disabled for the shared public test account.',
       code: 'TEST_ACCOUNT_RESTRICTED_FEATURE',
@@ -691,7 +769,6 @@ app.get('/api/characters', asyncRoute(async (req, res) => {
     durationMs: Date.now() - startedAt,
     requestId: apiRequestId(req),
     responseBytes: Buffer.byteLength(JSON.stringify({ characters })),
-    revision: API_REVISION,
   })
   return res.json({ characters })
 }))
@@ -2037,7 +2114,12 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
   })
 }))
 
-app.use((error: any, _req: Request, res: Response, _next: NextFunction) => {
+app.use('/api', (req, res) => {
+  void auditRequest(req, { eventType: 'unknown_api_route', severity: 'warning' })
+  return res.status(404).json({ error: 'Not found.' })
+})
+
+app.use((error: any, req: Request, res: Response, _next: NextFunction) => {
   console.error('Request failed', error)
   const persistedUserMessage = res.locals.persistedUserMessage
   const persistenceDetails = persistedUserMessage
@@ -2053,9 +2135,11 @@ app.use((error: any, _req: Request, res: Response, _next: NextFunction) => {
     error?.type === 'entity.parse.failed'
     || (error instanceof SyntaxError && Number((error as any).status) === 400)
   ) {
+    void auditRequest(req, { eventType: 'malformed_json', severity: 'warning' })
     return res.status(400).json({ error: 'request body contains invalid JSON' })
   }
   if (error?.type === 'entity.too.large' || Number(error?.status) === 413) {
+    void auditRequest(req, { eventType: 'request_body_too_large', severity: 'warning' })
     return res.status(413).json({ error: 'request body is too large' })
   }
   if (error instanceof Error && error.message === 'Origin is not allowed by CORS') {
@@ -2070,6 +2154,17 @@ app.use((error: any, _req: Request, res: Response, _next: NextFunction) => {
   if (error?.code === '23505') {
     return res.status(409).json({ error: 'record already exists', ...persistenceDetails })
   }
+  if (error?.code === 'P0001' && error?.message === 'test_account_custom_character_limit') {
+    return res.status(409).json({
+      error: 'The shared test account can create up to 3 custom characters.',
+      code: 'TEST_ACCOUNT_CUSTOM_CHARACTER_LIMIT_REACHED',
+    })
+  }
+  void auditRequest(req, {
+    eventType: 'unhandled_request_error',
+    severity: 'critical',
+    metadata: { errorType: error instanceof Error ? error.name : 'unknown_error' },
+  })
   return res.status(500).json({ error: 'database operation failed', ...persistenceDetails })
 })
 
