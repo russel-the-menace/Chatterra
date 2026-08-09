@@ -1039,15 +1039,24 @@ export function ChatProvider({ children }: PropsWithChildren) {
         ...message
       }) => message)
     const existing = conversationCacheRef.current.get(characterId)
-    const mergedMessages = existing
+    const conversationChanged = Boolean(
+      entry.conversationId
+      && existing?.conversationId
+      && entry.conversationId !== existing.conversationId
+    )
+    const mergedMessages = existing && !conversationChanged
       ? mergeMessagePage(existing.messages, stableMessages, 'append')
       : stableMessages
     const stableEntry = {
       ...entry,
       conversationId: entry.conversationId || existing?.conversationId || null,
       messages: mergedMessages,
-      hasMoreHistory: Boolean(existing?.hasMoreHistory || entry.hasMoreHistory),
-      oldestMessageCursor: entry.oldestMessageCursor || existing?.oldestMessageCursor,
+      hasMoreHistory: conversationChanged
+        ? Boolean(entry.hasMoreHistory)
+        : Boolean(existing?.hasMoreHistory || entry.hasMoreHistory),
+      oldestMessageCursor: conversationChanged
+        ? entry.oldestMessageCursor
+        : entry.oldestMessageCursor || existing?.oldestMessageCursor,
     }
     const cachedViewState = conversationListViewStateRef.current.get(characterId)
     const latestMessage = mergedMessages.at(-1)

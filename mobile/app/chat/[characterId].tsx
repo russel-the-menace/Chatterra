@@ -1792,12 +1792,18 @@ export default function ChatScreen() {
       if (quiet && hasPendingLocalDelivery()) return
       const cachedHistory = getConversationCache(character.id)
       const serverMessages = mapMessages(messagePage.messages)
-      const mappedMessages = quiet
+      const conversationChanged = Boolean(
+        cachedHistory?.conversationId
+        && cachedHistory.conversationId !== matching.id
+      )
+      const mappedMessages = quiet && !conversationChanged
         ? mergeMessagePage(messagesRef.current, serverMessages, 'append')
         : serverMessages
-      const nextHasMoreHistory = Boolean(cachedHistory?.hasMoreHistory || messagePage.hasMore)
+      const nextHasMoreHistory = conversationChanged
+        ? messagePage.hasMore
+        : Boolean(cachedHistory?.hasMoreHistory || messagePage.hasMore)
       const nextOldestMessageCursor = cursorForMessage(mappedMessages[0])
-        || cachedHistory?.oldestMessageCursor
+        || (conversationChanged ? undefined : cachedHistory?.oldestMessageCursor)
         || messagePage.nextCursor
       if (quiet) {
         const existingIds = new Set(messagesRef.current.map(message => message.id))

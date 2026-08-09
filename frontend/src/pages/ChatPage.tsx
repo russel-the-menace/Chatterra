@@ -1228,9 +1228,12 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
         if (activeConversation && activeCache?.conversationId !== activeConversation.id) {
           conversationCacheRef.current[activeCharacter.id] = {
             conversationId: activeConversation.id,
-            messages: activeCache?.messages || [],
+            messages: [],
             behaviorStatus: activeCache?.behaviorStatus || 'Online'
           }
+          delete messageHistoryRef.current[activeCharacter.id]
+          setMessages([])
+          setUnseenLatestCount(0)
           setConversationId(activeConversation.id)
           localStorage.setItem('chatterra_conversationId', activeConversation.id)
         }

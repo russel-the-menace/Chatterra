@@ -1423,6 +1423,11 @@ export const createMemory = async (memory: Memory): Promise<Memory> => {
 
 export const clearChatHistory = async (userId: string, characterId: string) => {
   return withTransaction(async client => {
+    // Coordinate with starter creation so a cleared chat remains empty.
+    await client.query(
+      'SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))',
+      [userId, characterId]
+    )
     const conversationsResult = await client.query(
       `SELECT id FROM conversations WHERE user_id = $1 AND character_id = $2`,
       [userId, characterId]
@@ -1445,10 +1450,20 @@ export const clearChatHistory = async (userId: string, characterId: string) => {
       [userId, characterId]
     )
 
+    const now = new Date().toISOString()
+    const emptyConversationResult = await client.query(
+      `INSERT INTO conversations (
+         id, user_id, character_id, status, metadata, created_at, updated_at
+       ) VALUES ($1, $2, $3, 'active', '{}'::jsonb, $4, $4)
+       RETURNING *`,
+      [uuidv4(), userId, characterId, now]
+    )
+
     return {
       deletedConversations: conversationDeleteResult.rowCount || 0,
       deletedMessages: Number(messageCountResult.rows[0].count),
-      deletedMemories: memoryDeleteResult.rowCount || 0
+      deletedMemories: memoryDeleteResult.rowCount || 0,
+      conversation: mapConversation(emptyConversationResult.rows[0])
     }
   })
 }
