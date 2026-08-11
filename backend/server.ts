@@ -30,7 +30,7 @@ import {
 } from './message-quote'
 import { resolveResponseLanguagePolicy, starterMessageForPolicy } from './language-policy'
 import { createInferenceTrace } from './inference-logger'
-import { recordChatStreakInteraction } from './chat-streak'
+import { ChatStreak, recordChatStreakInteraction } from './chat-streak'
 import {
   looksLikeInjectionInput,
   looksLikeSuspiciousPath,
@@ -2155,6 +2155,7 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
     replyLength: reply.length,
     deliverySegmentCount: replySegments.length
   })
+  let streak: ChatStreak | undefined
   try {
     await recordAssistantResponse({
       userId: normalizedUserId,
@@ -2171,12 +2172,13 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
       diagnostics: trace.snapshot(),
       now: new Date(assistantMessage.createdAt)
     })
-    await recordChatStreakInteraction({
+    streak = await recordChatStreakInteraction({
       userId: normalizedUserId,
       characterId: storedCharacter.id,
       sourceMessageId: assistantMessage.id,
     }).catch(error => {
       console.warn('Could not record chat streak interaction', error)
+      return undefined
     })
     trace.mark('request_completed', 'completed', { messageId: assistantMessage.id })
     void compactConversationIfNeeded(conversation.id)
@@ -2225,6 +2227,7 @@ app.post('/api/chat', asyncRoute(async (req, res) => {
     replySegments,
     messageId: assistantMessage.id,
     voice,
+    streak,
     userMessageId: userMessage.id,
     conversationId: conversation.id,
     behavior: {

@@ -2160,6 +2160,12 @@ export default function ChatPage({ onLoggedOut }: { onLoggedOut: () => void }): 
           throw new Error(data.error || 'Chat request failed')
         }
         markCharacterActive(targetCharacterId)
+        if (data.streak && typeof data.streak === 'object' && data.streak.characterId === targetCharacterId) {
+          setStreaksByCharacter(current => ({
+            ...current,
+            [targetCharacterId]: data.streak as ChatStreak,
+          }))
+        }
         if (typeof data.conversationId === 'string') {
           updateConversationForCharacter(targetCharacterId, data.conversationId)
         }
